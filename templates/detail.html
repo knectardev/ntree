@@ -1,0 +1,1904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ ticker }} - Stock Detail</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 5px;
+            margin: 0;
+        }
+        
+        .container {
+            max-width: none; /* Remove max-width constraint */
+            margin: 0;
+            width: 100%; /* Use full available width */
+            padding: 0; /* No side padding */
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            color: white;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .back-link {
+            color: white;
+            text-decoration: none;
+            padding: 12px 24px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 8px;
+            transition: background 0.3s;
+            font-weight: 500;
+        }
+        
+        .back-link:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            padding: 0; /* No padding to allow full width */
+            padding-right: 0;
+            margin-bottom: 20px;
+            overflow: hidden; /* Hide overflow */
+            width: 100% !important; /* Force full width */
+            min-width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        
+        .interval-selector {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .interval-link {
+            display: inline-block;
+            margin: 0 10px;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .interval-link:hover {
+            text-decoration: underline;
+        }
+        
+        .interval-link.active {
+            color: #764ba2;
+            font-weight: 600;
+            text-decoration: underline;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 1.2em;
+        }
+        
+        .chart-wrapper {
+            position: relative;
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            height: 700px;
+            padding-bottom: 30px;
+            padding-right: 0;
+            padding-left: 0;
+            overflow: visible; /* Allow labels to be visible */
+            box-sizing: border-box;
+        }
+        
+        canvas {
+            max-height: 700px;
+            width: 100% !important; /* Ensure canvas uses full width */
+            height: 700px !important; /* Set explicit height */
+            cursor: crosshair;
+            overflow: visible; /* Ensure canvas doesn't clip */
+            display: block; /* Remove inline-block spacing */
+        }
+
+        .macd-chart-container {
+            margin-top: 8px;
+            height: 180px;
+        }
+
+        #macdChart {
+            width: 100% !important;
+            height: 180px !important;
+            display: block;
+        }
+        
+        .chart-controls {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .market-hours-legend {
+            position: absolute;
+            top: 120px; /* sit just below the indicator toggle stack */
+            left: 10px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 0.75em;
+            z-index: 10;
+            min-width: 180px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            border: 1px solid #ddd;
+            flex-shrink: 0;
+        }
+        
+        .legend-color.regular {
+            background-color: rgba(255, 255, 255, 1.0);
+            border-color: rgba(200, 200, 200, 0.5);
+        }
+        
+        .legend-color.pre-market {
+            background-color: rgba(52, 152, 219, 0.1);
+            border-color: rgba(52, 152, 219, 0.3);
+        }
+        
+        .legend-color.after-hours {
+            background-color: rgba(155, 89, 182, 0.1);
+            border-color: rgba(155, 89, 182, 0.3);
+        }
+        
+        .legend-color.closed {
+            background-color: rgba(149, 165, 166, 0.1);
+            border-color: rgba(149, 165, 166, 0.3);
+        }
+        
+        .indicator-controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-start;
+        }
+        
+        .indicator-controls-box {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 8px 12px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            display: flex;
+            gap: 12px;
+            font-size: 0.85em;
+            align-items: center;
+        }
+        
+        .indicator-label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            white-space: nowrap;
+            color: #333;
+        }
+        
+        .indicator-label input[type="checkbox"] {
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .indicator-title {
+            font-weight: 700;
+            margin-right: 6px;
+            color: #2c3e50;
+            white-space: nowrap;
+        }
+
+        .strategy-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 12;
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+            padding: 10px 12px;
+            min-width: 260px;
+            max-width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
+        .strategy-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .strategy-select {
+            flex: 1;
+            padding: 6px 8px;
+            border-radius: 6px;
+            border: 1px solid #d1d5db;
+            font-size: 0.9em;
+        }
+
+        .strategy-button {
+            padding: 7px 10px;
+            border: none;
+            border-radius: 6px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9em;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+        }
+
+        .strategy-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .strategy-card {
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 0.85em;
+            color: #374151;
+        }
+
+        .strategy-card h4 {
+            margin: 0 0 4px 0;
+            font-size: 0.95em;
+            color: #111827;
+        }
+
+        .strategy-param {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 2px 0;
+        }
+
+        .strategy-result-line {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 2px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ ticker }} - Stock Detail</h1>
+            <a href="/" class="back-link">← Back to Dashboard</a>
+        </div>
+        
+        <div class="chart-container">
+            <div class="interval-selector">
+                <a href="/ticker/{{ ticker }}?interval=1Min" class="interval-link" id="link-1min">1 Minute View</a>
+                <a href="/ticker/{{ ticker }}?interval=5Min" class="interval-link" id="link-5min">5 Minute View</a>
+            </div>
+            
+            <div id="loading" class="loading">Loading chart data...</div>
+            <div class="chart-wrapper" id="chartWrapper" style="display: none;">
+                <canvas id="stockChart"></canvas>
+                <div class="indicator-controls" id="indicatorControls">
+                    <div class="indicator-controls-box">
+                        <span class="indicator-title">Alpaca imported</span>
+                        <label class="indicator-label">
+                            <input type="checkbox" id="toggle-alpaca-ema9" onchange="toggleIndicator('alpaca','ema9')">
+                            EMA 9
+                        </label>
+                        <label class="indicator-label">
+                            <input type="checkbox" id="toggle-alpaca-ema21" onchange="toggleIndicator('alpaca','ema21')">
+                            EMA 21
+                        </label>
+                        <label class="indicator-label">
+                            <input type="checkbox" id="toggle-alpaca-ema50" onchange="toggleIndicator('alpaca','ema50')">
+                            EMA 50
+                        </label>
+                        <label class="indicator-label">
+                            <input type="checkbox" id="toggle-alpaca-vwap" onchange="toggleIndicator('alpaca','vwap')">
+                            VWAP
+                        </label>
+                    </div>
+                    <div class="indicator-controls-box">
+                        <span class="indicator-title">Panda Calculated</span>
+                        <label class="indicator-label">
+                            <input type="checkbox" id="toggle-pandas-ema9" onchange="toggleIndicator('pandas','ema9')">
+                            EMA 9
+                        </label>
+                        <label class="indicator-label">
+                            <input type="checkbox" id="toggle-pandas-ema21" onchange="toggleIndicator('pandas','ema21')">
+                            EMA 21
+                        </label>
+                        <label class="indicator-label">
+                            <input type="checkbox" id="toggle-pandas-ema50" onchange="toggleIndicator('pandas','ema50')">
+                            EMA 50
+                        </label>
+                        <label class="indicator-label">
+                            <input type="checkbox" id="toggle-pandas-vwap" onchange="toggleIndicator('pandas','vwap')">
+                            VWAP
+                        </label>
+                        <label class="indicator-label">
+                            <input type="checkbox" id="toggle-pandas-macd" onchange="toggleIndicator('pandas','macd')" checked>
+                            MACD + Signal
+                        </label>
+                    </div>
+                </div>
+                <div class="strategy-controls" id="strategyControls" style="display: none;">
+                    <div class="strategy-row">
+                        <span class="indicator-title">Strategy</span>
+                        <select id="strategySelect" class="strategy-select">
+                            <option value="none">None</option>
+                            <option value="ema_vwap_pullback_v1">EMA + VWAP Pullback (v1.3)</option>
+                            <option value="vwap_crossover_v1">VWAP cross-over (v1)</option>
+                            <option value="vwap_ema_crossover_v1">VWAP / EMA Crossover (v1)</option>
+                        </select>
+                        <button id="runBacktestBtn" class="strategy-button">Run Backtest</button>
+                    </div>
+                    <div class="strategy-card" id="strategyParams" style="display: none;"></div>
+                    <div class="strategy-card" id="strategyResults" style="display: none;"></div>
+                </div>
+                <div class="market-hours-legend" id="marketHoursLegend" style="display: none;">
+                    <div class="legend-item">
+                        <div class="legend-color regular"></div>
+                        <span><strong>Regular:</strong> 9:30 AM - 4:00 PM</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color pre-market"></div>
+                        <span><strong>Pre-Market:</strong> 4:00 AM - 9:30 AM</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color after-hours"></div>
+                        <span><strong>After-Hours:</strong> 4:00 PM - 8:00 PM</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color closed"></div>
+                        <span><strong>Closed:</strong> 8:00 PM - 4:00 AM</span>
+                    </div>
+                </div>
+            </div>
+            <div class="macd-chart-container" id="macdContainer" style="display: none;">
+                <canvas id="macdChart"></canvas>
+            </div>
+            <div class="chart-controls" id="chartControls" style="display: none;">
+                <p>Click and drag to pan horizontally • Scroll to zoom • Shift+Drag to zoom area • Double-click to reset</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Register the zoom plugin if available
+        if (typeof ChartZoom !== 'undefined') {
+            Chart.register(ChartZoom);
+        } else if (typeof zoomPlugin !== 'undefined') {
+            Chart.register(zoomPlugin);
+        }
+        
+        // Register financial chart plugin for candlestick charts
+        // The chartjs-chart-financial library auto-registers when loaded via CDN
+        // No manual registration needed
+        
+        // Get interval from template variable or URL parameter, default to 1Min
+        const urlParams = new URLSearchParams(window.location.search);
+        const interval = urlParams.get('interval') || '{{ interval }}' || '1Min';
+        let chartType = 'candlestick'; // Only candlestick charts
+        let chartData = null;
+        let chartTimestamps = null;
+        let initialMin = null;
+        let initialMax = null;
+        let macdChart = null;
+        
+        // Indicator visibility state
+        const indicatorVisibility = {
+            alpaca: {
+                ema9: false,
+                ema21: false,
+                ema50: false,
+                vwap: false
+            },
+            pandas: {
+                ema9: false,
+                ema21: false,
+                ema50: false,
+                vwap: false,
+                macd: true
+            }
+        };
+
+        // Strategy state
+        const strategyDefinitions = {
+            none: {
+                label: 'None',
+                params: []
+            },
+            'ema_vwap_pullback_v1': {
+                label: 'EMA + VWAP Pullback (v1.3)',
+                params: [
+                    { label: 'Trend', value: 'EMA21 > VWAP and rising' },
+                    { label: 'Pullback', value: '≥2 of last 3 closes below EMA9' },
+                    { label: 'Entry', value: 'Close crosses up through EMA9' },
+                    { label: 'Throttle', value: '≤1 signal per 20 bars' },
+                    { label: 'Session', value: 'RTH only' },
+                    { label: 'Exit', value: 'Same-bar close (toy)' }
+                ]
+            },
+            'vwap_crossover_v1': {
+                label: 'VWAP cross-over (v1)',
+                params: [
+                    { label: 'Trend', value: 'VWAP crosses down below EMA9 & EMA21' },
+                    { label: 'Follow-through', value: 'EMA9/EMA21/VWAP slopes > 0 for 8 bars' },
+                    { label: 'Session', value: 'RTH only' },
+                    { label: 'Entry', value: 'First bar satisfying cross + slope run' },
+                    { label: 'Exit', value: 'Same-bar close (toy)' }
+                ]
+            },
+            'vwap_ema_crossover_v1': {
+                label: 'VWAP / EMA Crossover (v1)',
+                params: [
+                    { label: 'Rule', value: 'Mark every VWAP and EMA21 intersection' },
+                    { label: 'Session', value: 'All sessions' },
+                    { label: 'Exit', value: 'Same-bar close (toy)' }
+                ]
+            }
+        };
+
+        const strategyState = {
+            selected: 'none',
+            backtest: null,
+            running: false
+        };
+        
+        // Set active link
+        document.getElementById('link-1min').classList.toggle('active', interval === '1Min');
+        document.getElementById('link-5min').classList.toggle('active', interval === '5Min');
+        
+        // Function to toggle indicator visibility
+        function toggleIndicator(source, indicatorName) {
+            const checkbox = document.getElementById(`toggle-${source}-${indicatorName}`);
+            if (!checkbox || !indicatorVisibility[source]) return;
+            indicatorVisibility[source][indicatorName] = checkbox.checked;
+            updateChart();
+        }
+
+        // Strategy UI helpers
+        function renderStrategyParams() {
+            const paramsBox = document.getElementById('strategyParams');
+            if (!paramsBox) return;
+            const defn = strategyDefinitions[strategyState.selected];
+            if (!defn || strategyState.selected === 'none' || !defn.params || defn.params.length === 0) {
+                paramsBox.style.display = 'none';
+                paramsBox.innerHTML = '';
+                return;
+            }
+
+            const lines = defn.params.map(p => `
+                <div class="strategy-param">
+                    <span>${p.label}</span>
+                    <span><strong>${p.value}</strong></span>
+                </div>
+            `).join('');
+            paramsBox.innerHTML = `<h4>${defn.label}</h4>${lines}`;
+            paramsBox.style.display = 'block';
+        }
+
+        function renderStrategyResults() {
+            const resultsBox = document.getElementById('strategyResults');
+            if (!resultsBox) return;
+            const res = strategyState.backtest;
+            if (!res) {
+                resultsBox.style.display = 'none';
+                resultsBox.innerHTML = '';
+                return;
+            }
+
+            const metrics = res.metrics || {};
+            const lines = [
+                { label: 'Trades', value: metrics.n_trades ?? '—' },
+                { label: 'Win rate', value: metrics.win_rate != null ? (metrics.win_rate * 100).toFixed(1) + '%' : '—' },
+                { label: 'Avg ret', value: metrics.avg_ret != null ? (metrics.avg_ret * 100).toFixed(2) + '%' : '—' },
+                { label: 'Median', value: metrics.median_ret != null ? (metrics.median_ret * 100).toFixed(2) + '%' : '—' }
+            ].map(r => `
+                <div class="strategy-result-line">
+                    <span>${r.label}</span>
+                    <span><strong>${r.value}</strong></span>
+                </div>
+            `).join('');
+
+            resultsBox.innerHTML = `<h4>Backtest (toy)</h4>${lines}`;
+            resultsBox.style.display = 'block';
+        }
+
+        function updateStrategyUI() {
+            const controls = document.getElementById('strategyControls');
+            const select = document.getElementById('strategySelect');
+            const button = document.getElementById('runBacktestBtn');
+
+            if (controls) controls.style.display = 'flex';
+            if (select && select.value !== strategyState.selected) {
+                select.value = strategyState.selected;
+            }
+            if (button) {
+                button.disabled = strategyState.selected === 'none' || strategyState.running;
+                button.textContent = strategyState.running ? 'Running...' : 'Run Backtest';
+            }
+            renderStrategyParams();
+            renderStrategyResults();
+        }
+
+        async function runBacktest() {
+            if (strategyState.selected === 'none') return;
+            const button = document.getElementById('runBacktestBtn');
+            strategyState.running = true;
+            updateStrategyUI();
+            try {
+                const resp = await fetch(`/api/strategy/${strategyState.selected}/backtest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ticker: '{{ ticker }}',
+                        interval: interval,
+                        fee_bp: 0.0
+                    })
+                });
+                const data = await resp.json();
+                strategyState.backtest = data && !data.error ? data : null;
+            } catch (err) {
+                console.error('Backtest error', err);
+                strategyState.backtest = null;
+            } finally {
+                strategyState.running = false;
+                updateStrategyUI();
+            }
+        }
+
+        // Wire strategy controls
+        const strategySelectEl = document.getElementById('strategySelect');
+        if (strategySelectEl) {
+            strategySelectEl.addEventListener('change', (e) => {
+                strategyState.selected = e.target.value;
+                // Reset backtest results when switching strategies
+                strategyState.backtest = null;
+                updateStrategyUI();
+                updateChart();
+            });
+        }
+        const runBacktestBtn = document.getElementById('runBacktestBtn');
+        if (runBacktestBtn) {
+            runBacktestBtn.addEventListener('click', () => runBacktest());
+        }
+
+        // Initialize strategy UI once
+        updateStrategyUI();
+        
+        // Function to update chart based on chart type
+        function updateChart() {
+            if (!chartData) return;
+            
+            const canvas = document.getElementById('stockChart');
+            if (!canvas) return;
+            
+            // Destroy existing chart if it exists
+            if (window.stockChart) {
+                try {
+                    window.stockChart.destroy();
+                } catch (e) {
+                    console.warn('Error destroying chart:', e);
+                }
+                window.stockChart = null;
+            }
+            if (window.macdChart) {
+                try {
+                    window.macdChart.destroy();
+                } catch (e) {
+                    console.warn('Error destroying MACD chart:', e);
+                }
+                window.macdChart = null;
+            }
+            
+            const ctx = canvas.getContext('2d');
+            
+            // Create candlestick chart
+            createCandlestickChart(ctx, chartData, chartTimestamps, interval, initialMin, initialMax);
+
+            renderMacdSubchart();
+        }
+        
+        
+        
+        // Plugin to limit volume bar heights to 125px dynamically
+        const volumeHeightLimitPlugin = {
+            id: 'volumeHeightLimitPlugin',
+            afterLayout: (chart) => {
+                // Set the max value to help Chart.js scale correctly
+                if (!window.volumeData || window.volumeData.length === 0) return;
+                
+                const y1Axis = chart.scales.y1;
+                const xAxis = chart.scales.x;
+                
+                if (!y1Axis || !xAxis) return;
+                
+                // Get the visible x-axis range (indices)
+                const xMin = Math.max(0, Math.floor(xAxis.min));
+                const xMax = Math.min(window.volumeData.length - 1, Math.ceil(xAxis.max));
+                
+                // Find the maximum volume value in the visible range
+                let maxVisibleVolume = 0;
+                for (let i = xMin; i <= xMax; i++) {
+                    const vol = window.volumeData[i] || 0;
+                    if (vol > maxVisibleVolume) {
+                        maxVisibleVolume = vol;
+                    }
+                }
+                
+                if (maxVisibleVolume === 0) {
+                    maxVisibleVolume = Math.max(...window.volumeData) || 1;
+                }
+                
+                // Calculate max value to make highest bar 125px
+                const chartArea = chart.chartArea;
+                const volumeAxisHeight = chartArea ? (chartArea.bottom - chartArea.top) : (y1Axis.bottom - y1Axis.top);
+                const maxVolumeHeight = 125;
+                const calculatedMax = maxVisibleVolume * (volumeAxisHeight / maxVolumeHeight);
+                
+                // Set the max value
+                y1Axis.options.max = calculatedMax;
+                y1Axis.max = calculatedMax;
+            }
+        };
+        
+        // Plugin to ensure price axis labels are always visible
+        const priceAxisVisibilityPlugin = {
+            id: 'priceAxisVisibilityPlugin',
+            afterLayout: (chart) => {
+                const yAxis = chart.scales.y;
+                if (yAxis && yAxis.position === 'right') {
+                    // Force minimum width to accommodate price labels positioned outside
+                    const minWidth = 90;
+                    if (yAxis.width < minWidth) {
+                        yAxis.width = minWidth;
+                    }
+                }
+            },
+            afterUpdate: (chart) => {
+                // Re-apply after updates (like zoom/pan)
+                const yAxis = chart.scales.y;
+                if (yAxis && yAxis.position === 'right') {
+                    const minWidth = 90;
+                    if (yAxis.width < minWidth) {
+                        yAxis.width = minWidth;
+                    }
+                }
+            }
+        };
+        
+        // Market hours shading colors
+        const marketHoursColors = {
+            'regular': 'rgba(255, 255, 255, 1.0)', // White for regular hours
+            'pre_market': 'rgba(52, 152, 219, 0.1)',
+            'after_hours': 'rgba(155, 89, 182, 0.1)',
+            'closed': 'rgba(149, 165, 166, 0.1)'
+        };
+        
+        // Custom plugin to draw green dots at VWAP anchor points (market opens)
+        const vwapAnchorPlugin = {
+            id: 'vwapAnchorPlugin',
+            afterDatasetsDraw: (chart) => {
+                const ctx = chart.ctx;
+                const xAxis = chart.scales.x;
+                const yAxis = chart.scales.y;
+                const marketOpens = window.marketOpens || [];
+                const timestamps = window.chartTimestamps || [];
+                const vwapData = window.vwapData || [];
+                
+                if (!marketOpens || marketOpens.length === 0 || !timestamps || timestamps.length === 0) {
+                    return;
+                }
+                
+                ctx.save();
+                
+                // Draw green dots at market open positions
+                marketOpens.forEach(marketOpen => {
+                    try {
+                        const openDate = new Date(marketOpen);
+                        
+                        // Find the index in timestamps array
+                        let openIdx = -1;
+                        for (let i = 0; i < timestamps.length; i++) {
+                            const ts = new Date(timestamps[i]);
+                            // Find closest timestamp (within 10 minutes)
+                            const timeDiff = Math.abs(ts - openDate);
+                            if (timeDiff <= 10 * 60 * 1000) { // 10 minutes in milliseconds
+                                openIdx = i;
+                                break;
+                            }
+                        }
+                        
+                        if (openIdx === -1) {
+                            // Try to find the closest index
+                            let minDiff = Infinity;
+                            for (let i = 0; i < timestamps.length; i++) {
+                                const ts = new Date(timestamps[i]);
+                                const diff = Math.abs(ts - openDate);
+                                if (diff < minDiff) {
+                                    minDiff = diff;
+                                    openIdx = i;
+                                }
+                            }
+                        }
+                        
+                        if (openIdx >= 0 && openIdx < timestamps.length) {
+                            // Get the VWAP value at this point
+                            let vwapValue = null;
+                            if (vwapData && vwapData[openIdx] !== null && vwapData[openIdx] !== undefined) {
+                                vwapValue = vwapData[openIdx];
+                            } else {
+                                // Try to find the first non-null VWAP value after market open
+                                for (let i = openIdx; i < Math.min(openIdx + 10, vwapData.length); i++) {
+                                    if (vwapData[i] !== null && vwapData[i] !== undefined) {
+                                        vwapValue = vwapData[i];
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (vwapValue !== null) {
+                                // Get pixel positions
+                                const xPixel = xAxis.getPixelForValue(openIdx);
+                                const yPixel = yAxis.getPixelForValue(vwapValue);
+                                
+                                // Draw green dot
+                                ctx.fillStyle = '#2ecc71'; // Green color
+                                ctx.beginPath();
+                                ctx.arc(xPixel, yPixel, 6, 0, 2 * Math.PI);
+                                ctx.fill();
+                                
+                                // Add a white border for visibility
+                                ctx.strokeStyle = '#ffffff';
+                                ctx.lineWidth = 2;
+                                ctx.stroke();
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Error drawing VWAP anchor:', e);
+                    }
+                });
+                
+                ctx.restore();
+            }
+        };
+        
+        // Custom plugin to draw market hours vertical shading
+        const marketHoursPlugin = {
+            id: 'marketHoursPlugin',
+            beforeDatasetsDraw: (chart) => {
+                const ctx = chart.ctx;
+                const xAxis = chart.scales.x;
+                const yAxis = chart.scales.y;
+                const marketHours = window.marketHours || [];
+                const timestamps = window.chartTimestamps || [];
+                
+                if (!marketHours || marketHours.length === 0 || !timestamps || timestamps.length === 0) {
+                    return;
+                }
+                
+                ctx.save();
+                
+                // Clip drawing to chart area only
+                const chartArea = chart.chartArea;
+                if (chartArea) {
+                    ctx.beginPath();
+                    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+                    ctx.clip();
+                }
+                
+                // Draw vertical shaded regions for each market hours period
+                marketHours.forEach(period => {
+                    try {
+                        const startDate = new Date(period.start);
+                        const endDate = new Date(period.end);
+                        
+                        // Find indices in timestamps array that fall within this period
+                        let startIdx = -1;
+                        let endIdx = -1;
+                        
+                        for (let i = 0; i < timestamps.length; i++) {
+                            const ts = new Date(timestamps[i]);
+                            if (ts >= startDate && startIdx === -1) {
+                                startIdx = i;
+                            }
+                            if (ts <= endDate) {
+                                endIdx = i;
+                            }
+                        }
+                        
+                        // If we couldn't find exact matches, try to find closest
+                        if (startIdx === -1) {
+                            // Find first timestamp after start
+                            for (let i = 0; i < timestamps.length; i++) {
+                                if (new Date(timestamps[i]) >= startDate) {
+                                    startIdx = Math.max(0, i - 1);
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (endIdx === -1) {
+                            // Find last timestamp before end
+                            for (let i = timestamps.length - 1; i >= 0; i--) {
+                                if (new Date(timestamps[i]) <= endDate) {
+                                    endIdx = Math.min(timestamps.length - 1, i + 1);
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
+                            return;
+                        }
+                        
+                        // Get pixel positions
+                        const startPixel = xAxis.getPixelForValue(startIdx);
+                        const endPixel = xAxis.getPixelForValue(endIdx);
+                        
+                        // Clamp pixel positions to chart area boundaries
+                        const clampedStart = Math.max(startPixel, chartArea.left);
+                        const clampedEnd = Math.min(endPixel, chartArea.right);
+                        
+                        // Only draw if there's a valid width and it's within the visible area
+                        if (clampedEnd <= clampedStart || clampedStart >= chartArea.right || clampedEnd <= chartArea.left) {
+                            return;
+                        }
+                        
+                        const color = marketHoursColors[period.type] || marketHoursColors['closed'];
+                        ctx.fillStyle = color;
+                        // Draw within the chart area, strictly bounded by chartArea
+                        ctx.fillRect(
+                            clampedStart,
+                            chartArea.top,
+                            clampedEnd - clampedStart,
+                            chartArea.bottom - chartArea.top
+                        );
+                    } catch (e) {
+                        console.warn('Error drawing market hours period:', e);
+                    }
+                });
+                
+                ctx.restore();
+            }
+        };
+        
+        // Custom plugin to draw date labels below time labels
+        const dateLabelPlugin = {
+            id: 'dateLabelPlugin',
+            afterDraw: (chart) => {
+                const ctx = chart.ctx;
+                const xAxis = chart.scales.x;
+                const yAxis = chart.scales.y;
+                const timestamps = window.chartTimestamps;
+                
+                if (!timestamps || timestamps.length === 0) return;
+                
+                ctx.save();
+                ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+                ctx.fillStyle = '#666';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                
+                let lastDateDrawn = null;
+                const tickSpacing = 1;
+                const xAxisLeft = xAxis.left;
+                const xAxisRight = xAxis.right;
+                
+                for (let i = 0; i < timestamps.length; i += tickSpacing) {
+                    const tickDate = timestamps[i];
+                    if (!tickDate) continue;
+                    
+                    try {
+                        const pixel = xAxis.getPixelForValue(i);
+                        if (pixel < xAxisLeft || pixel > xAxisRight) {
+                            continue;
+                        }
+                        
+                        const weekday = tickDate.toLocaleDateString('en-US', { weekday: 'long' });
+                        const date = tickDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+                        const currentDateStr = `${weekday}, ${date}`;
+                        
+                        if (currentDateStr !== lastDateDrawn) {
+                            const dateY = yAxis.bottom + 25;
+                            ctx.fillText(currentDateStr, pixel, dateY);
+                            lastDateDrawn = currentDateStr;
+                        }
+                    } catch (e) {
+                        continue;
+                    }
+                }
+                
+                ctx.restore();
+            }
+        };
+        
+        // Crosshair plugin - stores mouse position
+        let crosshairPosition = { x: null, y: null };
+        
+        // Custom plugin to draw crosshair lines
+        const crosshairPlugin = {
+            id: 'crosshairPlugin',
+            afterDraw: (chart) => {
+                if (crosshairPosition.x === null || crosshairPosition.y === null) {
+                    return;
+                }
+                
+                const ctx = chart.ctx;
+                const chartArea = chart.chartArea;
+                const xAxis = chart.scales.x;
+                const yAxis = chart.scales.y;
+                const y1Axis = chart.scales.y1;
+                const timestamps = window.chartTimestamps;
+                
+                if (!chartArea || !xAxis || !yAxis) return;
+                
+                ctx.save();
+                
+                // Get mouse position relative to canvas
+                const rect = chart.canvas.getBoundingClientRect();
+                const mouseX = crosshairPosition.x - rect.left;
+                const mouseY = crosshairPosition.y - rect.top;
+                const dataIndex = Math.round(xAxis.getValueForPixel(mouseX));
+                
+                // Check if mouse is within chart area
+                if (mouseX < chartArea.left || mouseX > chartArea.right || 
+                    mouseY < chartArea.top || mouseY > chartArea.bottom) {
+                    ctx.restore();
+                    return;
+                }
+                
+                // Draw horizontal line (light thin line)
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([]);
+                ctx.beginPath();
+                ctx.moveTo(chartArea.left, mouseY);
+                ctx.lineTo(chartArea.right, mouseY);
+                ctx.stroke();
+                
+                // Draw vertical line (light thin line)
+                ctx.beginPath();
+                ctx.moveTo(mouseX, chartArea.top);
+                ctx.lineTo(mouseX, chartArea.bottom);
+                ctx.stroke();
+                
+                // Highlight price on right side of chart (using right Y-axis for price)
+                let priceValue = null;
+                if (dataIndex >= 0 && window.chartData && window.chartData.ohlc && window.chartData.ohlc[dataIndex]) {
+                    const candle = window.chartData.ohlc[dataIndex];
+                    priceValue = candle.close ?? candle.c ?? candle.price ?? candle.o ?? candle.h ?? candle.l ?? null;
+                }
+                
+                if (priceValue === null || priceValue === undefined || isNaN(priceValue)) {
+                    priceValue = yAxis.getValueForPixel(mouseY);
+                }
+                
+                if (priceValue !== null && !isNaN(priceValue)) {
+                    // Draw background for price label on the right side
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+                    ctx.lineWidth = 1;
+                    
+                    const priceText = '$' + priceValue.toFixed(2);
+                    
+                    ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'middle';
+                    
+                    const textWidth = ctx.measureText(priceText).width;
+                    const padding = 6;
+                    // Position label inside the chart area near the right edge to avoid clipping
+                    const labelWidth = textWidth + padding * 2;
+                    const labelX = chartArea.right - labelWidth - 8;
+                    const labelY = yAxis.getPixelForValue(priceValue);
+                    
+                    // Draw rounded rectangle background
+                    const rectX = labelX;
+                    const rectY = labelY - 12;
+                    const rectWidth = textWidth + padding * 2;
+                    const rectHeight = 24;
+                    
+                    ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
+                    ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
+                    
+                    // Draw price text
+                    ctx.fillStyle = '#333';
+                    ctx.fillText(priceText, labelX + padding, labelY);
+                }
+                
+                // Highlight time on X-axis
+                if (timestamps && timestamps.length > 0) {
+                    if (dataIndex >= 0 && dataIndex < timestamps.length) {
+                        const timestamp = timestamps[dataIndex];
+                        if (timestamp) {
+                            const timeText = timestamp.toLocaleTimeString('en-US', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: true
+                            });
+                            const dateText = timestamp.toLocaleDateString('en-US', {
+                                weekday: 'long',
+                                month: 'numeric',
+                                day: 'numeric'
+                            });
+                            const timeLabel = `${timeText} (${dateText})`;
+                            
+                            // Draw background for time label
+                            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                            ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+                            ctx.lineWidth = 1;
+                            
+                            ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            
+                            const textWidth = ctx.measureText(timeLabel).width;
+                            const padding = 6;
+                            const labelX = mouseX;
+                            const labelY = chartArea.bottom + 15;
+                            
+                            // Draw rounded rectangle background
+                            const rectX = labelX - textWidth / 2 - padding;
+                            const rectY = labelY - 12;
+                            const rectWidth = textWidth + padding * 2;
+                            const rectHeight = 24;
+                            
+                            ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
+                            ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
+                            
+                            // Draw time text
+                            ctx.fillStyle = '#333';
+                            ctx.fillText(timeLabel, labelX, labelY);
+                        }
+                    }
+                }
+                
+                ctx.restore();
+            }
+        };
+        
+        // Plugin to draw border around chart area
+        const chartBorderPlugin = {
+            id: 'chartBorderPlugin',
+            afterDraw: (chart) => {
+                const ctx = chart.ctx;
+                const chartArea = chart.chartArea;
+                
+                if (!chartArea) return;
+                
+                ctx.save();
+                
+                // Draw border rectangle around chart area
+                ctx.strokeStyle = '#cccccc'; // Light gray border
+                ctx.lineWidth = 1;
+                ctx.setLineDash([]);
+                
+                // Draw rectangle border
+                ctx.strokeRect(
+                    chartArea.left,
+                    chartArea.top,
+                    chartArea.right - chartArea.left,
+                    chartArea.bottom - chartArea.top
+                );
+                
+                ctx.restore();
+            }
+        };
+        
+        // Function to create candlestick chart
+        function createCandlestickChart(ctx, data, timestamps, interval, initialMin, initialMax) {
+            const labels = timestamps.map(date => date.toLocaleString());
+            
+            // Format data for candlestick chart
+            // chartjs-chart-financial expects {x, o, h, l, c} format
+            // Use index for x since we're using category scale
+            const candlestickData = data.ohlc.map((ohlc, index) => ({
+                x: index,
+                o: ohlc.open,
+                h: ohlc.high,
+                l: ohlc.low,
+                c: ohlc.close
+            }));
+            
+            // Build datasets array with candlestick and indicators
+            const datasets = [{
+                label: '{{ ticker }}',
+                data: candlestickData,
+                color: {
+                    up: '#26a69a',
+                    down: '#ef5350',
+                    unchanged: '#999'
+                }
+            }];
+            
+            // Add volume bars dataset
+            if (data.ohlc && data.ohlc.length > 0) {
+                const volumeData = data.ohlc.map((ohlc, index) => {
+                    // Determine color based on price movement (green if close > open, red if close < open)
+                    const isUp = ohlc.close >= ohlc.open;
+                    return {
+                        x: index,
+                        y: ohlc.volume || 0
+                    };
+                });
+                
+                // Create color array for volume bars
+                const volumeColors = data.ohlc.map(ohlc => {
+                    const isUp = ohlc.close >= ohlc.open;
+                    return isUp ? 'rgba(38, 166, 154, 0.7)' : 'rgba(239, 83, 80, 0.7)'; // Green or red with transparency
+                });
+                
+                datasets.push({
+                    label: 'Volume',
+                    type: 'bar',
+                    data: volumeData,
+                    backgroundColor: volumeColors,
+                    borderColor: volumeColors,
+                    borderWidth: 0,
+                    yAxisID: 'y1', // Use second y-axis for volume
+                    order: 1, // Draw volume bars behind other elements
+                    barThickness: 'flex',
+                    maxBarThickness: 50
+                });
+            }
+            
+            // Add indicator datasets if visible (as line overlays)
+            if (data.indicators) {
+                const alpacaIndicators = data.indicators;
+                if (indicatorVisibility.alpaca.ema9 && alpacaIndicators.ema_9) {
+                    datasets.push({
+                        label: 'EMA 9 (Alpaca imported)',
+                        type: 'line',
+                        data: alpacaIndicators.ema_9.map((val, idx) => ({x: idx, y: val})),
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        tension: 0.4
+                    });
+                }
+                if (indicatorVisibility.alpaca.ema21 && alpacaIndicators.ema_21) {
+                    datasets.push({
+                        label: 'EMA 21 (Alpaca imported)',
+                        type: 'line',
+                        data: alpacaIndicators.ema_21.map((val, idx) => ({x: idx, y: val})),
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        tension: 0.4
+                    });
+                }
+                if (indicatorVisibility.alpaca.ema50 && alpacaIndicators.ema_50) {
+                    datasets.push({
+                        label: 'EMA 50 (Alpaca imported)',
+                        type: 'line',
+                        data: alpacaIndicators.ema_50.map((val, idx) => ({x: idx, y: val})),
+                        borderColor: 'rgb(255, 206, 86)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        tension: 0.4
+                    });
+                }
+                if (indicatorVisibility.alpaca.vwap && alpacaIndicators.vwap) {
+                    datasets.push({
+                        label: 'VWAP (Alpaca imported)',
+                        type: 'line',
+                        data: alpacaIndicators.vwap.map((val, idx) => ({x: idx, y: val})),
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.4
+                    });
+                }
+            }
+
+            if (data.indicators_ta) {
+                const pandasIndicators = data.indicators_ta;
+                if (indicatorVisibility.pandas.ema9 && pandasIndicators.ema_9) {
+                    datasets.push({
+                        label: 'EMA 9 (pandas_ta)',
+                        type: 'line',
+                        data: pandasIndicators.ema_9.map((val, idx) => ({x: idx, y: val})),
+                        borderColor: 'rgba(255, 99, 132, 0.7)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        borderDash: [2, 2],
+                        pointRadius: 0,
+                        tension: 0.4
+                    });
+                }
+                if (indicatorVisibility.pandas.ema21 && pandasIndicators.ema_21) {
+                    datasets.push({
+                        label: 'EMA 21 (pandas_ta)',
+                        type: 'line',
+                        data: pandasIndicators.ema_21.map((val, idx) => ({x: idx, y: val})),
+                        borderColor: 'rgba(54, 162, 235, 0.7)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        borderDash: [2, 2],
+                        pointRadius: 0,
+                        tension: 0.4
+                    });
+                }
+                if (indicatorVisibility.pandas.ema50 && pandasIndicators.ema_50) {
+                    datasets.push({
+                        label: 'EMA 50 (pandas_ta)',
+                        type: 'line',
+                        data: pandasIndicators.ema_50.map((val, idx) => ({x: idx, y: val})),
+                        borderColor: 'rgba(255, 206, 86, 0.7)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        borderDash: [2, 2],
+                        pointRadius: 0,
+                        tension: 0.4
+                    });
+                }
+                if (indicatorVisibility.pandas.vwap && pandasIndicators.vwap) {
+                    datasets.push({
+                        label: 'VWAP (pandas_ta)',
+                        type: 'line',
+                        data: pandasIndicators.vwap.map((val, idx) => ({x: idx, y: val})),
+                        borderColor: 'rgba(75, 192, 192, 0.7)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        borderDash: [2, 2],
+                        pointRadius: 0,
+                        tension: 0.4
+                    });
+                }
+            }
+
+            // Strategy markers
+            const addStrategyMarkers = (strat, label, baseColor, style = 'triangle') => {
+                const longEntries = strat.long_entry || [];
+                const markers = [];
+                const meta = [];
+                const colors = [];
+                const borders = [];
+                const yOverrides = strat.cross_y || [];
+                const directions = strat.direction || [];
+                longEntries.forEach((flag, idx) => {
+                    if (!flag) return;
+                    const candle = data.ohlc[idx];
+                    if (!candle) return;
+                    const lows = [candle.low, candle.close, candle.open].filter(v => typeof v === 'number');
+                    const highs = [candle.high, candle.close, candle.open].filter(v => typeof v === 'number');
+                    if (lows.length === 0) return;
+                    const low = Math.min(...lows);
+                    const high = highs.length ? Math.max(...highs) : low;
+                    const range = Math.max(high - low, Math.abs(low) * 0.0005, 0.01);
+                    const yFromPayload = yOverrides[idx];
+                    const markerY = (yFromPayload != null && !isNaN(yFromPayload)) ? yFromPayload : (low + range * 0.12);
+                    markers.push({ x: idx, y: markerY });
+                    const dir = directions[idx];
+                    const color = dir === 'bullish' ? '#2ecc71' : dir === 'bearish' ? '#e74c3c' : baseColor;
+                    colors.push(color);
+                    borders.push('#1b1b1b');
+                    meta.push({
+                        candleIndex: idx,
+                        entry_price: strat.entry_price ? strat.entry_price[idx] : null,
+                        ema9: strat.ema9 ? strat.ema9[idx] : null,
+                        ema21: strat.ema21 ? strat.ema21[idx] : null,
+                        vwap: strat.vwap ? strat.vwap[idx] : null,
+                        time: data.labels ? data.labels[idx] : null,
+                        close: candle.close,
+                        low: candle.low,
+                        direction: dir
+                    });
+                });
+
+                if (markers.length > 0) {
+                    datasets.push({
+                        label,
+                        type: 'scatter',
+                        data: markers,
+                        yAxisID: 'y',
+                        pointStyle: style,
+                        pointRadius: 8,
+                        pointBackgroundColor: colors.length ? colors : baseColor,
+                        pointBorderColor: borders.length ? borders : '#1b7f46',
+                        pointBorderWidth: 1.5,
+                        pointRotation: 0,
+                        showLine: false,
+                        strategyMarker: true,
+                        strategyMeta: meta,
+                        order: 10000, // draw on top
+                        clip: false   // avoid clipping so markers sit above lines
+                    });
+                }
+            };
+
+            if (data.strategies) {
+                if (strategyState.selected === 'ema_vwap_pullback_v1' && data.strategies.ema_vwap_pullback_v1) {
+                    addStrategyMarkers(data.strategies.ema_vwap_pullback_v1, 'Long entry (EMA+VWAP pullback)', '#2ecc71', 'triangle');
+                }
+                if (strategyState.selected === 'vwap_crossover_v1' && data.strategies.vwap_crossover_v1) {
+                    addStrategyMarkers(data.strategies.vwap_crossover_v1, 'Long entry (VWAP cross-over)', '#3498db', 'rectRot');
+                }
+                if (strategyState.selected === 'vwap_ema_crossover_v1' && data.strategies.vwap_ema_crossover_v1) {
+                    addStrategyMarkers(data.strategies.vwap_ema_crossover_v1, 'Cross (VWAP / EMA21)', '#9b59b6', 'circle');
+                }
+            }
+            
+            // Get volume data for max calculation
+            const volumeData = data.ohlc ? data.ohlc.map(ohlc => ohlc.volume || 0) : [];
+            const options = getChartOptions(interval, initialMin, initialMax, timestamps, volumeData);
+            
+            // Disable tooltip
+            options.plugins.tooltip = options.plugins.tooltip || {};
+            options.plugins.tooltip.enabled = true;
+            options.plugins.tooltip.filter = (context) => {
+                return !!(context && context.dataset && context.dataset.strategyMarker);
+            };
+            options.plugins.tooltip.intersect = false;
+            options.plugins.tooltip.mode = 'nearest';
+            options.plugins.tooltip.callbacks = {
+                title: (items) => {
+                    const ctx = items && items[0];
+                    if (!ctx || !ctx.dataset || !ctx.dataset.strategyMeta) return 'Long entry';
+                    const meta = ctx.dataset.strategyMeta[ctx.dataIndex];
+                    if (!meta || !meta.time) return 'Long entry';
+                    try {
+                        return new Date(meta.time).toLocaleString();
+                    } catch (e) {
+                        return meta.time;
+                    }
+                },
+                label: (ctx) => {
+                    const meta = ctx.dataset.strategyMeta ? ctx.dataset.strategyMeta[ctx.dataIndex] : null;
+                    if (!meta) return 'Long entry';
+                    const fmt = (v) => (v == null || isNaN(v)) ? '—' : Number(v).toFixed(2);
+                    const label = ctx.dataset.label || 'Long entry';
+                    return [
+                        label,
+                        `Entry price: ${fmt(meta.entry_price)}`,
+                        `Close: ${fmt(meta.close)} | EMA9: ${fmt(meta.ema9)}`,
+                        `EMA21: ${fmt(meta.ema21)} | VWAP: ${fmt(meta.vwap)}`,
+                        meta.direction ? `Direction: ${meta.direction}` : null
+                    ].filter(Boolean);
+                }
+            };
+            
+            window.stockChart = new Chart(ctx, {
+                plugins: [marketHoursPlugin, vwapAnchorPlugin, volumeHeightLimitPlugin, priceAxisVisibilityPlugin, dateLabelPlugin, crosshairPlugin, chartBorderPlugin],
+                type: 'candlestick',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: options
+            });
+            
+            // Set up mouse event handlers for crosshair (only once)
+            if (!window.crosshairHandlersSetup) {
+                const canvas = document.getElementById('stockChart');
+                canvas.addEventListener('mousemove', (e) => {
+                    crosshairPosition.x = e.clientX;
+                    crosshairPosition.y = e.clientY;
+                    if (window.stockChart) {
+                        window.stockChart.update('none'); // Update without animation
+                    }
+                });
+                
+                canvas.addEventListener('mouseleave', () => {
+                    crosshairPosition.x = null;
+                    crosshairPosition.y = null;
+                    if (window.stockChart) {
+                        window.stockChart.update('none');
+                    }
+                });
+                
+                window.crosshairHandlersSetup = true;
+            }
+        }
+
+        // Function to create MACD sub-chart
+        function createMacdChart(ctx, data, timestamps, interval) {
+            const labels = timestamps.map(date => date.toLocaleString());
+            const datasets = [];
+
+            const macdData = data.indicators_ta && data.indicators_ta.macd ? data.indicators_ta.macd.map((val, idx) => ({x: idx, y: val})) : [];
+            const macdSignalData = data.indicators_ta && data.indicators_ta.macd_signal ? data.indicators_ta.macd_signal.map((val, idx) => ({x: idx, y: val})) : [];
+
+            if (indicatorVisibility.pandas.macd && (macdData.length > 0 || macdSignalData.length > 0)) {
+                if (macdData.length > 0) {
+                    datasets.push({
+                        label: 'MACD (pandas_ta)',
+                        type: 'line',
+                        data: macdData,
+                        borderColor: 'rgba(0, 0, 255, 0.7)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0.2
+                    });
+                }
+                if (macdSignalData.length > 0) {
+                    datasets.push({
+                        label: 'MACD Signal (pandas_ta)',
+                        type: 'line',
+                        data: macdSignalData,
+                        borderColor: 'rgba(255, 0, 0, 0.7)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.2,
+                        pointRadius: 0,
+                        tension: 0.2
+                    });
+                }
+            }
+
+            // Zero reference line
+            const zeroLine = timestamps.map((_, idx) => ({x: idx, y: 0}));
+            datasets.push({
+                label: 'Zero',
+                type: 'line',
+                data: zeroLine,
+                borderColor: 'rgba(120,120,120,0.4)',
+                backgroundColor: 'transparent',
+                borderWidth: 1,
+                borderDash: [4, 4],
+                pointRadius: 0,
+                tension: 0
+            });
+
+            const options = {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    y: {
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'MACD'
+                        },
+                        ticks: {
+                            maxTicksLimit: 5
+                        },
+                        grid: {
+                            drawOnChartArea: true,
+                            color: 'rgba(200,200,200,0.2)'
+                        }
+                    },
+                    x: {
+                        display: false
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        enabled: false
+                    }
+                }
+            };
+
+            if (window.macdChart) {
+                try { window.macdChart.destroy(); } catch (e) {}
+            }
+            window.macdChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: options
+            });
+        }
+
+        function renderMacdSubchart() {
+            const macdContainer = document.getElementById('macdContainer');
+            const macdCanvas = document.getElementById('macdChart');
+            const hasMacdData = indicatorVisibility.pandas.macd && chartData && chartData.indicators_ta && (chartData.indicators_ta.macd || chartData.indicators_ta.macd_signal);
+            if (macdContainer && macdCanvas && hasMacdData) {
+                macdContainer.style.display = 'block';
+                const macdCtx = macdCanvas.getContext('2d');
+                createMacdChart(macdCtx, chartData, chartTimestamps, interval);
+            } else if (macdContainer) {
+                macdContainer.style.display = 'none';
+            }
+        }
+        
+        // Function to get chart options
+        function getChartOptions(interval, initialMin, initialMax, timestamps, volumeData) {
+            // Calculate available width for chart - use wrapper width directly
+            const wrapper = document.querySelector('.chart-wrapper');
+            const chartContainer = document.querySelector('.chart-container');
+            let chartWidth = 1400; // Default
+            if (wrapper) {
+                chartWidth = wrapper.offsetWidth || wrapper.clientWidth || wrapper.getBoundingClientRect().width;
+            } else if (chartContainer) {
+                const containerWidth = chartContainer.offsetWidth || chartContainer.clientWidth;
+                chartWidth = containerWidth - 85;
+            }
+            chartWidth = Math.max(chartWidth, 1000);
+            
+            return {
+                responsive: true,
+                maintainAspectRatio: false, // Allow chart to adjust for axis width
+                animation: false,
+                aspectRatio: undefined, // Disable aspect ratio to allow full width
+                devicePixelRatio: window.devicePixelRatio || 1, // Handle high DPI displays
+                layout: {
+                    padding: {
+                        left: 0,
+                        right: 0, 
+                        top: 0,
+                        bottom: 0
+                    }
+                },
+                resizeDelay: 0, // Update immediately on resize
+                // Explicitly set canvas size
+                onResize: (chart, size) => {
+                    // Force chart to use full available width
+                    const canvas = chart.canvas;
+                    const wrapper = canvas ? canvas.closest('.chart-wrapper') : null;
+                    if (wrapper && canvas) {
+                        wrapper.offsetHeight; // Force reflow
+                        const availableWidth = wrapper.offsetWidth || wrapper.clientWidth || wrapper.getBoundingClientRect().width;
+                        if (availableWidth > 0 && canvas.offsetWidth !== availableWidth) {
+                            canvas.width = availableWidth;
+                            canvas.style.width = availableWidth + 'px';
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    title: {
+                        display: false
+                    },
+                    legend: {
+                        display: false
+                    },
+                    zoom: {
+                        pan: {
+                            enabled: true,
+                            mode: 'x',
+                            modifierKey: null,
+                            threshold: 10
+                        },
+                        zoom: {
+                            wheel: {
+                                enabled: true,
+                                modifierKey: null
+                            },
+                            drag: {
+                                enabled: true,
+                                modifierKey: 'shift'
+                            },
+                            pinch: {
+                                enabled: true
+                            },
+                            mode: 'x',
+                            limits: {
+                                x: { min: 'original', max: 'original' }
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        position: 'right',
+                        beginAtZero: false,
+                        title: {
+                            display: true,
+                            text: 'Price ($)',
+                            padding: {
+                                right: 0 // Position title outside
+                            }
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toFixed(2);
+                            },
+                            padding: 2, // Minimal padding to position labels outside
+                            maxRotation: 0,
+                            autoSkip: false
+                        },
+                        grid: {
+                            drawOnChartArea: true,
+                            drawTicks: false // Don't draw tick marks extending into chart
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'left',
+                        beginAtZero: true,
+                        grace: 0, // Don't add extra space above max value
+                        title: {
+                            display: true,
+                            text: 'Volume',
+                            padding: {
+                                left: 0
+                            }
+                        },
+                        ticks: {
+                            display: false // Hide numeric scale labels
+                        },
+                        grid: {
+                            drawOnChartArea: false // Don't draw grid lines for volume axis
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        },
+                        min: initialMin,
+                        max: initialMax,
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45,
+                            autoSkip: true,
+                            autoSkipPadding: 20,
+                            maxTicksLimit: 20,
+                            padding: 10,
+                            callback: function(value, index) {
+                                const tickDate = timestamps[index];
+                                if (!tickDate) return '';
+                                return tickDate.toLocaleTimeString('en-US', { 
+                                    hour: '2-digit', 
+                                    minute: '2-digit',
+                                    hour12: true 
+                                });
+                            }
+                        }
+                    }
+                }
+            };
+        }
+        
+        // Fetch data and render chart
+        fetch(`/api/ticker/{{ ticker }}/${interval}`)
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('chartWrapper').style.display = 'block';
+                document.getElementById('chartControls').style.display = 'block';
+                
+                // Get canvas and set dimensions before getting context
+                const canvas = document.getElementById('stockChart');
+                const wrapper = document.getElementById('chartWrapper');
+                const chartContainer = wrapper ? wrapper.closest('.chart-container') : null;
+                
+                // Force container and wrapper to use full available width
+                if (chartContainer) {
+                    chartContainer.style.width = '100%';
+                    chartContainer.style.minWidth = '100%';
+                    chartContainer.style.maxWidth = '100%';
+                }
+                if (wrapper) {
+                    wrapper.style.width = '100%';
+                    wrapper.style.minWidth = '100%';
+                    wrapper.style.maxWidth = '100%';
+                }
+                
+                // Wait a moment for layout to settle, then calculate width
+                setTimeout(() => {
+                    // Calculate available width - use wrapper's full width
+                    let availableWidth = 1400; // Default fallback
+                    if (wrapper) {
+                        // Force a reflow to get accurate measurements
+                        wrapper.offsetHeight;
+                        availableWidth = wrapper.offsetWidth || wrapper.clientWidth || wrapper.getBoundingClientRect().width;
+                    } else if (chartContainer) {
+                        chartContainer.offsetHeight;
+                        const containerWidth = chartContainer.offsetWidth || chartContainer.clientWidth || chartContainer.getBoundingClientRect().width;
+                        availableWidth = containerWidth;
+                    }
+                    
+                    // Ensure minimum width
+                    availableWidth = Math.max(availableWidth, 100);
+                    
+                    // Set canvas dimensions explicitly
+                    if (canvas) {
+                        canvas.style.width = availableWidth + 'px';
+                        canvas.style.height = '700px';
+                        canvas.style.display = 'block';
+                        canvas.width = availableWidth;
+                        canvas.height = 700;
+                    }
+                }, 50);
+                
+                // Set initial dimensions for immediate use
+                let availableWidth = 1400;
+                if (wrapper) {
+                    availableWidth = Math.max(wrapper.offsetWidth || wrapper.clientWidth, 1200);
+                } else if (chartContainer) {
+                    const containerWidth = chartContainer.offsetWidth || chartContainer.clientWidth;
+                    availableWidth = Math.max(containerWidth - 85, 1200);
+                }
+                
+                // Set canvas dimensions explicitly - both style and attributes
+                let ctx;
+                if (canvas) {
+                    // Set CSS dimensions first
+                    canvas.style.width = availableWidth + 'px';
+                    canvas.style.height = '700px';
+                    canvas.style.display = 'block';
+                    // Chart.js will handle device pixel ratio, so just set logical dimensions
+                    canvas.width = availableWidth;
+                    canvas.height = 700;
+                    ctx = canvas.getContext('2d');
+                } else {
+                    ctx = canvas.getContext('2d');
+                }
+                
+                // Process timestamps
+                chartTimestamps = data.labels.map(ts => new Date(ts));
+                chartData = data;
+                
+                // Calculate initial zoom range to show only recent data (last 1 day)
+                const totalPoints = data.labels.length;
+                
+                if (totalPoints > 0) {
+                    const pointsPerDay = interval === '1Min' ? 390 : 78;
+                    const initialViewPoints = Math.min(pointsPerDay, totalPoints);
+                    initialMin = Math.max(0, totalPoints - initialViewPoints);
+                    initialMax = totalPoints - 1;
+                } else {
+                    initialMin = undefined;
+                    initialMax = undefined;
+                }
+                
+                // Store timestamps, market hours, and market opens globally for plugin access
+                window.chartTimestamps = chartTimestamps;
+                window.marketHours = data.market_hours || [];
+                window.marketOpens = data.market_opens || [];
+                window.vwapData = data.indicators.vwap || [];
+                window.volumeData = data.ohlc ? data.ohlc.map(ohlc => ohlc.volume || 0) : [];
+                
+                // Show market hours legend
+                const legendElement = document.getElementById('marketHoursLegend');
+                if (window.marketHours && window.marketHours.length > 0 && legendElement) {
+                    legendElement.style.display = 'flex';
+                }
+                
+                // Create initial candlestick chart (canvas dimensions already set above)
+                createCandlestickChart(ctx, chartData, chartTimestamps, interval, initialMin, initialMax);
+                renderMacdSubchart();
+                
+                // Force chart to resize multiple times to ensure it uses full width
+                const forceResize = () => {
+                    if (window.stockChart && canvas && wrapper) {
+                        let availableWidth = 1400;
+                        // Use wrapper width directly
+                        if (wrapper) {
+                            wrapper.offsetHeight; // Force reflow
+                            availableWidth = wrapper.offsetWidth || wrapper.clientWidth || wrapper.getBoundingClientRect().width;
+                        } else {
+                            const chartContainer = wrapper.closest('.chart-container');
+                            if (chartContainer) {
+                                const containerWidth = chartContainer.offsetWidth || chartContainer.clientWidth;
+                                availableWidth = containerWidth;
+                            }
+                        }
+                        availableWidth = Math.max(availableWidth, 100);
+                        
+                        if (availableWidth > 0 && canvas.offsetWidth !== availableWidth) {
+                            canvas.width = availableWidth;
+                            canvas.height = 700;
+                            canvas.style.width = availableWidth + 'px';
+                            canvas.style.height = '700px';
+                            window.stockChart.resize();
+                        }
+                    }
+                };
+                
+                // Resize immediately and after delays to catch any layout changes
+                forceResize();
+                setTimeout(forceResize, 100);
+                setTimeout(forceResize, 300);
+                setTimeout(forceResize, 500);
+                
+                // Resize chart on window resize
+                let resizeTimeout;
+                window.addEventListener('resize', () => {
+                    clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(() => {
+                        if (window.stockChart && canvas && wrapper) {
+                            let availableWidth = 1400;
+                            // Use wrapper width directly
+                            if (wrapper) {
+                                wrapper.offsetHeight; // Force reflow
+                                availableWidth = wrapper.offsetWidth || wrapper.clientWidth || wrapper.getBoundingClientRect().width;
+                            } else {
+                                const chartContainer = wrapper.closest('.chart-container');
+                                if (chartContainer) {
+                                    const containerWidth = chartContainer.offsetWidth || chartContainer.clientWidth;
+                                    availableWidth = containerWidth;
+                                }
+                            }
+                            availableWidth = Math.max(availableWidth, 100);
+                            
+                            if (availableWidth > 0) {
+                                canvas.width = availableWidth;
+                                canvas.height = 700;
+                                canvas.style.width = availableWidth + 'px';
+                                canvas.style.height = '700px';
+                                window.stockChart.resize();
+                            }
+                        }
+                    }, 250);
+                });
+                
+                // Add double-click to reset zoom
+                document.getElementById('stockChart').addEventListener('dblclick', function() {
+                    window.stockChart.resetZoom();
+                });
+            })
+            .catch(error => {
+                console.error('Error fetching data:', error);
+                document.getElementById('loading').textContent = 'Error loading chart data. Please try again.';
+            });
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,92 @@
+Only trade during RTH (9:30–16:00 ET).
+
+Require a real uptrend:
+
+close > EMA21
+
+EMA21 > VWAP
+
+EMA21 has a positive slope over a few bars
+
+Require a real pullback:
+
+at least two bars with close below EMA9 (not just one tick)
+
+then a cross back above EMA9
+
+Here’s a revised compute_strategy_signals that does this and still fits your existing JSON shape:
+
+Something like this: 
+
+from datetime import time as dtime
+import pandas as pd
+import math
+
+def compute_strategy_signals(df_prices):
+    """
+    EMA + VWAP pullback v1.1
+    - RTH only (9:30–16:00)
+    - Uptrend: close > ema21, ema21 > vwap, ema21 slope > 0
+    - Pullback: at least 2 bars below ema9, then close crosses back above ema9
+    """
+    if df_prices is None or df_prices.empty:
+        return {}
+
+    df = df_prices.copy()
+    df.index = pd.to_datetime(df.index)
+
+    # --- RTH mask (naive, assumes timestamps are in US ET or equivalent) ---
+    idx = df.index
+    rth_mask = (
+        ((idx.hour > 9) | ((idx.hour == 9) & (idx.minute >= 30))) &
+        ((idx.hour < 16) | ((idx.hour == 16) & (idx.minute == 0)))
+    )
+
+    # Compute indicators
+    if ta:
+        df['ema9'] = ta.ema(df['close'], length=9)
+        df['ema21'] = ta.ema(df['close'], length=21)
+    else:
+        df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+        df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+
+    vwap_series = calculate_vwap_per_trading_day(df.rename(columns={
+        'open': 'open',
+        'high': 'high',
+        'low': 'low',
+        'close': 'close',
+        'volume': 'volume'
+    }))
+    df['vwap'] = vwap_series
+
+    close = df['close']
+    ema9 = df['ema9']
+    ema21 = df['ema21']
+    vwap = df['vwap']
+
+    # --- Uptrend definition ---
+    ema21_slope = ema21 - ema21.shift(5)  # 5-bar slope
+    up_trend = (
+        (close > ema21) &
+        (ema21 > vwap) &
+        (ema21_slope > 0)
+    )
+
+    # --- Pullback definition ---
+    # 2 bars in a row below ema9, then cross above
+    below_fast = close.shift(1) < ema9.shift(1)
+    below_fast2 = close.shift(2) < ema9.shift(2)
+    cross_up = (close > ema9) & below_fast & below_fast2
+
+    long_entry = up_trend & cross_up & rth_mask
+
+    entry_price = df['open'].shift(-1)
+
+    return {
+        'long_entry': [bool(x) if pd.notna(x) else False for x in long_entry],
+        'entry_price': _clean_series(entry_price),
+        'ema9': _clean_series(ema9),
+        'ema21': _clean_series(ema21),
+        'vwap': _clean_series(vwap),
+        'timestamp': [ts.isoformat() for ts in df.index]
+    }
