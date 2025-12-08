@@ -21,14 +21,6 @@ def init_database():
             low_price REAL,
             volume REAL,
             interval TEXT NOT NULL,
-            ema_9 REAL,
-            ema_21 REAL,
-            ema_50 REAL,
-            vwap REAL,
-            ta_ema_9 REAL,
-            ta_ema_21 REAL,
-            ta_ema_50 REAL,
-            ta_vwap REAL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(ticker, timestamp, interval)
         )
@@ -39,15 +31,7 @@ def init_database():
         ('open_price', 'REAL'),
         ('high_price', 'REAL'),
         ('low_price', 'REAL'),
-        ('volume', 'REAL'),
-        ('ema_9', 'REAL'),
-        ('ema_21', 'REAL'),
-        ('ema_50', 'REAL'),
-        ('vwap', 'REAL'),
-        ('ta_ema_9', 'REAL'),
-        ('ta_ema_21', 'REAL'),
-        ('ta_ema_50', 'REAL'),
-        ('ta_vwap', 'REAL')
+        ('volume', 'REAL')
     ]
     
     for column_name, column_type in columns_to_add:

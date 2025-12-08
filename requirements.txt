@@ -6,4 +6,5 @@ numpy>=1.24.0
 scipy>=1.10.0
 statsmodels>=0.14.0
 pandas-ta==0.4.71b0
+python-dotenv>=1.0.0
 

@@ -10,6 +10,7 @@ except ImportError:
     ta = None
 import math
 from utils import calculate_vwap_per_trading_day, get_market_hours_info, get_market_open_times
+from strategies import compute_vwap_ema_crossover_signals, STRATEGY_REGISTRY, build_regular_mask
 
 # Optional imports for predictive analytics - won't break app if not installed
 try:
@@ -35,282 +36,7 @@ except ImportError:
 
 app = Flask(__name__)
 
-# --- Strategy utilities (v1: EMA + VWAP pullback) ---
-def _clean_series(series):
-    """Convert a pandas Series to list with None for nan/NaT."""
-    return [None if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in series]
-
-
-def build_regular_mask(timestamps, market_hours=None):
-    """Return a pandas Series boolean mask for regular sessions aligned to timestamps."""
-    try:
-        idx = pd.to_datetime(timestamps)
-    except Exception:
-        return None
-
-    mask = pd.Series(False, index=idx)
-    if market_hours:
-        for period in market_hours:
-            if period.get('type') != 'regular':
-                continue
-            start = period.get('start')
-            end = period.get('end')
-            try:
-                start_dt = pd.to_datetime(start)
-                end_dt = pd.to_datetime(end)
-                mask |= (idx >= start_dt) & (idx <= end_dt)
-            except Exception:
-                continue
-
-    # If no regular periods resolved, fall back to naive time-of-day filter (ET-like)
-    if not mask.any():
-        rth_mask = (
-            ((idx.hour > 9) | ((idx.hour == 9) & (idx.minute >= 30))) &
-            ((idx.hour < 16) | ((idx.hour == 16) & (idx.minute == 0)))
-        )
-        mask = pd.Series(rth_mask, index=idx)
-
-    return mask
-
-
-def compute_strategy_signals(df_prices, rth_mask=None):
-    """
-    EMA + VWAP pullback v1.3
-    - RTH only (via rth_mask)
-    - Trend: ema21 > vwap and ema21 slope > 0
-    - Pullback: at least 2 of last 3 bars closed below ema9
-    - Entry: close crosses up through ema9
-    - Throttle: at most one entry every 20 bars
-    """
-    if df_prices is None or df_prices.empty:
-        return {}
-
-    df = df_prices.copy()
-    df.index = pd.to_datetime(df.index)
-
-    # RTH mask (prefer provided mask; fallback to naive)
-    idx = df.index
-    if rth_mask is not None:
-        try:
-            rth_mask = pd.Series(rth_mask, index=idx)
-        except Exception:
-            pass
-    if rth_mask is None or len(rth_mask) != len(df):
-        rth_mask = (
-            ((idx.hour > 9) | ((idx.hour == 9) & (idx.minute >= 30))) &
-            ((idx.hour < 16) | ((idx.hour == 16) & (idx.minute == 0)))
-        )
-        rth_mask = pd.Series(rth_mask, index=idx)
-    if isinstance(rth_mask, pd.Series):
-        rth_mask = rth_mask.astype(bool)
-
-    # Compute indicators (reuse existing columns when present)
-    if 'ema9' not in df.columns or 'ema21' not in df.columns:
-        if ta:
-            df['ema9'] = ta.ema(df['close'], length=9)
-            df['ema21'] = ta.ema(df['close'], length=21)
-        else:
-            df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
-            df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-
-    if 'vwap' not in df.columns:
-        vwap_series = calculate_vwap_per_trading_day(df.rename(columns={
-            'open': 'open',
-            'high': 'high',
-            'low': 'low',
-            'close': 'close',
-            'volume': 'volume'
-        }))
-        df['vwap'] = vwap_series
-
-    close = df['close']
-    ema9 = df['ema9']
-    ema21 = df['ema21']
-    vwap = df['vwap']
-
-    # Trend filter: EMA21 above VWAP and sloping up
-    ema21_slope = ema21 - ema21.shift(5)
-    trend = (ema21 > vwap) & (ema21_slope > 0)
-
-    # Pullback: at least 2 of last 3 bars below EMA9
-    below_fast = close < ema9
-    pullback = below_fast.rolling(window=3, min_periods=3).sum() >= 2
-
-    # Cross-up through ema9
-    cross_up = (close > ema9) & (close.shift(1) <= ema9.shift(1))
-
-    # preliminary signal
-    pre_signal = trend & pullback & cross_up & rth_mask
-
-    # Throttle: at most one entry every 20 bars (keep the first)
-    recent_signal = pre_signal.shift(1).rolling(window=20, min_periods=1).max().fillna(False)
-    if isinstance(recent_signal, pd.Series):
-        recent_signal = recent_signal.astype(bool)
-    long_entry = pre_signal & (~recent_signal)
-
-    entry_price = df['open'].shift(-1)
-
-    return {
-        'long_entry': [bool(x) if pd.notna(x) else False for x in long_entry],
-        'entry_price': _clean_series(entry_price),
-        'ema9': _clean_series(ema9),
-        'ema21': _clean_series(ema21),
-        'vwap': _clean_series(vwap),
-        'timestamp': [ts.isoformat() for ts in df.index]
-    }
-
-
-def compute_vwap_crossover_signals(df_prices, rth_mask=None):
-    """
-    VWAP cross-over v1
-    - RTH only (via rth_mask)
-    - Intersection: VWAP crosses down from above both EMA9 and EMA21
-    - Follow-through: EMA9, EMA21, and VWAP slopes positive for at least 8 bars
-    - Entry at next bar open
-    """
-    if df_prices is None or df_prices.empty:
-        return {}
-
-    df = df_prices.copy()
-    df.index = pd.to_datetime(df.index)
-    idx = df.index
-
-    # RTH mask
-    if rth_mask is not None:
-        try:
-            rth_mask = pd.Series(rth_mask, index=idx)
-        except Exception:
-            rth_mask = None
-    if rth_mask is None or len(rth_mask) != len(df):
-        rth_mask = (
-            ((idx.hour > 9) | ((idx.hour == 9) & (idx.minute >= 30))) &
-            ((idx.hour < 16) | ((idx.hour == 16) & (idx.minute == 0)))
-        )
-        rth_mask = pd.Series(rth_mask, index=idx)
-    if isinstance(rth_mask, pd.Series):
-        rth_mask = rth_mask.astype(bool)
-
-    # Indicators (reuse if present)
-    if 'ema9' not in df.columns or 'ema21' not in df.columns:
-        if ta:
-            df['ema9'] = ta.ema(df['close'], length=9)
-            df['ema21'] = ta.ema(df['close'], length=21)
-        else:
-            df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
-            df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-
-    if 'vwap' not in df.columns:
-        vwap_series = calculate_vwap_per_trading_day(df.rename(columns={
-            'open': 'open',
-            'high': 'high',
-            'low': 'low',
-            'close': 'close',
-            'volume': 'volume'
-        }))
-        df['vwap'] = vwap_series
-
-    close = df['close']
-    ema9 = df['ema9']
-    ema21 = df['ema21']
-    vwap = df['vwap']
-
-    # Intersection: VWAP crosses down from above both EMA9 and EMA21
-    cross_down = (
-        (vwap < ema9) & (vwap < ema21) &
-        (vwap.shift(1) >= ema9.shift(1)) &
-        (vwap.shift(1) >= ema21.shift(1))
-    )
-
-    # Slopes positive (follow-through) for at least 8 bars
-    slope9 = ema9.diff()
-    slope21 = ema21.diff()
-    slope_vwap = vwap.diff()
-    slopes_pos = (slope9 > 0) & (slope21 > 0) & (slope_vwap > 0)
-    slope_run = slopes_pos.rolling(window=8, min_periods=8).sum() == 8
-
-    pre_signal = cross_down & slope_run & rth_mask
-
-    # Entry at next bar open
-    entry_price = df['open'].shift(-1)
-
-    return {
-        'long_entry': [bool(x) if pd.notna(x) else False for x in pre_signal],
-        'entry_price': _clean_series(entry_price),
-        'ema9': _clean_series(ema9),
-        'ema21': _clean_series(ema21),
-        'vwap': _clean_series(vwap),
-        'timestamp': [ts.isoformat() for ts in df.index]
-    }
-
-
-def compute_vwap_ema_crossover_signals(df_prices, rth_mask=None):
-    """
-    VWAP / EMA crossover (simple): mark every intersection between VWAP and EMA21.
-    - Uses provided rth_mask; if none, allows all sessions (pre/after-hours included)
-    - Intersection when sign of (vwap - ema21) changes from prior bar
-    """
-    if df_prices is None or df_prices.empty:
-        return {}
-
-    df = df_prices.copy()
-    df.index = pd.to_datetime(df.index)
-    idx = df.index
-
-    # Session mask: use provided; otherwise keep all sessions (including off-hours)
-    if rth_mask is not None:
-        try:
-            rth_mask = pd.Series(rth_mask, index=idx).astype(bool)
-        except Exception:
-            rth_mask = None
-    if rth_mask is None or len(rth_mask) != len(df):
-        rth_mask = pd.Series([True] * len(df), index=idx)
-
-    # Indicators (reuse existing)
-    if 'ema21' not in df.columns:
-        if ta:
-            df['ema21'] = ta.ema(df['close'], length=21)
-        else:
-            df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-    if 'vwap' not in df.columns:
-        vwap_series = calculate_vwap_per_trading_day(df.rename(columns={
-            'open': 'open',
-            'high': 'high',
-            'low': 'low',
-            'close': 'close',
-            'volume': 'volume'
-        }))
-        df['vwap'] = vwap_series
-
-    ema21 = df['ema21']
-    vwap = df['vwap']
-
-    diff = vwap - ema21
-    prev_diff = diff.shift(1)
-    cross = (diff.notna() & prev_diff.notna()) & (diff * prev_diff <= 0) & (diff != prev_diff)
-    long_entry = cross & rth_mask
-
-    # Direction: bullish if VWAP dips below EMA21 on/after cross; bearish otherwise
-    direction = []
-    cross_y = []
-    for curr_diff, curr_vwap, curr_ema in zip(diff, vwap, ema21):
-        if pd.isna(curr_diff) or pd.isna(curr_vwap) or pd.isna(curr_ema):
-            direction.append(None)
-            cross_y.append(None)
-            continue
-        direction.append('bullish' if curr_diff < 0 else 'bearish')
-        cross_y.append(float((curr_vwap + curr_ema) / 2.0))
-
-    entry_price = df['open'].shift(-1)
-
-    return {
-        'long_entry': [bool(x) if pd.notna(x) else False for x in long_entry],
-        'direction': direction,
-        'cross_y': cross_y,
-        'entry_price': _clean_series(entry_price),
-        'ema21': _clean_series(ema21),
-        'vwap': _clean_series(vwap),
-        'timestamp': [ts.isoformat() for ts in df.index]
-    }
+# Strategy functions are now imported from the strategies package
 
 
 def simple_backtest(df_prices, signals, fee_bp=0.0):
@@ -440,11 +166,9 @@ def get_ticker_data(ticker, interval):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Get all data for the ticker and interval with OHLC data and technical indicators
+    # Get all data for the ticker and interval (OHLC + volume only)
     cursor.execute('''
-        SELECT timestamp, price, open_price, high_price, low_price, volume, 
-               ema_9, ema_21, ema_50, vwap,
-               ta_ema_9, ta_ema_21, ta_ema_50, ta_vwap
+        SELECT timestamp, price, open_price, high_price, low_price, volume
         FROM stock_data
         WHERE ticker = ? AND interval = ?
         ORDER BY timestamp ASC
@@ -468,27 +192,9 @@ def get_ticker_data(ticker, interval):
         for row in results
     ]
 
-    # Use stored Alpaca indicators
-    indicators_alpaca = {
-        'ema_9': [row[6] if row[6] is not None else None for row in results],
-        'ema_21': [row[7] if row[7] is not None else None for row in results],
-        'ema_50': [row[8] if row[8] is not None else None for row in results],
-        'vwap': [row[9] if row[9] is not None else None for row in results]
-    }
-
-    # Start with stored pandas_ta indicators if present
-    indicators_ta = {
-        'ema_9': [row[10] if row[10] is not None else None for row in results],
-        'ema_21': [row[11] if row[11] is not None else None for row in results],
-        'ema_50': [row[12] if row[12] is not None else None for row in results],
-        'vwap': [row[13] if row[13] is not None else None for row in results],
-        'macd': [row[14] if len(row) > 14 and row[14] is not None else None for row in results],
-        'macd_signal': [row[15] if len(row) > 15 and row[15] is not None else None for row in results]
-    }
-
-    # If we have missing pandas_ta values, compute on the fly
-    needs_ta = any((v is None) for series in indicators_ta.values() for v in series)
-    if needs_ta and len(ohlc) > 0:
+    # Compute pandas_ta indicators on the fly (always)
+    indicators_ta = {}
+    if len(ohlc) > 0:
         df = pd.DataFrame(ohlc)
         # set index to timestamps to match VWAP anchoring per trading day
         try:
@@ -535,12 +241,6 @@ def get_ticker_data(ticker, interval):
             'macd': df['ta_macd'].where(pd.notna(df['ta_macd']), None).tolist() if 'ta_macd' in df else [None]*len(df),
             'macd_signal': df['ta_macd_signal'].where(pd.notna(df['ta_macd_signal']), None).tolist() if 'ta_macd_signal' in df else [None]*len(df)
         }
-    else:
-        # Ensure JSON-serializable if we used stored values
-        indicators_ta = {
-            key: [None if v is None or (isinstance(v, float) and pd.isna(v)) else v for v in series]
-            for key, series in indicators_ta.items()
-        }
 
     # Always align pandas_ta VWAP to anchored calculation if we have timestamps
     if len(ohlc) > 0:
@@ -558,20 +258,11 @@ def get_ticker_data(ticker, interval):
         }))
         indicators_ta['vwap'] = vwap_anchored.where(pd.notna(vwap_anchored), None).tolist()
 
-    # Build strategy signals (EMA + VWAP pullback v1)
+    # Build strategy signals
     strategy_payload = {}
-    regular_mask = build_regular_mask(timestamps, market_hours)
     try:
         df_strategy = pd.DataFrame(ohlc)
         df_strategy.index = pd.to_datetime(timestamps)
-        signals_pullback = compute_strategy_signals(df_strategy, rth_mask=regular_mask)
-        if signals_pullback:
-            strategy_payload['ema_vwap_pullback_v1'] = signals_pullback
-
-        signals_vwap_cross = compute_vwap_crossover_signals(df_strategy, rth_mask=regular_mask)
-        if signals_vwap_cross:
-            strategy_payload['vwap_crossover_v1'] = signals_vwap_cross
-
         # Allow off-hours for the simple VWAP/EMA crossover
         signals_vwap_ema_cross = compute_vwap_ema_crossover_signals(df_strategy, rth_mask=None)
         if signals_vwap_ema_cross:
@@ -593,7 +284,7 @@ def get_ticker_data(ticker, interval):
             }
             for entry in ohlc
         ],
-        'indicators': {k: _clean(v) for k, v in indicators_alpaca.items()},
+        'indicators': {},  # deprecated: alpaca imports removed
         'indicators_ta': {k: _clean(v) for k, v in indicators_ta.items()},
         'market_hours': [
             {
@@ -621,11 +312,8 @@ def run_strategy_backtest(name):
     interval = payload.get('interval', '1Min')
     fee_bp = float(payload.get('fee_bp', 0.0) or 0.0)
 
-    supported = {
-        'ema_vwap_pullback_v1': compute_strategy_signals,
-        'vwap_crossover_v1': compute_vwap_crossover_signals,
-        'vwap_ema_crossover_v1': compute_vwap_ema_crossover_signals
-    }
+    # Use the strategy registry from the strategies package
+    supported = STRATEGY_REGISTRY
 
     if name not in supported:
         return jsonify({'error': 'Unsupported strategy'}), 400
@@ -703,6 +391,7 @@ def fetch_latest_data():
         API_KEY = 'PK57P4EYJODEZTVL7QYOX7J53W'
         API_SECRET = '6PXLeTmf6wKNJBSCKZAhg3SgCkieGag1Bgvf5Yeq53qD'
         BASE_URL = 'https://paper-api.alpaca.markets/v2'
+        
         api = tradeapi.REST(API_KEY, API_SECRET, BASE_URL, api_version='v2')
         
         # Calculate time range
@@ -748,32 +437,14 @@ def fetch_latest_data():
                     # Sort by timestamp
                     bars = bars.sort_index()
                     
-                    # Calculate technical indicators with fallback when pandas_ta is unavailable
-                    bars['ema_9'] = bars['close'].ewm(span=9, adjust=False).mean()
-                    bars['ema_21'] = bars['close'].ewm(span=21, adjust=False).mean()
-                    bars['ema_50'] = bars['close'].ewm(span=50, adjust=False).mean()
-                    if ta:
-                        bars['ta_ema_9'] = ta.ema(bars['close'], length=9)
-                        bars['ta_ema_21'] = ta.ema(bars['close'], length=21)
-                        bars['ta_ema_50'] = ta.ema(bars['close'], length=50)
-                    else:
-                        bars['ta_ema_9'] = bars['ema_9']
-                        bars['ta_ema_21'] = bars['ema_21']
-                        bars['ta_ema_50'] = bars['ema_50']
-                    
-                    # Calculate VWAP per trading day (resets at market open each day)
-                    bars['vwap'] = calculate_vwap_per_trading_day(bars)
-                    bars['ta_vwap'] = calculate_vwap_per_trading_day(bars)
-                    
-                    # Insert data into database
+                    # Insert data into database (only OHLCV)
                     for timestamp, row in bars.iterrows():
                         try:
                             cursor.execute('''
                                 INSERT OR REPLACE INTO stock_data 
                                 (ticker, timestamp, price, open_price, high_price, low_price, volume, 
-                                 interval, ema_9, ema_21, ema_50, vwap,
-                                 ta_ema_9, ta_ema_21, ta_ema_50, ta_vwap)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 interval)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (
                                 ticker,
                                 timestamp.isoformat(),
@@ -782,15 +453,7 @@ def fetch_latest_data():
                                 float(row['high']),
                                 float(row['low']),
                                 float(row['volume']) if 'volume' in row and pd.notna(row['volume']) else None,
-                                interval,
-                                float(row['ema_9']) if pd.notna(row['ema_9']) else None,
-                                float(row['ema_21']) if pd.notna(row['ema_21']) else None,
-                                float(row['ema_50']) if pd.notna(row['ema_50']) else None,
-                                float(row['vwap']) if 'vwap' in row and pd.notna(row['vwap']) else None,
-                                float(row['ta_ema_9']) if 'ta_ema_9' in row and pd.notna(row['ta_ema_9']) else None,
-                                float(row['ta_ema_21']) if 'ta_ema_21' in row and pd.notna(row['ta_ema_21']) else None,
-                                float(row['ta_ema_50']) if 'ta_ema_50' in row and pd.notna(row['ta_ema_50']) else None,
-                                float(row['ta_vwap']) if 'ta_vwap' in row and pd.notna(row['ta_vwap']) else None
+                                interval
                             ))
                             total_records += 1
                             last_timestamp = timestamp.isoformat()

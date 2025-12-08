@@ -1,6 +1,6 @@
 @echo off
 setlocal
-set VENV=.venv_new
+set VENV=.venv
 
 echo ------------------------------------------------------------
 echo Starting Stock Ticker Dashboard
@@ -24,10 +24,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Upgrading pip...
-python -m pip install --upgrade pip
-echo Installing requirements (including pandas-ta)...
+echo Upgrading pip, setuptools, and wheel...
+python -m pip install --upgrade pip setuptools wheel
+echo.
+echo Installing core dependencies first...
+python -m pip install flask python-dotenv
+python -m pip install pandas pytz
+echo.
+echo Installing aiohttp dependencies (may take a moment)...
+python -m pip install --only-binary :all: aiohttp multidict yarl frozenlist 2>nul || python -m pip install aiohttp multidict yarl frozenlist
+echo.
+echo Installing alpaca-trade-api...
+python -m pip install alpaca-trade-api
+echo.
+echo Installing remaining requirements...
 python -m pip install -r requirements.txt
+echo.
+echo Verifying critical packages...
+python -c "import flask; import alpaca_trade_api; import pandas; import dotenv; print('✓ All critical packages installed successfully!')" || echo "⚠ Warning: Some packages may not have installed correctly"
 
 echo ------------------------------------------------------------
 echo Launching app...

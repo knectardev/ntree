@@ -17,22 +17,35 @@ A Python-based web application for displaying real-time stock ticker data for SP
 pip install -r requirements.txt
 ```
 
-2. Initialize the database:
+2. Configure Alpaca API credentials:
+   - Copy `.env.example` to `.env`:
+     ```bash
+     copy .env.example .env
+     ```
+   - Edit `.env` and add your Alpaca API credentials:
+     ```
+     ALPACA_API_KEY=your_api_key_here
+     ALPACA_API_SECRET=your_api_secret_here
+     ALPACA_BASE_URL=https://paper-api.alpaca.markets/v2
+     ```
+   - The `.env` file is already in `.gitignore` and will not be committed to the repository.
+
+3. Initialize the database:
 ```bash
 python database.py
 ```
 
-3. Ingest stock data from Alpaca API:
+4. Ingest stock data from Alpaca API:
 ```bash
 python ingest_data.py
 ```
 
-4. Start the web application:
+5. Start the web application:
 ```bash
 python app.py
 ```
 
-5. Open your browser and navigate to:
+6. Open your browser and navigate to:
 ```
 http://localhost:5000
 ```
@@ -62,8 +75,9 @@ http://localhost:5000
 
 ## Notes
 
-- The Alpaca API credentials are configured in `ingest_data.py`
+- The Alpaca API credentials are stored in the `.env` file (not committed to git)
 - Data is stored in SQLite database `stock_data.db`
 - The application uses Chart.js for interactive chart visualization
 - The web interface is responsive and modern with a gradient design
+- Environment variables are loaded using `python-dotenv` package
 

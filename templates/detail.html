@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ ticker }} - Stock Detail</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
     <style>
         * {
@@ -18,7 +18,7 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #000;
             min-height: 100vh;
             padding: 5px;
             margin: 0;
@@ -59,7 +59,7 @@
         }
         
         .chart-container {
-            background: white;
+            background: #000;
             border-radius: 12px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.3);
             padding: 0; /* No padding to allow full width */
@@ -122,6 +122,7 @@
             cursor: crosshair;
             overflow: visible; /* Ensure canvas doesn't clip */
             display: block; /* Remove inline-block spacing */
+            background: #000; /* Black chart background */
         }
 
         .macd-chart-container {
@@ -144,10 +145,12 @@
         
         .market-hours-legend {
             position: absolute;
-            top: 120px; /* sit just below the indicator toggle stack */
+            top: 50%;
             left: 10px;
+            transform: translateY(-50%);
             padding: 10px;
-            background: rgba(255, 255, 255, 0.95);
+            background: rgba(0, 0, 0, 0.95);
+            color: white;
             border-radius: 6px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
             display: flex;
@@ -168,28 +171,28 @@
             width: 14px;
             height: 14px;
             border-radius: 3px;
-            border: 1px solid #ddd;
+            border: 1px solid rgba(255, 255, 255, 0.2);
             flex-shrink: 0;
         }
         
         .legend-color.regular {
-            background-color: rgba(255, 255, 255, 1.0);
-            border-color: rgba(200, 200, 200, 0.5);
+            background-color: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
         }
         
         .legend-color.pre-market {
             background-color: rgba(52, 152, 219, 0.1);
-            border-color: rgba(52, 152, 219, 0.3);
+            border-color: rgba(52, 152, 219, 0.2);
         }
         
         .legend-color.after-hours {
             background-color: rgba(155, 89, 182, 0.1);
-            border-color: rgba(155, 89, 182, 0.3);
+            border-color: rgba(155, 89, 182, 0.2);
         }
         
         .legend-color.closed {
             background-color: rgba(149, 165, 166, 0.1);
-            border-color: rgba(149, 165, 166, 0.3);
+            border-color: rgba(149, 165, 166, 0.2);
         }
         
         .indicator-controls {
@@ -209,23 +212,37 @@
             border-radius: 6px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
             display: flex;
-            gap: 12px;
+            flex-direction: column;
+            gap: 8px;
             font-size: 0.85em;
-            align-items: center;
+            align-items: flex-start;
         }
         
         .indicator-label {
             display: flex;
-            align-items: center;
-            gap: 5px;
+            flex-direction: column;
+            gap: 4px;
             cursor: pointer;
             white-space: nowrap;
             color: #333;
         }
         
+        .indicator-label-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
         .indicator-label input[type="checkbox"] {
             margin: 0;
             cursor: pointer;
+        }
+        
+        .indicator-color-line {
+            height: 0;
+            width: 30px;
+            margin-left: 20px; /* Align with checkbox + text */
+            margin-top: 2px;
         }
 
         .indicator-title {
@@ -333,45 +350,33 @@
                 <canvas id="stockChart"></canvas>
                 <div class="indicator-controls" id="indicatorControls">
                     <div class="indicator-controls-box">
-                        <span class="indicator-title">Alpaca imported</span>
                         <label class="indicator-label">
-                            <input type="checkbox" id="toggle-alpaca-ema9" onchange="toggleIndicator('alpaca','ema9')">
-                            EMA 9
+                            <div class="indicator-label-row">
+                                <input type="checkbox" id="toggle-pandas-ema9" onchange="toggleIndicator('pandas','ema9')" checked>
+                                EMA 9
+                            </div>
+                            <div class="indicator-color-line" style="border-top: 3px solid rgba(255, 99, 132, 0.7);"></div>
                         </label>
                         <label class="indicator-label">
-                            <input type="checkbox" id="toggle-alpaca-ema21" onchange="toggleIndicator('alpaca','ema21')">
-                            EMA 21
+                            <div class="indicator-label-row">
+                                <input type="checkbox" id="toggle-pandas-ema21" onchange="toggleIndicator('pandas','ema21')" checked>
+                                EMA 21
+                            </div>
+                            <div class="indicator-color-line" style="border-top: 3px solid rgba(54, 162, 235, 0.7);"></div>
                         </label>
                         <label class="indicator-label">
-                            <input type="checkbox" id="toggle-alpaca-ema50" onchange="toggleIndicator('alpaca','ema50')">
-                            EMA 50
+                            <div class="indicator-label-row">
+                                <input type="checkbox" id="toggle-pandas-ema50" onchange="toggleIndicator('pandas','ema50')">
+                                EMA 50
+                            </div>
+                            <div class="indicator-color-line" style="border-top: 3px solid rgba(255, 206, 86, 0.7);"></div>
                         </label>
                         <label class="indicator-label">
-                            <input type="checkbox" id="toggle-alpaca-vwap" onchange="toggleIndicator('alpaca','vwap')">
-                            VWAP
-                        </label>
-                    </div>
-                    <div class="indicator-controls-box">
-                        <span class="indicator-title">Panda Calculated</span>
-                        <label class="indicator-label">
-                            <input type="checkbox" id="toggle-pandas-ema9" onchange="toggleIndicator('pandas','ema9')">
-                            EMA 9
-                        </label>
-                        <label class="indicator-label">
-                            <input type="checkbox" id="toggle-pandas-ema21" onchange="toggleIndicator('pandas','ema21')">
-                            EMA 21
-                        </label>
-                        <label class="indicator-label">
-                            <input type="checkbox" id="toggle-pandas-ema50" onchange="toggleIndicator('pandas','ema50')">
-                            EMA 50
-                        </label>
-                        <label class="indicator-label">
-                            <input type="checkbox" id="toggle-pandas-vwap" onchange="toggleIndicator('pandas','vwap')">
-                            VWAP
-                        </label>
-                        <label class="indicator-label">
-                            <input type="checkbox" id="toggle-pandas-macd" onchange="toggleIndicator('pandas','macd')" checked>
-                            MACD + Signal
+                            <div class="indicator-label-row">
+                                <input type="checkbox" id="toggle-pandas-vwap" onchange="toggleIndicator('pandas','vwap')" checked>
+                                VWAP
+                            </div>
+                            <div class="indicator-color-line" style="border-top: 3.5px solid rgba(75, 192, 192, 0.7);"></div>
                         </label>
                     </div>
                 </div>
@@ -380,8 +385,6 @@
                         <span class="indicator-title">Strategy</span>
                         <select id="strategySelect" class="strategy-select">
                             <option value="none">None</option>
-                            <option value="ema_vwap_pullback_v1">EMA + VWAP Pullback (v1.3)</option>
-                            <option value="vwap_crossover_v1">VWAP cross-over (v1)</option>
                             <option value="vwap_ema_crossover_v1">VWAP / EMA Crossover (v1)</option>
                         </select>
                         <button id="runBacktestBtn" class="strategy-button">Run Backtest</button>
@@ -418,6 +421,43 @@
     </div>
     
     <script>
+        // --- Candlestick theme ---
+        const CANDLE_UP_FILL   = 'rgba(38, 166, 154, 1)';  // solid teal
+        const CANDLE_DOWN_FILL = 'rgba(239, 83, 80, 1)';   // solid red
+        const CANDLE_UNCH_FILL = 'rgba(150, 150, 150, 1)'; // solid gray
+        const CANDLE_TRANSPARENT = 'rgba(0, 0, 0, 0)';
+        const CANDLE_WICK_ALPHA = 0.7;
+
+        // Apply theme at the element-default level (this is what chartjs-chart-financial uses)
+        if (
+            typeof Chart !== 'undefined' &&
+            Chart.defaults &&
+            Chart.defaults.elements &&
+            Chart.defaults.elements.candlestick
+        ) {
+            Chart.defaults.elements.candlestick.color = {
+                up: CANDLE_UP_FILL,
+                down: CANDLE_DOWN_FILL,
+                unchanged: CANDLE_UNCH_FILL
+            };
+
+            // No visible body border
+            Chart.defaults.elements.candlestick.borderColor = {
+                up: CANDLE_TRANSPARENT,
+                down: CANDLE_TRANSPARENT,
+                unchanged: CANDLE_TRANSPARENT
+            };
+            Chart.defaults.elements.candlestick.borderWidth = 0;
+
+            // Wicks
+            Chart.defaults.elements.candlestick.wickColor = {
+                up: `rgba(38, 166, 154, ${CANDLE_WICK_ALPHA})`,
+                down: `rgba(239, 83, 80, ${CANDLE_WICK_ALPHA})`,
+                unchanged: `rgba(150, 150, 150, ${CANDLE_WICK_ALPHA})`
+            };
+            Chart.defaults.elements.candlestick.wickWidth = 1.2;
+        }
+
         // Register the zoom plugin if available
         if (typeof ChartZoom !== 'undefined') {
             Chart.register(ChartZoom);
@@ -441,17 +481,11 @@
         
         // Indicator visibility state
         const indicatorVisibility = {
-            alpaca: {
-                ema9: false,
-                ema21: false,
-                ema50: false,
-                vwap: false
-            },
             pandas: {
-                ema9: false,
-                ema21: false,
+                ema9: true,
+                ema21: true,
                 ema50: false,
-                vwap: false,
+                vwap: true,
                 macd: true
             }
         };
@@ -461,27 +495,6 @@
             none: {
                 label: 'None',
                 params: []
-            },
-            'ema_vwap_pullback_v1': {
-                label: 'EMA + VWAP Pullback (v1.3)',
-                params: [
-                    { label: 'Trend', value: 'EMA21 > VWAP and rising' },
-                    { label: 'Pullback', value: '≥2 of last 3 closes below EMA9' },
-                    { label: 'Entry', value: 'Close crosses up through EMA9' },
-                    { label: 'Throttle', value: '≤1 signal per 20 bars' },
-                    { label: 'Session', value: 'RTH only' },
-                    { label: 'Exit', value: 'Same-bar close (toy)' }
-                ]
-            },
-            'vwap_crossover_v1': {
-                label: 'VWAP cross-over (v1)',
-                params: [
-                    { label: 'Trend', value: 'VWAP crosses down below EMA9 & EMA21' },
-                    { label: 'Follow-through', value: 'EMA9/EMA21/VWAP slopes > 0 for 8 bars' },
-                    { label: 'Session', value: 'RTH only' },
-                    { label: 'Entry', value: 'First bar satisfying cross + slope run' },
-                    { label: 'Exit', value: 'Same-bar close (toy)' }
-                ]
             },
             'vwap_ema_crossover_v1': {
                 label: 'VWAP / EMA Crossover (v1)',
@@ -724,7 +737,8 @@
         
         // Market hours shading colors
         const marketHoursColors = {
-            'regular': 'rgba(255, 255, 255, 1.0)', // White for regular hours
+            // Keep regular-hours overlay faint so grid lines remain visible
+            'regular': 'rgba(255, 255, 255, 0.05)',
             'pre_market': 'rgba(52, 152, 219, 0.1)',
             'after_hours': 'rgba(155, 89, 182, 0.1)',
             'closed': 'rgba(149, 165, 166, 0.1)'
@@ -1004,7 +1018,7 @@
                 }
                 
                 // Draw horizontal line (light thin line)
-                ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.strokeStyle = 'rgba(200, 200, 200, 0.8)'; // light gray @ 80% opacity
                 ctx.lineWidth = 1;
                 ctx.setLineDash([]);
                 ctx.beginPath();
@@ -1113,6 +1127,89 @@
             }
         };
         
+        // Custom plugin to manually draw candlesticks with full styling control
+        const customCandlestickPlugin = {
+            id: 'customCandlestickPlugin',
+            beforeDatasetsDraw: (chart) => {
+                const ctx = chart.ctx;
+                const chartArea = chart.chartArea;
+                const xAxis = chart.scales.x;
+                const yAxis = chart.scales.y;
+                
+                if (!chartArea || !xAxis || !yAxis) return;
+                
+                // Find the candlestick dataset (look for one with candlestickData property)
+                const candlestickDataset = chart.data.datasets.find(ds => 
+                    ds.candlestickData && ds.candlestickData.length > 0
+                );
+                
+                if (!candlestickDataset || !candlestickDataset.candlestickData) return;
+                
+                const data = candlestickDataset.candlestickData;
+                
+                ctx.save();
+                
+                // Clip to chart area
+                ctx.beginPath();
+                ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+                ctx.clip();
+                
+                const visibleRange = {
+                    min: Math.max(0, Math.floor(xAxis.min)),
+                    max: Math.min(data.length - 1, Math.ceil(xAxis.max))
+                };
+                
+                // Calculate candle width (leave some gap between candles)
+                const candleSpacing = (xAxis.right - xAxis.left) / (visibleRange.max - visibleRange.min + 1);
+                const candleWidth = Math.max(2, candleSpacing * 0.7); // 70% of spacing, min 2px
+                
+                // Draw each visible candle
+                for (let i = visibleRange.min; i <= visibleRange.max; i++) {
+                    const candle = data[i];
+                    if (!candle || candle.o === undefined || candle.h === undefined || 
+                        candle.l === undefined || candle.c === undefined) continue;
+                    
+                    const x = xAxis.getPixelForValue(i);
+                    const openY = yAxis.getPixelForValue(candle.o);
+                    const highY = yAxis.getPixelForValue(candle.h);
+                    const lowY = yAxis.getPixelForValue(candle.l);
+                    const closeY = yAxis.getPixelForValue(candle.c);
+                    
+                    // Determine if up or down
+                    const isUp = candle.c >= candle.o;
+                    const bodyTop = Math.min(openY, closeY);
+                    const bodyBottom = Math.max(openY, closeY);
+                    const bodyHeight = Math.max(1, bodyBottom - bodyTop); // Min 1px for visibility
+                    
+                    // Choose colors based on theme constants
+                    const bodyColor = isUp ? CANDLE_UP_FILL : CANDLE_DOWN_FILL;
+                    const wickColor = isUp 
+                        ? `rgba(38, 166, 154, ${CANDLE_WICK_ALPHA})` 
+                        : `rgba(239, 83, 80, ${CANDLE_WICK_ALPHA})`;
+                    
+                    // Draw wick (vertical line from high to low)
+                    ctx.strokeStyle = wickColor;
+                    ctx.lineWidth = 1.2;
+                    ctx.beginPath();
+                    ctx.moveTo(x, highY);
+                    ctx.lineTo(x, lowY);
+                    ctx.stroke();
+                    
+                    // Draw body (rectangle from open to close)
+                    // No border - just fill
+                    ctx.fillStyle = bodyColor;
+                    ctx.fillRect(
+                        x - candleWidth / 2,
+                        bodyTop,
+                        candleWidth,
+                        bodyHeight
+                    );
+                }
+                
+                ctx.restore();
+            }
+        };
+        
         // Plugin to draw border around chart area
         const chartBorderPlugin = {
             id: 'chartBorderPlugin',
@@ -1145,9 +1242,7 @@
         function createCandlestickChart(ctx, data, timestamps, interval, initialMin, initialMax) {
             const labels = timestamps.map(date => date.toLocaleString());
             
-            // Format data for candlestick chart
-            // chartjs-chart-financial expects {x, o, h, l, c} format
-            // Use index for x since we're using category scale
+            // Format data for candlestick chart (using OHLC format for custom plugin)
             const candlestickData = data.ohlc.map((ohlc, index) => ({
                 x: index,
                 o: ohlc.open,
@@ -1155,16 +1250,18 @@
                 l: ohlc.low,
                 c: ohlc.close
             }));
-            
-            // Build datasets array with candlestick and indicators
+
+            // Build datasets array - use a hidden line dataset for axis scaling
+            // The custom plugin will draw the actual candlesticks
             const datasets = [{
                 label: '{{ ticker }}',
-                data: candlestickData,
-                color: {
-                    up: '#26a69a',
-                    down: '#ef5350',
-                    unchanged: '#999'
-                }
+                data: candlestickData.map(c => ({ x: c.x, y: c.c })), // Use close for line positioning
+                candlestickData: candlestickData, // Store OHLC data for custom plugin
+                borderColor: 'transparent',
+                backgroundColor: 'transparent',
+                pointRadius: 0,
+                borderWidth: 0,
+                order: 0 // Draw behind everything
             }];
             
             // Add volume bars dataset
@@ -1199,61 +1296,6 @@
             }
             
             // Add indicator datasets if visible (as line overlays)
-            if (data.indicators) {
-                const alpacaIndicators = data.indicators;
-                if (indicatorVisibility.alpaca.ema9 && alpacaIndicators.ema_9) {
-                    datasets.push({
-                        label: 'EMA 9 (Alpaca imported)',
-                        type: 'line',
-                        data: alpacaIndicators.ema_9.map((val, idx) => ({x: idx, y: val})),
-                        borderColor: 'rgb(255, 99, 132)',
-                        backgroundColor: 'transparent',
-                        borderWidth: 1.5,
-                        borderDash: [5, 5],
-                        pointRadius: 0,
-                        tension: 0.4
-                    });
-                }
-                if (indicatorVisibility.alpaca.ema21 && alpacaIndicators.ema_21) {
-                    datasets.push({
-                        label: 'EMA 21 (Alpaca imported)',
-                        type: 'line',
-                        data: alpacaIndicators.ema_21.map((val, idx) => ({x: idx, y: val})),
-                        borderColor: 'rgb(54, 162, 235)',
-                        backgroundColor: 'transparent',
-                        borderWidth: 1.5,
-                        borderDash: [5, 5],
-                        pointRadius: 0,
-                        tension: 0.4
-                    });
-                }
-                if (indicatorVisibility.alpaca.ema50 && alpacaIndicators.ema_50) {
-                    datasets.push({
-                        label: 'EMA 50 (Alpaca imported)',
-                        type: 'line',
-                        data: alpacaIndicators.ema_50.map((val, idx) => ({x: idx, y: val})),
-                        borderColor: 'rgb(255, 206, 86)',
-                        backgroundColor: 'transparent',
-                        borderWidth: 1.5,
-                        borderDash: [5, 5],
-                        pointRadius: 0,
-                        tension: 0.4
-                    });
-                }
-                if (indicatorVisibility.alpaca.vwap && alpacaIndicators.vwap) {
-                    datasets.push({
-                        label: 'VWAP (Alpaca imported)',
-                        type: 'line',
-                        data: alpacaIndicators.vwap.map((val, idx) => ({x: idx, y: val})),
-                        borderColor: 'rgb(75, 192, 192)',
-                        backgroundColor: 'transparent',
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        tension: 0.4
-                    });
-                }
-            }
-
             if (data.indicators_ta) {
                 const pandasIndicators = data.indicators_ta;
                 if (indicatorVisibility.pandas.ema9 && pandasIndicators.ema_9) {
@@ -1264,7 +1306,6 @@
                         borderColor: 'rgba(255, 99, 132, 0.7)',
                         backgroundColor: 'transparent',
                         borderWidth: 1.5,
-                        borderDash: [2, 2],
                         pointRadius: 0,
                         tension: 0.4
                     });
@@ -1277,7 +1318,6 @@
                         borderColor: 'rgba(54, 162, 235, 0.7)',
                         backgroundColor: 'transparent',
                         borderWidth: 1.5,
-                        borderDash: [2, 2],
                         pointRadius: 0,
                         tension: 0.4
                     });
@@ -1290,7 +1330,6 @@
                         borderColor: 'rgba(255, 206, 86, 0.7)',
                         backgroundColor: 'transparent',
                         borderWidth: 1.5,
-                        borderDash: [2, 2],
                         pointRadius: 0,
                         tension: 0.4
                     });
@@ -1303,7 +1342,6 @@
                         borderColor: 'rgba(75, 192, 192, 0.7)',
                         backgroundColor: 'transparent',
                         borderWidth: 2,
-                        borderDash: [2, 2],
                         pointRadius: 0,
                         tension: 0.4
                     });
@@ -1371,12 +1409,6 @@
             };
 
             if (data.strategies) {
-                if (strategyState.selected === 'ema_vwap_pullback_v1' && data.strategies.ema_vwap_pullback_v1) {
-                    addStrategyMarkers(data.strategies.ema_vwap_pullback_v1, 'Long entry (EMA+VWAP pullback)', '#2ecc71', 'triangle');
-                }
-                if (strategyState.selected === 'vwap_crossover_v1' && data.strategies.vwap_crossover_v1) {
-                    addStrategyMarkers(data.strategies.vwap_crossover_v1, 'Long entry (VWAP cross-over)', '#3498db', 'rectRot');
-                }
                 if (strategyState.selected === 'vwap_ema_crossover_v1' && data.strategies.vwap_ema_crossover_v1) {
                     addStrategyMarkers(data.strategies.vwap_ema_crossover_v1, 'Cross (VWAP / EMA21)', '#9b59b6', 'circle');
                 }
@@ -1386,44 +1418,13 @@
             const volumeData = data.ohlc ? data.ohlc.map(ohlc => ohlc.volume || 0) : [];
             const options = getChartOptions(interval, initialMin, initialMax, timestamps, volumeData);
             
-            // Disable tooltip
+            // Disable all tooltips to avoid confusing "Long entry" popups
             options.plugins.tooltip = options.plugins.tooltip || {};
-            options.plugins.tooltip.enabled = true;
-            options.plugins.tooltip.filter = (context) => {
-                return !!(context && context.dataset && context.dataset.strategyMarker);
-            };
-            options.plugins.tooltip.intersect = false;
-            options.plugins.tooltip.mode = 'nearest';
-            options.plugins.tooltip.callbacks = {
-                title: (items) => {
-                    const ctx = items && items[0];
-                    if (!ctx || !ctx.dataset || !ctx.dataset.strategyMeta) return 'Long entry';
-                    const meta = ctx.dataset.strategyMeta[ctx.dataIndex];
-                    if (!meta || !meta.time) return 'Long entry';
-                    try {
-                        return new Date(meta.time).toLocaleString();
-                    } catch (e) {
-                        return meta.time;
-                    }
-                },
-                label: (ctx) => {
-                    const meta = ctx.dataset.strategyMeta ? ctx.dataset.strategyMeta[ctx.dataIndex] : null;
-                    if (!meta) return 'Long entry';
-                    const fmt = (v) => (v == null || isNaN(v)) ? '—' : Number(v).toFixed(2);
-                    const label = ctx.dataset.label || 'Long entry';
-                    return [
-                        label,
-                        `Entry price: ${fmt(meta.entry_price)}`,
-                        `Close: ${fmt(meta.close)} | EMA9: ${fmt(meta.ema9)}`,
-                        `EMA21: ${fmt(meta.ema21)} | VWAP: ${fmt(meta.vwap)}`,
-                        meta.direction ? `Direction: ${meta.direction}` : null
-                    ].filter(Boolean);
-                }
-            };
+            options.plugins.tooltip.enabled = false;
             
             window.stockChart = new Chart(ctx, {
-                plugins: [marketHoursPlugin, vwapAnchorPlugin, volumeHeightLimitPlugin, priceAxisVisibilityPlugin, dateLabelPlugin, crosshairPlugin, chartBorderPlugin],
-                type: 'candlestick',
+                plugins: [customCandlestickPlugin, marketHoursPlugin, vwapAnchorPlugin, volumeHeightLimitPlugin, priceAxisVisibilityPlugin, dateLabelPlugin, crosshairPlugin, chartBorderPlugin],
+                type: 'line', // Use line chart for axis scaling, custom plugin draws candlesticks
                 data: {
                     labels: labels,
                     datasets: datasets
@@ -1462,7 +1463,7 @@
             const macdData = data.indicators_ta && data.indicators_ta.macd ? data.indicators_ta.macd.map((val, idx) => ({x: idx, y: val})) : [];
             const macdSignalData = data.indicators_ta && data.indicators_ta.macd_signal ? data.indicators_ta.macd_signal.map((val, idx) => ({x: idx, y: val})) : [];
 
-            if (indicatorVisibility.pandas.macd && (macdData.length > 0 || macdSignalData.length > 0)) {
+            if (macdData.length > 0 || macdSignalData.length > 0) {
                 if (macdData.length > 0) {
                     datasets.push({
                         label: 'MACD (pandas_ta)',
@@ -1498,7 +1499,6 @@
                 borderColor: 'rgba(120,120,120,0.4)',
                 backgroundColor: 'transparent',
                 borderWidth: 1,
-                borderDash: [4, 4],
                 pointRadius: 0,
                 tension: 0
             });
@@ -1519,7 +1519,7 @@
                         },
                         grid: {
                             drawOnChartArea: true,
-                            color: 'rgba(200,200,200,0.2)'
+                            color: 'rgba(200,200,200,0.1)'
                         }
                     },
                     x: {
@@ -1552,7 +1552,7 @@
         function renderMacdSubchart() {
             const macdContainer = document.getElementById('macdContainer');
             const macdCanvas = document.getElementById('macdChart');
-            const hasMacdData = indicatorVisibility.pandas.macd && chartData && chartData.indicators_ta && (chartData.indicators_ta.macd || chartData.indicators_ta.macd_signal);
+            const hasMacdData = chartData && chartData.indicators_ta && (chartData.indicators_ta.macd || chartData.indicators_ta.macd_signal);
             if (macdContainer && macdCanvas && hasMacdData) {
                 macdContainer.style.display = 'block';
                 const macdCtx = macdCanvas.getContext('2d');
@@ -1664,7 +1664,8 @@
                         },
                         grid: {
                             drawOnChartArea: true,
-                            drawTicks: false // Don't draw tick marks extending into chart
+                            drawTicks: false, // Don't draw tick marks extending into chart
+                            color: 'rgba(200, 200, 200, 0.2)' // Light gray grid for visibility on dark bg
                         }
                     },
                     y1: {
@@ -1673,8 +1674,8 @@
                         beginAtZero: true,
                         grace: 0, // Don't add extra space above max value
                         title: {
-                            display: true,
-                            text: 'Volume',
+                            display: false,
+                            text: '',
                             padding: {
                                 left: 0
                             }
@@ -1687,6 +1688,7 @@
                         }
                     },
                     x: {
+                        type: 'linear', // keep x-values as numeric indexes that align with data
                         title: {
                             display: true,
                             text: 'Time'
@@ -1700,8 +1702,10 @@
                             autoSkipPadding: 20,
                             maxTicksLimit: 20,
                             padding: 10,
-                            callback: function(value, index) {
-                                const tickDate = timestamps[index];
+                            callback: function(value, index, ticks) {
+                                // Use the tick's mapped value (data index) to pull the correct timestamp
+                                const dataIndex = (ticks && ticks[index] && ticks[index].value != null) ? ticks[index].value : value;
+                                const tickDate = timestamps[Math.round(dataIndex)];
                                 if (!tickDate) return '';
                                 return tickDate.toLocaleTimeString('en-US', { 
                                     hour: '2-digit', 
@@ -1709,6 +1713,9 @@
                                     hour12: true 
                                 });
                             }
+                        },
+                        grid: {
+                            color: 'rgba(200, 200, 200, 0.1)' // Light gray grid on dark bg
                         }
                     }
                 }
@@ -1812,7 +1819,7 @@
                 window.chartTimestamps = chartTimestamps;
                 window.marketHours = data.market_hours || [];
                 window.marketOpens = data.market_opens || [];
-                window.vwapData = data.indicators.vwap || [];
+                window.vwapData = (data.indicators_ta && data.indicators_ta.vwap) ? data.indicators_ta.vwap : [];
                 window.volumeData = data.ohlc ? data.ohlc.map(ohlc => ohlc.volume || 0) : [];
                 
                 // Show market hours legend
