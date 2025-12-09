@@ -10,7 +10,8 @@ except ImportError:
     ta = None
 import math
 from utils import calculate_vwap_per_trading_day, get_market_hours_info, get_market_open_times
-from strategies import compute_vwap_ema_crossover_signals, STRATEGY_REGISTRY, build_regular_mask
+from strategies import compute_vwap_ema_crossover_signals, compute_fools_paradise_signals, STRATEGY_REGISTRY, build_regular_mask
+from candlestick_analysis import compute_candlestick_bias
 
 # Optional imports for predictive analytics - won't break app if not installed
 try:
@@ -39,10 +40,14 @@ app = Flask(__name__)
 # Strategy functions are now imported from the strategies package
 
 
-def simple_backtest(df_prices, signals, fee_bp=0.0):
+def simple_backtest(df_prices, signals, fee_bp=0.0, risk_percent=0.5):
     """
-    Toy backtest: enter next bar open, exit same-bar close (shifted),
-    subtract fee basis points.
+    Backtest with 2:1 profit-to-loss ratio.
+    - Enters at next bar open after signal
+    - Stop loss: entry_price * (1 - risk_percent)
+    - Take profit: entry_price * (1 + 2 * risk_percent)
+    - Exits when stop loss or take profit is hit, or at end of data
+    - Subtracts fee basis points from returns
     """
     if df_prices is None or df_prices.empty or not signals:
         return {
@@ -53,14 +58,122 @@ def simple_backtest(df_prices, signals, fee_bp=0.0):
         }
 
     df = df_prices.copy()
-    df['long_entry'] = signals.get('long_entry', [])
-    df['entry_price'] = df['open'].shift(-1)
-    df['exit_price'] = df['close'].shift(-1)
-
-    trades = df[df['long_entry'] == True].copy()  # noqa: E712
-    trades['ret'] = (trades['exit_price'] - trades['entry_price']) / trades['entry_price']
-    trades['ret'] -= fee_bp / 10000.0
-
+    long_entry_signals = signals.get('long_entry', [])
+    directions = signals.get('direction', [None] * len(df))
+    
+    # Ensure we have OHLC data
+    if 'open' not in df.columns or 'high' not in df.columns or \
+       'low' not in df.columns or 'close' not in df.columns:
+        return {
+            "n_trades": 0,
+            "win_rate": None,
+            "avg_ret": None,
+            "median_ret": None
+        }
+    
+    # Convert risk_percent to decimal (e.g., 0.5% -> 0.005)
+    risk = risk_percent / 100.0
+    
+    trades = []
+    i = 0
+    while i < len(df):
+        # Look for entry signal
+        if i < len(long_entry_signals) and long_entry_signals[i]:
+            # Entry at next bar's open
+            if i + 1 < len(df):
+                entry_idx = i + 1
+                entry_price = df.iloc[entry_idx]['open']
+                
+                # Determine if this is a long or short position
+                direction = directions[i] if i < len(directions) else 'bullish'
+                is_long = direction == 'bullish'
+                
+                # Calculate stop loss and take profit
+                if is_long:
+                    # Long position: stop loss below, take profit above
+                    stop_loss = entry_price * (1 - risk)
+                    take_profit = entry_price * (1 + 2 * risk)
+                else:
+                    # Short position: stop loss above, take profit below
+                    stop_loss = entry_price * (1 + risk)
+                    take_profit = entry_price * (1 - 2 * risk)
+                
+                # Track position until exit
+                exit_idx = None
+                exit_price = None
+                exit_reason = None
+                
+                # Check each bar after entry for stop loss or take profit
+                for j in range(entry_idx + 1, len(df)):
+                    bar_high = df.iloc[j]['high']
+                    bar_low = df.iloc[j]['low']
+                    bar_open = df.iloc[j]['open']
+                    
+                    # Check if both could be hit in the same bar
+                    if is_long:
+                        # Long position: take profit hit when high >= target, stop loss when low <= stop
+                        hit_take_profit = bar_high >= take_profit
+                        hit_stop_loss = bar_low <= stop_loss
+                    else:
+                        # Short position: take profit hit when low <= target, stop loss when high >= stop
+                        hit_take_profit = bar_low <= take_profit
+                        hit_stop_loss = bar_high >= stop_loss
+                    
+                    if hit_take_profit and hit_stop_loss:
+                        # Both could be hit - determine which was hit first based on bar open
+                        # If open is closer to take_profit, assume take_profit hit first
+                        dist_to_tp = abs(bar_open - take_profit)
+                        dist_to_sl = abs(bar_open - stop_loss)
+                        if dist_to_tp <= dist_to_sl:
+                            exit_idx = j
+                            exit_price = take_profit
+                            exit_reason = 'take_profit'
+                            break
+                        else:
+                            exit_idx = j
+                            exit_price = stop_loss
+                            exit_reason = 'stop_loss'
+                            break
+                    elif hit_take_profit:
+                        exit_idx = j
+                        exit_price = take_profit
+                        exit_reason = 'take_profit'
+                        break
+                    elif hit_stop_loss:
+                        exit_idx = j
+                        exit_price = stop_loss
+                        exit_reason = 'stop_loss'
+                        break
+                
+                # If neither was hit, exit at last bar's close
+                if exit_idx is None:
+                    exit_idx = len(df) - 1
+                    exit_price = df.iloc[exit_idx]['close']
+                    exit_reason = 'end_of_data'
+                
+                # Calculate return (for shorts, profit when price goes down)
+                if is_long:
+                    ret = (exit_price - entry_price) / entry_price
+                else:
+                    ret = (entry_price - exit_price) / entry_price
+                ret -= fee_bp / 10000.0
+                
+                trades.append({
+                    'entry_idx': entry_idx,
+                    'exit_idx': exit_idx,
+                    'entry_price': entry_price,
+                    'exit_price': exit_price,
+                    'ret': ret,
+                    'exit_reason': exit_reason
+                })
+                
+                # Move to after exit to avoid overlapping trades
+                i = exit_idx + 1
+            else:
+                i += 1
+        else:
+            i += 1
+    
     if len(trades) == 0:
         return {
             "n_trades": 0,
@@ -68,12 +181,27 @@ def simple_backtest(df_prices, signals, fee_bp=0.0):
             "avg_ret": None,
             "median_ret": None
         }
-
+    
+    # Calculate metrics
+    returns = [t['ret'] for t in trades]
+    win_rate = sum(1 for r in returns if r > 0) / len(returns) if returns else 0.0
+    avg_ret = sum(returns) / len(returns) if returns else 0.0
+    
+    # Calculate median
+    sorted_returns = sorted(returns)
+    n = len(sorted_returns)
+    if n == 0:
+        median_ret = 0.0
+    elif n % 2 == 0:
+        median_ret = (sorted_returns[n//2 - 1] + sorted_returns[n//2]) / 2.0
+    else:
+        median_ret = sorted_returns[n//2]
+    
     return {
         "n_trades": int(len(trades)),
-        "win_rate": float((trades['ret'] > 0).mean()),
-        "avg_ret": float(trades['ret'].mean()),
-        "median_ret": float(trades['ret'].median())
+        "win_rate": float(win_rate),
+        "avg_ret": float(avg_ret),
+        "median_ret": float(median_ret)
     }
 
 # Initialize database on startup
@@ -267,9 +395,24 @@ def get_ticker_data(ticker, interval):
         signals_vwap_ema_cross = compute_vwap_ema_crossover_signals(df_strategy, rth_mask=None)
         if signals_vwap_ema_cross:
             strategy_payload['vwap_ema_crossover_v1'] = signals_vwap_ema_cross
+        
+        # Compute Fools Paradise strategy signals
+        signals_fools_paradise = compute_fools_paradise_signals(df_strategy, rth_mask=None)
+        if signals_fools_paradise:
+            strategy_payload['fools_paradise'] = signals_fools_paradise
     except Exception as e:
         # Keep strategies empty if anything fails; don't break main payload
         strategy_payload = {}
+    
+    # Compute candlestick bias overlay (educational tool, not a strategy)
+    candle_bias = []
+    try:
+        if len(ohlc) > 0:
+            df_candles = pd.DataFrame(ohlc)
+            candle_bias = compute_candlestick_bias(df_candles)
+    except Exception as e:
+        # Keep candle_bias empty if computation fails; don't break main payload
+        candle_bias = []
 
     data = {
         'labels': timestamps,
@@ -298,7 +441,8 @@ def get_ticker_data(ticker, interval):
             mo.isoformat() if isinstance(mo, datetime) else mo
             for mo in market_opens
         ],
-        'strategies': strategy_payload
+        'strategies': strategy_payload,
+        'candle_bias': candle_bias
     }
     
     return jsonify(data)
@@ -306,11 +450,12 @@ def get_ticker_data(ticker, interval):
 
 @app.route('/api/strategy/<name>/backtest', methods=['POST'])
 def run_strategy_backtest(name):
-    """Run a simple backtest for a supported strategy."""
+    """Run a backtest for a supported strategy with 2:1 profit-to-loss ratio."""
     payload = request.get_json(silent=True) or {}
     ticker = payload.get('ticker')
     interval = payload.get('interval', '1Min')
     fee_bp = float(payload.get('fee_bp', 0.0) or 0.0)
+    risk_percent = float(payload.get('risk_percent', 0.5) or 0.5)  # Default 0.5% risk
 
     # Use the strategy registry from the strategies package
     supported = STRATEGY_REGISTRY
@@ -355,12 +500,12 @@ def run_strategy_backtest(name):
     except Exception:
         df = pd.DataFrame(ohlc)
 
-    # Allow off-hours for VWAP/EMA crossover
-    if name == 'vwap_ema_crossover_v1':
+    # Allow off-hours for VWAP/EMA crossover and Fools Paradise
+    if name in ['vwap_ema_crossover_v1', 'fools_paradise']:
         signals = supported[name](df, rth_mask=None)
     else:
         signals = supported[name](df, rth_mask=regular_mask)
-    metrics = simple_backtest(df, signals, fee_bp=fee_bp)
+    metrics = simple_backtest(df, signals, fee_bp=fee_bp, risk_percent=risk_percent)
 
     return jsonify({
         'strategy': name,

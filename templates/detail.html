@@ -379,6 +379,47 @@
                             <div class="indicator-color-line" style="border-top: 3.5px solid rgba(75, 192, 192, 0.7);"></div>
                         </label>
                     </div>
+                    <div class="indicator-controls-box" style="margin-top: 8px;">
+                        <label class="indicator-label">
+                            <div class="indicator-label-row">
+                                <input type="checkbox" id="toggle-candle-bias" onchange="toggleCandleBias()">
+                                Candlestick Bias Overlay
+                            </div>
+                        </label>
+                        <div style="margin-top: 8px; display: none;" id="candle-pattern-selector">
+                            <label style="font-size: 0.8em; color: #333; margin-bottom: 4px; display: block;">Filter Pattern:</label>
+                            <select id="candle-pattern-filter" onchange="filterCandlePattern()" style="width: 100%; padding: 4px; font-size: 0.85em; border: 1px solid #ccc; border-radius: 4px; background: white;">
+                                <option value="all">All Patterns</option>
+                                <optgroup label="Single Candle">
+                                    <option value="doji_like">Doji</option>
+                                    <option value="hammer_like">Hammer</option>
+                                    <option value="shooting_star_like">Shooting Star</option>
+                                    <option value="hanging_man_like">Hanging Man</option>
+                                    <option value="strong_bullish_body">Strong Bullish Body</option>
+                                    <option value="strong_bearish_body">Strong Bearish Body</option>
+                                    <option value="weak_bullish">Weak Bullish</option>
+                                    <option value="weak_bearish">Weak Bearish</option>
+                                    <option value="neutral">Neutral</option>
+                                </optgroup>
+                                <optgroup label="Two Candle (Pair)">
+                                    <option value="bullish_engulfing">Bullish Engulfing</option>
+                                    <option value="bearish_engulfing">Bearish Engulfing</option>
+                                    <option value="tweezers_top">Tweezers Top</option>
+                                    <option value="tweezers_bottom">Tweezers Bottom</option>
+                                </optgroup>
+                                <optgroup label="Three Candle (Trio)">
+                                    <option value="morning_star">Morning Star</option>
+                                    <option value="evening_star">Evening Star</option>
+                                    <option value="three_white_soldiers">Three White Soldiers</option>
+                                    <option value="three_black_crows">Three Black Crows</option>
+                                </optgroup>
+                                <optgroup label="Fair Value Gap">
+                                    <option value="bullish_fair_value_gap">Bullish Fair Value Gap</option>
+                                    <option value="bearish_fair_value_gap">Bearish Fair Value Gap</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
                 </div>
                 <div class="strategy-controls" id="strategyControls" style="display: none;">
                     <div class="strategy-row">
@@ -386,6 +427,7 @@
                         <select id="strategySelect" class="strategy-select">
                             <option value="none">None</option>
                             <option value="vwap_ema_crossover_v1">VWAP / EMA Crossover (v1)</option>
+                            <option value="fools_paradise">Fools Paradise</option>
                         </select>
                         <button id="runBacktestBtn" class="strategy-button">Run Backtest</button>
                     </div>
@@ -489,6 +531,11 @@
                 macd: true
             }
         };
+        
+        // Candlestick bias overlay state
+        let candleBiasEnabled = false;
+        let candleBiasData = [];
+        let selectedCandlePattern = 'all'; // 'all' or specific pattern name
 
         // Strategy state
         const strategyDefinitions = {
@@ -501,7 +548,15 @@
                 params: [
                     { label: 'Rule', value: 'Mark every VWAP and EMA21 intersection' },
                     { label: 'Session', value: 'All sessions' },
-                    { label: 'Exit', value: 'Same-bar close (toy)' }
+                    { label: 'Exit', value: '2:1 Profit/Loss (0.5% risk)' }
+                ]
+            },
+            'fools_paradise': {
+                label: 'Fools Paradise',
+                params: [
+                    { label: 'Bullish', value: 'EMAs up, price > VWAP, enter on green, exit on red' },
+                    { label: 'Bearish', value: 'EMAs down, price < VWAP, enter on red, exit on green' },
+                    { label: 'Exit', value: '2:1 Profit/Loss (0.5% risk)' }
                 ]
             }
         };
@@ -521,6 +576,29 @@
             const checkbox = document.getElementById(`toggle-${source}-${indicatorName}`);
             if (!checkbox || !indicatorVisibility[source]) return;
             indicatorVisibility[source][indicatorName] = checkbox.checked;
+            updateChart();
+        }
+        
+        // Function to toggle candlestick bias overlay
+        function toggleCandleBias() {
+            const checkbox = document.getElementById('toggle-candle-bias');
+            if (!checkbox) return;
+            candleBiasEnabled = checkbox.checked;
+            
+            // Show/hide pattern selector
+            const selector = document.getElementById('candle-pattern-selector');
+            if (selector) {
+                selector.style.display = candleBiasEnabled ? 'block' : 'none';
+            }
+            
+            updateChart();
+        }
+        
+        // Function to filter candle patterns
+        function filterCandlePattern() {
+            const select = document.getElementById('candle-pattern-filter');
+            if (!select) return;
+            selectedCandlePattern = select.value;
             updateChart();
         }
 
@@ -568,7 +646,7 @@
                 </div>
             `).join('');
 
-            resultsBox.innerHTML = `<h4>Backtest (toy)</h4>${lines}`;
+            resultsBox.innerHTML = `<h4>Backtest Results</h4>${lines}`;
             resultsBox.style.display = 'block';
         }
 
@@ -601,7 +679,8 @@
                     body: JSON.stringify({
                         ticker: '{{ ticker }}',
                         interval: interval,
-                        fee_bp: 0.0
+                        fee_bp: 0.0,
+                        risk_percent: 0.5  // 0.5% risk per trade
                     })
                 });
                 const data = await resp.json();
@@ -811,20 +890,134 @@
                                 const xPixel = xAxis.getPixelForValue(openIdx);
                                 const yPixel = yAxis.getPixelForValue(vwapValue);
                                 
-                                // Draw green dot
+                                // Draw text "VWAP anchor" above the arrow
+                                ctx.font = '12px Arial';
+                                ctx.textAlign = 'center';
+                                ctx.textBaseline = 'bottom';
+                                
+                                // Measure text for background
+                                const text = 'VWAP anchor';
+                                const textMetrics = ctx.measureText(text);
+                                const textWidth = textMetrics.width;
+                                const textHeight = 14;
+                                const padding = 4;
+                                
+                                // Draw text background for readability
+                                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                                ctx.fillRect(
+                                    xPixel - textWidth / 2 - padding,
+                                    yPixel - 30 - textHeight - padding,
+                                    textWidth + padding * 2,
+                                    textHeight + padding * 2
+                                );
+                                
+                                // Draw text
+                                ctx.fillStyle = '#2ecc71'; // Green color
+                                ctx.fillText(text, xPixel, yPixel - 30);
+                                
+                                // Draw downward-pointing arrow
+                                const arrowSize = 10;
+                                const arrowY = yPixel - 15; // Position arrow below text
+                                
                                 ctx.fillStyle = '#2ecc71'; // Green color
                                 ctx.beginPath();
-                                ctx.arc(xPixel, yPixel, 6, 0, 2 * Math.PI);
+                                ctx.moveTo(xPixel, arrowY + arrowSize); // Bottom point (tip)
+                                ctx.lineTo(xPixel - arrowSize / 2, arrowY); // Top left
+                                ctx.lineTo(xPixel + arrowSize / 2, arrowY); // Top right
+                                ctx.closePath();
                                 ctx.fill();
                                 
-                                // Add a white border for visibility
+                                // Add white border to arrow for visibility
                                 ctx.strokeStyle = '#ffffff';
-                                ctx.lineWidth = 2;
+                                ctx.lineWidth = 1.5;
                                 ctx.stroke();
                             }
                         }
                     } catch (e) {
                         console.warn('Error drawing VWAP anchor:', e);
+                    }
+                });
+                
+                ctx.restore();
+            }
+        };
+        
+        // Custom plugin to draw candlestick bias markers
+        const candlestickBiasPlugin = {
+            id: 'candlestickBiasPlugin',
+            afterDatasetsDraw: (chart) => {
+                if (!candleBiasEnabled || !candleBiasData || candleBiasData.length === 0) {
+                    return;
+                }
+                
+                const ctx = chart.ctx;
+                const xAxis = chart.scales.x;
+                const yAxis = chart.scales.y;
+                const ohlcData = window.chartData ? window.chartData.ohlc : [];
+                
+                if (!ohlcData || ohlcData.length === 0) {
+                    return;
+                }
+                
+                ctx.save();
+                
+                // Clip to chart area
+                const chartArea = chart.chartArea;
+                if (chartArea) {
+                    ctx.beginPath();
+                    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+                    ctx.clip();
+                }
+                
+                // Draw bias markers for each candle
+                candleBiasData.forEach((bias, idx) => {
+                    if (!bias || idx >= ohlcData.length) return;
+                    
+                    // Filter by selected pattern
+                    if (selectedCandlePattern !== 'all' && bias.pattern !== selectedCandlePattern) {
+                        return;
+                    }
+                    
+                    const candle = ohlcData[idx];
+                    if (!candle || candle.high === null || candle.low === null) return;
+                    
+                    // Get pixel positions
+                    const xPixel = xAxis.getPixelForValue(idx);
+                    const high = candle.high;
+                    const low = candle.low;
+                    const range = high - low;
+                    
+                    // Determine marker color based on bias
+                    let markerColor = '#999'; // Default gray for neutral
+                    if (bias.bias === 'bullish') {
+                        markerColor = '#2ecc71'; // Green
+                    } else if (bias.bias === 'bearish') {
+                        markerColor = '#e74c3c'; // Red
+                    }
+                    
+                    // Position marker above candle for bullish, below for bearish, at middle for neutral
+                    let yPixel;
+                    if (bias.bias === 'bullish') {
+                        yPixel = yAxis.getPixelForValue(high + range * 0.15);
+                    } else if (bias.bias === 'bearish') {
+                        yPixel = yAxis.getPixelForValue(low - range * 0.15);
+                    } else {
+                        yPixel = yAxis.getPixelForValue((high + low) / 2);
+                    }
+                    
+                    // Only draw if within visible chart area
+                    if (xPixel >= chartArea.left && xPixel <= chartArea.right &&
+                        yPixel >= chartArea.top && yPixel <= chartArea.bottom) {
+                        // Draw colored dot
+                        ctx.fillStyle = markerColor;
+                        ctx.beginPath();
+                        ctx.arc(xPixel, yPixel, 4, 0, 2 * Math.PI);
+                        ctx.fill();
+                        
+                        // Add white border for visibility
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
                     }
                 });
                 
@@ -1123,6 +1316,58 @@
                     }
                 }
                 
+                // Show candlestick bias tooltip if enabled and data exists
+                if (candleBiasEnabled && candleBiasData && candleBiasData.length > 0 && 
+                    dataIndex >= 0 && dataIndex < candleBiasData.length) {
+                    const bias = candleBiasData[dataIndex];
+                    // Only show tooltip if pattern matches filter (or filter is 'all')
+                    if (bias && bias.pattern && 
+                        (selectedCandlePattern === 'all' || bias.pattern === selectedCandlePattern)) {
+                        // Format pattern name (replace underscores with spaces, capitalize)
+                        const patternName = bias.pattern.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        const biasText = bias.bias ? bias.bias.charAt(0).toUpperCase() + bias.bias.slice(1) : 'Neutral';
+                        const tooltipText = `${patternName} (${biasText})`;
+                        
+                        // Draw background for tooltip
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                        ctx.lineWidth = 1;
+                        
+                        ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'top';
+                        
+                        // Calculate text dimensions
+                        const padding = 8;
+                        const lineHeight = 16;
+                        const lines = [tooltipText];
+                        if (bias.explanation) {
+                            lines.push(bias.explanation);
+                        }
+                        
+                        let maxWidth = 0;
+                        lines.forEach(line => {
+                            const width = ctx.measureText(line).width;
+                            if (width > maxWidth) maxWidth = width;
+                        });
+                        
+                        const tooltipX = mouseX + 15;
+                        const tooltipY = mouseY - 10;
+                        const tooltipWidth = maxWidth + padding * 2;
+                        const tooltipHeight = lines.length * lineHeight + padding * 2;
+                        
+                        // Draw rounded rectangle background
+                        ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+                        ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+                        
+                        // Draw text
+                        ctx.fillStyle = '#fff';
+                        lines.forEach((line, idx) => {
+                            ctx.fillText(line, tooltipX + padding, tooltipY + padding + idx * lineHeight);
+                        });
+                    }
+                }
+                
                 ctx.restore();
             }
         };
@@ -1368,7 +1613,8 @@
                     const high = highs.length ? Math.max(...highs) : low;
                     const range = Math.max(high - low, Math.abs(low) * 0.0005, 0.01);
                     const yFromPayload = yOverrides[idx];
-                    const markerY = (yFromPayload != null && !isNaN(yFromPayload)) ? yFromPayload : (low + range * 0.12);
+                    // Position entry markers just below the candle with minimal spacing
+                    const markerY = (yFromPayload != null && !isNaN(yFromPayload)) ? (yFromPayload - range * 0.3) : (low - range * 0.3);
                     markers.push({ x: idx, y: markerY });
                     const dir = directions[idx];
                     const color = dir === 'bullish' ? '#2ecc71' : dir === 'bearish' ? '#e74c3c' : baseColor;
@@ -1408,9 +1654,108 @@
                 }
             };
 
+            // Function to add exit markers for strategies
+            const addStrategyExitMarkers = (strat, label, baseColor, style = 'triangle') => {
+                const longExits = strat.long_exit || [];
+                if (!longExits || longExits.length === 0) return;
+                
+                // Group markers by color/rotation for efficiency
+                const redMarkers = []; // Red triangles (exiting long positions)
+                const greenMarkers = []; // Green triangles (exiting short positions)
+                const redMeta = [];
+                const greenMeta = [];
+                const yOverrides = strat.exit_y || [];
+                const exitDirections = strat.exit_direction || [];
+                
+                longExits.forEach((flag, idx) => {
+                    if (!flag) return;
+                    const candle = data.ohlc[idx];
+                    if (!candle) return;
+                    const lows = [candle.low, candle.close, candle.open].filter(v => typeof v === 'number');
+                    const highs = [candle.high, candle.close, candle.open].filter(v => typeof v === 'number');
+                    if (lows.length === 0) return;
+                    const low = Math.min(...lows);
+                    const high = highs.length ? Math.max(...highs) : low;
+                    const range = Math.max(high - low, Math.abs(low) * 0.0005, 0.01);
+                    const yFromPayload = yOverrides[idx];
+                    // Position exit markers just above the candle with minimal spacing
+                    const markerY = (yFromPayload != null && !isNaN(yFromPayload)) ? (yFromPayload + range * 0.3) : (high + range * 0.3);
+                    
+                    const dir = exitDirections[idx];
+                    const marker = { x: idx, y: markerY };
+                    const metaItem = {
+                        candleIndex: idx,
+                        exit_price: strat.exit_price ? strat.exit_price[idx] : null,
+                        time: data.labels ? data.labels[idx] : null,
+                        close: candle.close,
+                        high: candle.high,
+                        direction: dir
+                    };
+                    
+                    // Red triangle pointing down for exiting long (bullish) positions
+                    if (dir === 'bullish') {
+                        redMarkers.push(marker);
+                        redMeta.push(metaItem);
+                    }
+                    // Green triangle pointing down for exiting short (bearish) positions
+                    else if (dir === 'bearish') {
+                        greenMarkers.push(marker);
+                        greenMeta.push(metaItem);
+                    }
+                });
+
+                // Add red exit markers (exiting long positions)
+                if (redMarkers.length > 0) {
+                    datasets.push({
+                        label: label + ' (Exit Long)',
+                        type: 'scatter',
+                        data: redMarkers,
+                        yAxisID: 'y',
+                        pointStyle: 'triangle',
+                        pointRadius: 8,
+                        pointBackgroundColor: '#e74c3c', // Red
+                        pointBorderColor: '#1b1b1b',
+                        pointBorderWidth: 1.5,
+                        pointRotation: 180, // Point down
+                        showLine: false,
+                        strategyMarker: true,
+                        strategyMeta: redMeta,
+                        order: 10001, // draw on top of entry markers
+                        clip: false
+                    });
+                }
+                
+                // Add green exit markers (exiting short positions)
+                if (greenMarkers.length > 0) {
+                    datasets.push({
+                        label: label + ' (Exit Short)',
+                        type: 'scatter',
+                        data: greenMarkers,
+                        yAxisID: 'y',
+                        pointStyle: 'triangle',
+                        pointRadius: 8,
+                        pointBackgroundColor: '#2ecc71', // Green
+                        pointBorderColor: '#1b1b1b',
+                        pointBorderWidth: 1.5,
+                        pointRotation: 180, // Point down
+                        showLine: false,
+                        strategyMarker: true,
+                        strategyMeta: greenMeta,
+                        order: 10001, // draw on top of entry markers
+                        clip: false
+                    });
+                }
+            };
+
             if (data.strategies) {
                 if (strategyState.selected === 'vwap_ema_crossover_v1' && data.strategies.vwap_ema_crossover_v1) {
                     addStrategyMarkers(data.strategies.vwap_ema_crossover_v1, 'Cross (VWAP / EMA21)', '#9b59b6', 'circle');
+                }
+                if (strategyState.selected === 'fools_paradise' && data.strategies.fools_paradise) {
+                    // Add entry markers (triangles pointing up)
+                    addStrategyMarkers(data.strategies.fools_paradise, 'Fools Paradise Entry', '#e67e22', 'triangle');
+                    // Add exit markers (triangles pointing down)
+                    addStrategyExitMarkers(data.strategies.fools_paradise, 'Fools Paradise Exit', '#e67e22', 'triangle');
                 }
             }
             
@@ -1423,7 +1768,7 @@
             options.plugins.tooltip.enabled = false;
             
             window.stockChart = new Chart(ctx, {
-                plugins: [customCandlestickPlugin, marketHoursPlugin, vwapAnchorPlugin, volumeHeightLimitPlugin, priceAxisVisibilityPlugin, dateLabelPlugin, crosshairPlugin, chartBorderPlugin],
+                plugins: [customCandlestickPlugin, marketHoursPlugin, vwapAnchorPlugin, candlestickBiasPlugin, volumeHeightLimitPlugin, priceAxisVisibilityPlugin, dateLabelPlugin, crosshairPlugin, chartBorderPlugin],
                 type: 'line', // Use line chart for axis scaling, custom plugin draws candlesticks
                 data: {
                     labels: labels,
@@ -1817,10 +2162,12 @@
                 
                 // Store timestamps, market hours, and market opens globally for plugin access
                 window.chartTimestamps = chartTimestamps;
+                window.chartData = data; // Store full chart data for plugins
                 window.marketHours = data.market_hours || [];
                 window.marketOpens = data.market_opens || [];
                 window.vwapData = (data.indicators_ta && data.indicators_ta.vwap) ? data.indicators_ta.vwap : [];
                 window.volumeData = data.ohlc ? data.ohlc.map(ohlc => ohlc.volume || 0) : [];
+                candleBiasData = data.candle_bias || [];
                 
                 // Show market hours legend
                 const legendElement = document.getElementById('marketHoursLegend');
