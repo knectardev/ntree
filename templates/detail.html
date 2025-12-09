@@ -429,6 +429,9 @@
                             <option value="vwap_ema_crossover_v1">VWAP / EMA Crossover (v1)</option>
                             <option value="fools_paradise">Fools Paradise</option>
                         </select>
+                        <select id="backtestConfigSelect" class="strategy-select" title="Backtest Configuration">
+                            <option value="">Default (risk 0.5%, RR 2.0, fee 0)</option>
+                        </select>
                         <button id="runBacktestBtn" class="strategy-button">Run Backtest</button>
                     </div>
                     <div class="strategy-card" id="strategyParams" style="display: none;"></div>
@@ -782,10 +785,13 @@
             resultsBox.style.display = 'block';
         }
 
+        const backtestConfigState = { configs: [], selectedId: '' };
+
         function updateStrategyUI() {
             const controls = document.getElementById('strategyControls');
             const select = document.getElementById('strategySelect');
             const button = document.getElementById('runBacktestBtn');
+            const cfgSelect = document.getElementById('backtestConfigSelect');
 
             if (controls) controls.style.display = 'flex';
             if (select && select.value !== strategyState.selected) {
@@ -795,8 +801,49 @@
                 button.disabled = strategyState.selected === 'none' || strategyState.running;
                 button.textContent = strategyState.running ? 'Running...' : 'Run Backtest';
             }
+            if (cfgSelect && backtestConfigState.selectedId && cfgSelect.value !== backtestConfigState.selectedId) {
+                cfgSelect.value = backtestConfigState.selectedId;
+            }
             renderStrategyParams();
             renderStrategyResults();
+        }
+
+        async function loadBacktestConfigs() {
+            try {
+                const resp = await fetch('/api/backtest-configs');
+                const data = await resp.json();
+                backtestConfigState.configs = Array.isArray(data) ? data : [];
+                const select = document.getElementById('backtestConfigSelect');
+                if (select) {
+                    const current = select.value;
+                    select.innerHTML = '<option value="">Default (risk 0.5%, RR 2.0, fee 0)</option>';
+                    backtestConfigState.configs.forEach(cfg => {
+                        const opt = document.createElement('option');
+                        opt.value = cfg.id;
+                        opt.textContent = `${cfg.name} (R:${cfg.risk_percent}% RR:${cfg.reward_multiple} Fee:${cfg.fee_bp}bp)`;
+                        select.appendChild(opt);
+                    });
+                    // Preserve selection if possible
+                    if (current && backtestConfigState.configs.find(c => String(c.id) === String(current))) {
+                        select.value = current;
+                        backtestConfigState.selectedId = current;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to load backtest configs', e);
+            }
+        }
+
+        function getSelectedBacktestParams() {
+            const cfg = backtestConfigState.configs.find(c => String(c.id) === String(backtestConfigState.selectedId));
+            if (!cfg) {
+                return { fee_bp: 0.0, risk_percent: 0.5, reward_multiple: 2.0 };
+            }
+            return {
+                fee_bp: cfg.fee_bp ?? 0.0,
+                risk_percent: cfg.risk_percent ?? 0.5,
+                reward_multiple: cfg.reward_multiple ?? 2.0
+            };
         }
 
         async function runBacktest() {
@@ -805,14 +852,16 @@
             strategyState.running = true;
             updateStrategyUI();
             try {
+                const params = getSelectedBacktestParams();
                 const resp = await fetch(`/api/strategy/${strategyState.selected}/backtest`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         ticker: '{{ ticker }}',
                         interval: interval,
-                        fee_bp: 0.0,
-                        risk_percent: 0.5  // 0.5% risk per trade
+                        fee_bp: params.fee_bp,
+                        risk_percent: params.risk_percent,
+                        reward_multiple: params.reward_multiple
                     })
                 });
                 const data = await resp.json();
@@ -842,8 +891,16 @@
             runBacktestBtn.addEventListener('click', () => runBacktest());
         }
 
+        const backtestConfigSelect = document.getElementById('backtestConfigSelect');
+        if (backtestConfigSelect) {
+            backtestConfigSelect.addEventListener('change', (e) => {
+                backtestConfigState.selectedId = e.target.value;
+            });
+        }
+
         // Initialize strategy UI once
         updateStrategyUI();
+        loadBacktestConfigs();
         
         // Function to update chart based on chart type
         function updateChart() {

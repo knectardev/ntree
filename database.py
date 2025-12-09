@@ -45,6 +45,48 @@ def init_database():
         CREATE INDEX IF NOT EXISTS idx_ticker_interval_timestamp 
         ON stock_data(ticker, interval, timestamp)
     ''')
+
+    # Table for global backtest configurations (strategy-neutral presets)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS backtest_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            risk_percent REAL NOT NULL,
+            reward_multiple REAL NOT NULL,
+            fee_bp REAL NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_bt_configs_name ON backtest_configs(name)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_bt_configs_created ON backtest_configs(created_at DESC)
+    ''')
+
+    # Table for saved/named backtests (parameters + optional metrics)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS backtests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            risk_percent REAL NOT NULL,
+            reward_multiple REAL NOT NULL,
+            fee_bp REAL NOT NULL,
+            metrics_json TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_backtests_name ON backtests(name)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_backtests_created ON backtests(created_at DESC)
+    ''')
     
     conn.commit()
     conn.close()

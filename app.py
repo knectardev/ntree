@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import alpaca_trade_api as tradeapi
 import time
 import pandas as pd
+import json
 try:
     import pandas_ta as ta
 except ImportError:
@@ -11,6 +12,7 @@ except ImportError:
 import math
 from utils import calculate_vwap_per_trading_day, get_market_hours_info, get_market_open_times
 from strategies import compute_vwap_ema_crossover_signals, compute_fools_paradise_signals, STRATEGY_REGISTRY, build_regular_mask
+from backtesting import run_backtest, RiskRewardExecutionModel
 from candlestick_analysis import compute_candlestick_bias, count_pattern_instances
 
 # Optional imports for predictive analytics - won't break app if not installed
@@ -36,173 +38,6 @@ except ImportError:
     sm = None
 
 app = Flask(__name__)
-
-# Strategy functions are now imported from the strategies package
-
-
-def simple_backtest(df_prices, signals, fee_bp=0.0, risk_percent=0.5):
-    """
-    Backtest with 2:1 profit-to-loss ratio.
-    - Enters at next bar open after signal
-    - Stop loss: entry_price * (1 - risk_percent)
-    - Take profit: entry_price * (1 + 2 * risk_percent)
-    - Exits when stop loss or take profit is hit, or at end of data
-    - Subtracts fee basis points from returns
-    """
-    if df_prices is None or df_prices.empty or not signals:
-        return {
-            "n_trades": 0,
-            "win_rate": None,
-            "avg_ret": None,
-            "median_ret": None
-        }
-
-    df = df_prices.copy()
-    long_entry_signals = signals.get('long_entry', [])
-    directions = signals.get('direction', [None] * len(df))
-    
-    # Ensure we have OHLC data
-    if 'open' not in df.columns or 'high' not in df.columns or \
-       'low' not in df.columns or 'close' not in df.columns:
-        return {
-            "n_trades": 0,
-            "win_rate": None,
-            "avg_ret": None,
-            "median_ret": None
-        }
-    
-    # Convert risk_percent to decimal (e.g., 0.5% -> 0.005)
-    risk = risk_percent / 100.0
-    
-    trades = []
-    i = 0
-    while i < len(df):
-        # Look for entry signal
-        if i < len(long_entry_signals) and long_entry_signals[i]:
-            # Entry at next bar's open
-            if i + 1 < len(df):
-                entry_idx = i + 1
-                entry_price = df.iloc[entry_idx]['open']
-                
-                # Determine if this is a long or short position
-                direction = directions[i] if i < len(directions) else 'bullish'
-                is_long = direction == 'bullish'
-                
-                # Calculate stop loss and take profit
-                if is_long:
-                    # Long position: stop loss below, take profit above
-                    stop_loss = entry_price * (1 - risk)
-                    take_profit = entry_price * (1 + 2 * risk)
-                else:
-                    # Short position: stop loss above, take profit below
-                    stop_loss = entry_price * (1 + risk)
-                    take_profit = entry_price * (1 - 2 * risk)
-                
-                # Track position until exit
-                exit_idx = None
-                exit_price = None
-                exit_reason = None
-                
-                # Check each bar after entry for stop loss or take profit
-                for j in range(entry_idx + 1, len(df)):
-                    bar_high = df.iloc[j]['high']
-                    bar_low = df.iloc[j]['low']
-                    bar_open = df.iloc[j]['open']
-                    
-                    # Check if both could be hit in the same bar
-                    if is_long:
-                        # Long position: take profit hit when high >= target, stop loss when low <= stop
-                        hit_take_profit = bar_high >= take_profit
-                        hit_stop_loss = bar_low <= stop_loss
-                    else:
-                        # Short position: take profit hit when low <= target, stop loss when high >= stop
-                        hit_take_profit = bar_low <= take_profit
-                        hit_stop_loss = bar_high >= stop_loss
-                    
-                    if hit_take_profit and hit_stop_loss:
-                        # Both could be hit - determine which was hit first based on bar open
-                        # If open is closer to take_profit, assume take_profit hit first
-                        dist_to_tp = abs(bar_open - take_profit)
-                        dist_to_sl = abs(bar_open - stop_loss)
-                        if dist_to_tp <= dist_to_sl:
-                            exit_idx = j
-                            exit_price = take_profit
-                            exit_reason = 'take_profit'
-                            break
-                        else:
-                            exit_idx = j
-                            exit_price = stop_loss
-                            exit_reason = 'stop_loss'
-                            break
-                    elif hit_take_profit:
-                        exit_idx = j
-                        exit_price = take_profit
-                        exit_reason = 'take_profit'
-                        break
-                    elif hit_stop_loss:
-                        exit_idx = j
-                        exit_price = stop_loss
-                        exit_reason = 'stop_loss'
-                        break
-                
-                # If neither was hit, exit at last bar's close
-                if exit_idx is None:
-                    exit_idx = len(df) - 1
-                    exit_price = df.iloc[exit_idx]['close']
-                    exit_reason = 'end_of_data'
-                
-                # Calculate return (for shorts, profit when price goes down)
-                if is_long:
-                    ret = (exit_price - entry_price) / entry_price
-                else:
-                    ret = (entry_price - exit_price) / entry_price
-                ret -= fee_bp / 10000.0
-                
-                trades.append({
-                    'entry_idx': entry_idx,
-                    'exit_idx': exit_idx,
-                    'entry_price': entry_price,
-                    'exit_price': exit_price,
-                    'ret': ret,
-                    'exit_reason': exit_reason
-                })
-                
-                # Move to after exit to avoid overlapping trades
-                i = exit_idx + 1
-            else:
-                i += 1
-        else:
-            i += 1
-    
-    if len(trades) == 0:
-        return {
-            "n_trades": 0,
-            "win_rate": None,
-            "avg_ret": None,
-            "median_ret": None
-        }
-    
-    # Calculate metrics
-    returns = [t['ret'] for t in trades]
-    win_rate = sum(1 for r in returns if r > 0) / len(returns) if returns else 0.0
-    avg_ret = sum(returns) / len(returns) if returns else 0.0
-    
-    # Calculate median
-    sorted_returns = sorted(returns)
-    n = len(sorted_returns)
-    if n == 0:
-        median_ret = 0.0
-    elif n % 2 == 0:
-        median_ret = (sorted_returns[n//2 - 1] + sorted_returns[n//2]) / 2.0
-    else:
-        median_ret = sorted_returns[n//2]
-    
-    return {
-        "n_trades": int(len(trades)),
-        "win_rate": float(win_rate),
-        "avg_ret": float(avg_ret),
-        "median_ret": float(median_ret)
-    }
 
 # Initialize database on startup
 init_database()
@@ -276,6 +111,84 @@ def ticker_detail(ticker):
     from flask import request
     interval = request.args.get('interval', '1Min')
     return render_template('detail.html', ticker=ticker, interval=interval)
+
+
+@app.route('/backtest-config')
+def backtest_config():
+    """Page with a form to run backtests with adjustable parameters."""
+    strategy_names = sorted(list(STRATEGY_REGISTRY.keys()))
+    intervals = ['1Min', '5Min', '15Min', '1H', '1D']
+    return render_template(
+        'backtest_config.html',
+        strategies=strategy_names,
+        intervals=intervals,
+        default_ticker='SPY'
+    )
+
+
+def perform_strategy_backtest(name, ticker, interval, fee_bp, risk_percent, reward_multiple):
+    """Shared backtest execution used by multiple endpoints."""
+    supported = STRATEGY_REGISTRY
+
+    if name not in supported:
+        raise ValueError('Unsupported strategy')
+    if not ticker:
+        raise ValueError('ticker required')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT timestamp, price, open_price, high_price, low_price, volume
+        FROM stock_data
+        WHERE ticker = ? AND interval = ?
+        ORDER BY timestamp ASC
+    ''', (ticker, interval))
+    results = cursor.fetchall()
+    conn.close()
+
+    if not results:
+        raise LookupError('no data')
+
+    timestamps = [row[0] for row in results]
+    market_hours = get_market_hours_info(timestamps)
+    regular_mask = build_regular_mask(timestamps, market_hours)
+    ohlc = [
+        {
+            'open': row[2] if row[2] is not None else row[1],
+            'high': row[3] if row[3] is not None else row[1],
+            'low': row[4] if row[4] is not None else row[1],
+            'close': row[1],
+            'volume': row[5] if row[5] is not None else 0
+        }
+        for row in results
+    ]
+
+    try:
+        df = pd.DataFrame(ohlc)
+        df.index = pd.to_datetime(timestamps)
+    except Exception:
+        df = pd.DataFrame(ohlc)
+
+    # Allow off-hours for VWAP/EMA crossover and Fools Paradise
+    if name in ['vwap_ema_crossover_v1', 'fools_paradise']:
+        signals = supported[name](df, rth_mask=None)
+    else:
+        signals = supported[name](df, rth_mask=regular_mask)
+
+    execution_model = RiskRewardExecutionModel(
+        risk_percent=risk_percent,
+        reward_multiple=reward_multiple
+    )
+    metrics = run_backtest(df, signals, fee_bp=fee_bp, execution_model=execution_model)
+
+    return {
+        'strategy': name,
+        'ticker': ticker,
+        'interval': interval,
+        'metrics': metrics,
+        'n_bars': len(df),
+        'generated_at': datetime.now(timezone.utc).isoformat()
+    }
 
 @app.route('/api/ticker/<ticker>/<interval>')
 def get_ticker_data(ticker, interval):
@@ -460,65 +373,281 @@ def run_strategy_backtest(name):
     interval = payload.get('interval', '1Min')
     fee_bp = float(payload.get('fee_bp', 0.0) or 0.0)
     risk_percent = float(payload.get('risk_percent', 0.5) or 0.5)  # Default 0.5% risk
+    reward_multiple = float(payload.get('reward_multiple', 2.0) or 2.0)  # Default 2:1
+    try:
+        result = perform_strategy_backtest(
+            name=name,
+            ticker=ticker,
+            interval=interval,
+            fee_bp=fee_bp,
+            risk_percent=risk_percent,
+            reward_multiple=reward_multiple
+        )
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except LookupError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    # Use the strategy registry from the strategies package
-    supported = STRATEGY_REGISTRY
 
-    if name not in supported:
-        return jsonify({'error': 'Unsupported strategy'}), 400
+def _row_to_backtest(row):
+    """Convert a DB row from backtests into a dict."""
+    if not row:
+        return None
+    metrics = None
+    try:
+        metrics = json.loads(row[8]) if row[8] else None
+    except Exception:
+        metrics = None
+    return {
+        'id': row[0],
+        'name': row[1],
+        'strategy': row[2],
+        'ticker': row[3],
+        'interval': row[4],
+        'risk_percent': row[5],
+        'reward_multiple': row[6],
+        'fee_bp': row[7],
+        'metrics': metrics,
+        'created_at': row[9],
+        'updated_at': row[10] if len(row) > 10 else None
+    }
 
-    if not ticker:
-        return jsonify({'error': 'ticker required'}), 400
 
+@app.route('/api/backtests', methods=['GET', 'POST'])
+def backtests():
+    """List or create named backtests (stores parameters and summary metrics)."""
+    if request.method == 'GET':
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, name, strategy, ticker, interval, risk_percent, reward_multiple, fee_bp, metrics_json, created_at, updated_at
+            FROM backtests
+            ORDER BY datetime(created_at) DESC
+            LIMIT 100
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+        return jsonify([_row_to_backtest(r) for r in rows])
+
+    # POST: create and persist a named backtest
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get('name') or '').strip()
+    strategy = payload.get('strategy')
+    ticker = payload.get('ticker')
+    interval = payload.get('interval', '1Min')
+    fee_bp = float(payload.get('fee_bp', 0.0) or 0.0)
+    risk_percent = float(payload.get('risk_percent', 0.5) or 0.5)
+    reward_multiple = float(payload.get('reward_multiple', 2.0) or 2.0)
+    run_flag = payload.get('run', True)
+    run_backtest = not (isinstance(run_flag, bool) and run_flag is False)
+
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+
+    result = {
+        'strategy': strategy,
+        'ticker': ticker,
+        'interval': interval,
+        'metrics': None,
+        'generated_at': None
+    }
+
+    if run_backtest:
+        try:
+            result = perform_strategy_backtest(
+                name=strategy,
+                ticker=ticker,
+                interval=interval,
+                fee_bp=fee_bp,
+                risk_percent=risk_percent,
+                reward_multiple=reward_multiple
+            )
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except LookupError as e:
+            return jsonify({'error': str(e)}), 404
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    # Persist the parameters and summary metrics
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    metrics_json = json.dumps(result.get('metrics', {})) if run_backtest else None
+    cursor.execute('''
+        INSERT INTO backtests (name, strategy, ticker, interval, risk_percent, reward_multiple, fee_bp, metrics_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (name, strategy, ticker, interval, risk_percent, reward_multiple, fee_bp, metrics_json, now_iso, now_iso))
+    backtest_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    result_with_id = dict(result)
+    result_with_id['id'] = backtest_id
+    result_with_id['name'] = name
+    return jsonify(result_with_id), 201
+
+
+@app.route('/api/backtests/<int:bt_id>', methods=['GET'])
+def get_backtest(bt_id):
+    """Fetch a saved backtest by id."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT timestamp, price, open_price, high_price, low_price, volume
-        FROM stock_data
-        WHERE ticker = ? AND interval = ?
-        ORDER BY timestamp ASC
-    ''', (ticker, interval))
-    results = cursor.fetchall()
+        SELECT id, name, strategy, ticker, interval, risk_percent, reward_multiple, fee_bp, metrics_json, created_at, updated_at
+        FROM backtests
+        WHERE id = ?
+    ''', (bt_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify(_row_to_backtest(row))
+
+
+@app.route('/api/backtests/<int:bt_id>/run', methods=['POST'])
+def rerun_backtest(bt_id):
+    """Re-run a saved backtest using current market data and update its metrics."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, name, strategy, ticker, interval, risk_percent, reward_multiple, fee_bp, metrics_json, created_at, updated_at
+        FROM backtests
+        WHERE id = ?
+    ''', (bt_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'not found'}), 404
+
+    bt = _row_to_backtest(row)
+    try:
+        result = perform_strategy_backtest(
+            name=bt['strategy'],
+            ticker=bt['ticker'],
+            interval=bt['interval'],
+            fee_bp=bt['fee_bp'],
+            risk_percent=bt['risk_percent'],
+            reward_multiple=bt['reward_multiple']
+        )
+    except ValueError as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+    except LookupError as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 500
+
+    # Update stored metrics
+    updated_iso = datetime.now(timezone.utc).isoformat()
+    metrics_json = json.dumps(result.get('metrics', {}))
+    cursor.execute('''
+        UPDATE backtests
+        SET metrics_json = ?, updated_at = ?
+        WHERE id = ?
+    ''', (metrics_json, updated_iso, bt_id))
+    conn.commit()
     conn.close()
 
-    if not results:
-        return jsonify({'error': 'no data'}), 404
+    result_with_id = dict(result)
+    result_with_id['id'] = bt_id
+    result_with_id['name'] = bt['name']
+    return jsonify(result_with_id)
 
-    timestamps = [row[0] for row in results]
-    market_hours = get_market_hours_info(timestamps)
-    regular_mask = build_regular_mask(timestamps, market_hours)
-    ohlc = [
-        {
-            'open': row[2] if row[2] is not None else row[1],
-            'high': row[3] if row[3] is not None else row[1],
-            'low': row[4] if row[4] is not None else row[1],
-            'close': row[1],
-            'volume': row[5] if row[5] is not None else 0
-        }
-        for row in results
-    ]
 
-    try:
-        df = pd.DataFrame(ohlc)
-        df.index = pd.to_datetime(timestamps)
-    except Exception:
-        df = pd.DataFrame(ohlc)
+@app.route('/api/backtests/<int:bt_id>', methods=['DELETE'])
+def delete_backtest(bt_id):
+    """Delete a saved backtest."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM backtests WHERE id = ?', (bt_id,))
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    if deleted == 0:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'deleted': bt_id})
 
-    # Allow off-hours for VWAP/EMA crossover and Fools Paradise
-    if name in ['vwap_ema_crossover_v1', 'fools_paradise']:
-        signals = supported[name](df, rth_mask=None)
-    else:
-        signals = supported[name](df, rth_mask=regular_mask)
-    metrics = simple_backtest(df, signals, fee_bp=fee_bp, risk_percent=risk_percent)
+
+def _row_to_backtest_config(row):
+    """Convert a DB row from backtest_configs into a dict."""
+    if not row:
+        return None
+    return {
+        'id': row[0],
+        'name': row[1],
+        'risk_percent': row[2],
+        'reward_multiple': row[3],
+        'fee_bp': row[4],
+        'created_at': row[5],
+        'updated_at': row[6] if len(row) > 6 else None
+    }
+
+
+@app.route('/api/backtest-configs', methods=['GET', 'POST'])
+def backtest_configs():
+    """List or create global backtest configurations (strategy-neutral presets)."""
+    if request.method == 'GET':
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, name, risk_percent, reward_multiple, fee_bp, created_at, updated_at
+            FROM backtest_configs
+            ORDER BY datetime(created_at) DESC
+            LIMIT 100
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+        return jsonify([_row_to_backtest_config(r) for r in rows])
+
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get('name') or '').strip()
+    risk_percent = float(payload.get('risk_percent', 0.5) or 0.5)
+    reward_multiple = float(payload.get('reward_multiple', 2.0) or 2.0)
+    fee_bp = float(payload.get('fee_bp', 0.0) or 0.0)
+
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cursor.execute('''
+        INSERT INTO backtest_configs (name, risk_percent, reward_multiple, fee_bp, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (name, risk_percent, reward_multiple, fee_bp, now_iso, now_iso))
+    cfg_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
 
     return jsonify({
-        'strategy': name,
-        'ticker': ticker,
-        'interval': interval,
-        'metrics': metrics,
-        'n_bars': len(df),
-        'generated_at': datetime.now(timezone.utc).isoformat()
-    })
+        'id': cfg_id,
+        'name': name,
+        'risk_percent': risk_percent,
+        'reward_multiple': reward_multiple,
+        'fee_bp': fee_bp,
+        'created_at': now_iso,
+        'updated_at': now_iso
+    }), 201
+
+
+@app.route('/api/backtest-configs/<int:cfg_id>', methods=['DELETE'])
+def delete_backtest_config(cfg_id):
+    """Delete a global backtest configuration."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM backtest_configs WHERE id = ?', (cfg_id,))
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    if deleted == 0:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'deleted': cfg_id})
 
 @app.route('/api/fetch-latest', methods=['POST'])
 def fetch_latest_data():
