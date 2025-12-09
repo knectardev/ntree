@@ -536,6 +536,138 @@
         let candleBiasEnabled = false;
         let candleBiasData = [];
         let selectedCandlePattern = 'all'; // 'all' or specific pattern name
+        let patternCounts = {}; // Store pattern counts from backend
+        
+        // Pattern display names mapping
+        const patternDisplayNames = {
+            'doji_like': 'Doji',
+            'hammer_like': 'Hammer',
+            'shooting_star_like': 'Shooting Star',
+            'hanging_man_like': 'Hanging Man',
+            'strong_bullish_body': 'Strong Bullish Body',
+            'strong_bearish_body': 'Strong Bearish Body',
+            'weak_bullish': 'Weak Bullish',
+            'weak_bearish': 'Weak Bearish',
+            'neutral': 'Neutral',
+            'bullish_engulfing': 'Bullish Engulfing',
+            'bearish_engulfing': 'Bearish Engulfing',
+            'tweezers_top': 'Tweezers Top',
+            'tweezers_bottom': 'Tweezers Bottom',
+            'morning_star': 'Morning Star',
+            'evening_star': 'Evening Star',
+            'three_white_soldiers': 'Three White Soldiers',
+            'three_black_crows': 'Three Black Crows',
+            'bullish_fair_value_gap': 'Bullish Fair Value Gap',
+            'bearish_fair_value_gap': 'Bearish Fair Value Gap'
+        };
+        
+        // Helper function to calculate color based on count (conditional formatting)
+        // Returns RGB color string interpolated from white (0) to medium green (max)
+        function getCountColor(count, maxCount) {
+            if (maxCount === 0 || count === 0) {
+                return 'rgb(255, 255, 255)'; // White for zero
+            }
+            
+            // Calculate ratio (0 to 1)
+            const ratio = count / maxCount;
+            
+            // Color range: white (255, 255, 255) to medium green (76, 175, 80)
+            const whiteR = 255, whiteG = 255, whiteB = 255;
+            const greenR = 76, greenG = 175, greenB = 80;
+            
+            // Interpolate between white and green
+            const r = Math.round(whiteR + (greenR - whiteR) * ratio);
+            const g = Math.round(whiteG + (greenG - whiteG) * ratio);
+            const b = Math.round(whiteB + (greenB - whiteB) * ratio);
+            
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+        
+        // Function to update pattern dropdown with counts
+        function updatePatternDropdown() {
+            const select = document.getElementById('candle-pattern-filter');
+            if (!select) return;
+            
+            // Store current selection
+            const currentValue = select.value;
+            
+            // Find maximum count across all patterns for conditional formatting
+            const allPatterns = [
+                'doji_like', 'hammer_like', 'shooting_star_like', 'hanging_man_like',
+                'strong_bullish_body', 'strong_bearish_body', 'weak_bullish', 'weak_bearish', 'neutral',
+                'bullish_engulfing', 'bearish_engulfing', 'tweezers_top', 'tweezers_bottom',
+                'morning_star', 'evening_star', 'three_white_soldiers', 'three_black_crows',
+                'bullish_fair_value_gap', 'bearish_fair_value_gap'
+            ];
+            const maxCount = Math.max(...allPatterns.map(p => patternCounts[p] || 0), 0);
+            
+            // Clear existing options except "All Patterns"
+            select.innerHTML = '<option value="all">All Patterns</option>';
+            
+            // Helper function to create option with conditional formatting
+            function createOptionWithColor(pattern) {
+                const option = document.createElement('option');
+                option.value = pattern;
+                const count = patternCounts[pattern] || 0;
+                option.textContent = `${patternDisplayNames[pattern]} (${count})`;
+                
+                // Apply conditional formatting background color
+                const bgColor = getCountColor(count, maxCount);
+                option.style.backgroundColor = bgColor;
+                
+                return option;
+            }
+            
+            // Add Single Candle patterns
+            const singleGroup = document.createElement('optgroup');
+            singleGroup.label = 'Single Candle';
+            const singlePatterns = [
+                'doji_like', 'hammer_like', 'shooting_star_like', 'hanging_man_like',
+                'strong_bullish_body', 'strong_bearish_body', 'weak_bullish', 'weak_bearish', 'neutral'
+            ];
+            singlePatterns.forEach(pattern => {
+                singleGroup.appendChild(createOptionWithColor(pattern));
+            });
+            select.appendChild(singleGroup);
+            
+            // Add Two Candle (Pair) patterns
+            const pairGroup = document.createElement('optgroup');
+            pairGroup.label = 'Two Candle (Pair)';
+            const pairPatterns = [
+                'bullish_engulfing', 'bearish_engulfing', 'tweezers_top', 'tweezers_bottom'
+            ];
+            pairPatterns.forEach(pattern => {
+                pairGroup.appendChild(createOptionWithColor(pattern));
+            });
+            select.appendChild(pairGroup);
+            
+            // Add Three Candle (Trio) patterns
+            const trioGroup = document.createElement('optgroup');
+            trioGroup.label = 'Three Candle (Trio)';
+            const trioPatterns = [
+                'morning_star', 'evening_star', 'three_white_soldiers', 'three_black_crows'
+            ];
+            trioPatterns.forEach(pattern => {
+                trioGroup.appendChild(createOptionWithColor(pattern));
+            });
+            select.appendChild(trioGroup);
+            
+            // Add Fair Value Gap patterns
+            const fvgGroup = document.createElement('optgroup');
+            fvgGroup.label = 'Fair Value Gap';
+            const fvgPatterns = [
+                'bullish_fair_value_gap', 'bearish_fair_value_gap'
+            ];
+            fvgPatterns.forEach(pattern => {
+                fvgGroup.appendChild(createOptionWithColor(pattern));
+            });
+            select.appendChild(fvgGroup);
+            
+            // Restore previous selection if it still exists
+            if (currentValue) {
+                select.value = currentValue;
+            }
+        }
 
         // Strategy state
         const strategyDefinitions = {
@@ -2168,6 +2300,8 @@
                 window.vwapData = (data.indicators_ta && data.indicators_ta.vwap) ? data.indicators_ta.vwap : [];
                 window.volumeData = data.ohlc ? data.ohlc.map(ohlc => ohlc.volume || 0) : [];
                 candleBiasData = data.candle_bias || [];
+                patternCounts = data.pattern_counts || {};
+                updatePatternDropdown(); // Update dropdown with counts
                 
                 // Show market hours legend
                 const legendElement = document.getElementById('marketHoursLegend');

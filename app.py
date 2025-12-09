@@ -11,7 +11,7 @@ except ImportError:
 import math
 from utils import calculate_vwap_per_trading_day, get_market_hours_info, get_market_open_times
 from strategies import compute_vwap_ema_crossover_signals, compute_fools_paradise_signals, STRATEGY_REGISTRY, build_regular_mask
-from candlestick_analysis import compute_candlestick_bias
+from candlestick_analysis import compute_candlestick_bias, count_pattern_instances
 
 # Optional imports for predictive analytics - won't break app if not installed
 try:
@@ -406,13 +406,16 @@ def get_ticker_data(ticker, interval):
     
     # Compute candlestick bias overlay (educational tool, not a strategy)
     candle_bias = []
+    pattern_counts = {}
     try:
         if len(ohlc) > 0:
             df_candles = pd.DataFrame(ohlc)
             candle_bias = compute_candlestick_bias(df_candles)
+            pattern_counts = count_pattern_instances(candle_bias)
     except Exception as e:
         # Keep candle_bias empty if computation fails; don't break main payload
         candle_bias = []
+        pattern_counts = {}
 
     data = {
         'labels': timestamps,
@@ -442,7 +445,8 @@ def get_ticker_data(ticker, interval):
             for mo in market_opens
         ],
         'strategies': strategy_payload,
-        'candle_bias': candle_bias
+        'candle_bias': candle_bias,
+        'pattern_counts': pattern_counts
     }
     
     return jsonify(data)

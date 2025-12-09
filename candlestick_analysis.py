@@ -761,3 +761,23 @@ def compute_candlestick_bias(df):
         results.append(single_result)
     
     return results
+
+
+def count_pattern_instances(candle_bias_results):
+    """
+    Count the number of instances for each pattern type in the candlestick bias results.
+    
+    Args:
+        candle_bias_results: List of dicts from compute_candlestick_bias, each with a 'pattern' key
+        
+    Returns:
+        dict mapping pattern names to counts
+    """
+    pattern_counts = {}
+    
+    for result in candle_bias_results:
+        if result and 'pattern' in result:
+            pattern = result['pattern']
+            pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
+    
+    return pattern_counts
