@@ -45,9 +45,22 @@
             cursor: not-allowed;
         }
         .row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: flex-start;
+            align-items: center;
+            max-width: 500px;
+        }
+
+        .row > div {
+            flex: 0 0 auto;
+        }
+
+        .row input,
+        .row select {
+            width: 140px;
+            max-width: 140px;
         }
         .results {
             margin-top: 16px;
@@ -62,9 +75,30 @@
             margin-top: 8px;
             font-weight: 600;
         }
+
+        .global-nav {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 1000;
+        }
+        .global-nav select {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            background: #0b1220;
+            color: #e2e8f0;
+        }
     </style>
 </head>
 <body>
+    <div class="global-nav">
+        <select id="globalNavSelect">
+            <option value="/">Dashboard</option>
+            <option value="/backtest-config">Backtest Configurations</option>
+            <option value="/package-proof-of-concept">Package POC</option>
+        </select>
+    </div>
     <h1>Backtest Configuration</h1>
     <p>Define strategy-neutral backtest parameters to reuse elsewhere.</p>
 
@@ -248,6 +282,18 @@
 
         // Initial load
         fetchSaved();
+
+        (function setupGlobalNav() {
+            const nav = document.getElementById('globalNavSelect');
+            if (!nav) return;
+            const path = window.location.pathname || '/';
+            if (path.startsWith('/backtest-config')) nav.value = '/backtest-config';
+            else if (path.startsWith('/package-proof-of-concept')) nav.value = '/package-proof-of-concept';
+            else nav.value = '/';
+            nav.addEventListener('change', (e) => {
+                if (e.target.value) window.location.href = e.target.value;
+            });
+        })();
     </script>
 </body>
 </html>

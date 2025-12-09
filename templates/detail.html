@@ -194,6 +194,20 @@
             background-color: rgba(149, 165, 166, 0.1);
             border-color: rgba(149, 165, 166, 0.2);
         }
+
+        .global-nav {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 2000;
+        }
+        .global-nav select {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            background: #0b1220;
+            color: #e2e8f0;
+        }
         
         .indicator-controls {
             position: absolute;
@@ -333,6 +347,13 @@
     </style>
 </head>
 <body>
+    <div class="global-nav">
+        <select id="globalNavSelect">
+            <option value="/">Dashboard</option>
+            <option value="/backtest-config">Backtest Configurations</option>
+            <option value="/package-proof-of-concept">Package POC</option>
+        </select>
+    </div>
     <div class="container">
         <div class="header">
             <h1>{{ ticker }} - Stock Detail</h1>
@@ -897,6 +918,18 @@
                 backtestConfigState.selectedId = e.target.value;
             });
         }
+
+        (function setupGlobalNav() {
+            const nav = document.getElementById('globalNavSelect');
+            if (!nav) return;
+            const path = window.location.pathname || '/';
+            if (path.startsWith('/backtest-config')) nav.value = '/backtest-config';
+            else if (path.startsWith('/package-proof-of-concept')) nav.value = '/package-proof-of-concept';
+            else nav.value = '/';
+            nav.addEventListener('change', (e) => {
+                if (e.target.value) window.location.href = e.target.value;
+            });
+        })();
 
         // Initialize strategy UI once
         updateStrategyUI();

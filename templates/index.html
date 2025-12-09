@@ -170,9 +170,30 @@
             color: #3498db;
             border: 1px solid rgba(52, 152, 219, 0.3);
         }
+
+        .global-nav {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 1000;
+        }
+        .global-nav select {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            background: #0b1220;
+            color: #e2e8f0;
+        }
     </style>
 </head>
 <body>
+    <div class="global-nav">
+        <select id="globalNavSelect">
+            <option value="/">Dashboard</option>
+            <option value="/backtest-config">Backtest Configurations</option>
+            <option value="/package-proof-of-concept">Package POC</option>
+        </select>
+    </div>
     <div class="container">
         <div class="header-section">
             <h1 style="margin: 0;">Stock Ticker Dashboard</h1>
@@ -267,6 +288,19 @@
                 btn.textContent = 'Fetch Latest Data';
             });
         }
+    </script>
+    <script>
+        (function setupGlobalNav() {
+            const nav = document.getElementById('globalNavSelect');
+            if (!nav) return;
+            const path = window.location.pathname || '/';
+            if (path.startsWith('/backtest-config')) nav.value = '/backtest-config';
+            else if (path.startsWith('/package-proof-of-concept')) nav.value = '/package-proof-of-concept';
+            else nav.value = '/';
+            nav.addEventListener('change', (e) => {
+                if (e.target.value) window.location.href = e.target.value;
+            });
+        })();
     </script>
 </body>
 </html>
