@@ -114,6 +114,19 @@
             overflow: visible; /* Allow labels to be visible */
             box-sizing: border-box;
         }
+
+        .l2-notice {
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            padding: 6px 10px;
+            font-size: 12px;
+            background: rgba(255,255,255,0.12);
+            color: #eee;
+            border-radius: 4px;
+            z-index: 10;
+            display: none;
+        }
         
         canvas {
             max-height: 700px;
@@ -347,6 +360,13 @@
     </style>
 </head>
 <body>
+    <div id="chart-root"
+         data-symbol="{{ ticker }}"
+         data-interval="{{ interval }}"
+         data-timeframe="{{ timeframe|default(interval) }}"
+         data-is-synthetic="{{ 'true' if is_synthetic else 'false' }}"
+         data-scenario="{{ scenario or '' }}">
+    </div>
     <div class="global-nav">
         <select id="globalNavSelect">
             <option value="/">Dashboard</option>
@@ -362,8 +382,13 @@
         
         <div class="chart-container">
             <div class="interval-selector">
+                {% if is_synthetic %}
+                <a href="/synthetic/{{ ticker }}?scenario={{ scenario }}&timeframe=1m" class="interval-link" id="link-1min">1 Minute View</a>
+                <a href="/synthetic/{{ ticker }}?scenario={{ scenario }}&timeframe=5m" class="interval-link" id="link-5min">5 Minute View</a>
+                {% else %}
                 <a href="/ticker/{{ ticker }}?interval=1Min" class="interval-link" id="link-1min">1 Minute View</a>
                 <a href="/ticker/{{ ticker }}?interval=5Min" class="interval-link" id="link-5min">5 Minute View</a>
+                {% endif %}
             </div>
             
             <div id="loading" class="loading">Loading chart data...</div>
@@ -407,6 +432,15 @@
                                 Candlestick Bias Overlay
                             </div>
                         </label>
+                        {% if is_synthetic %}
+                        <label class="indicator-label">
+                            <div class="indicator-label-row">
+                                <input type="checkbox" id="toggle-l2-dbi">
+                                L2 Depth Imbalance
+                            </div>
+                            <div class="indicator-color-line" style="border-top: 2px solid rgba(255,255,255,0.7);"></div>
+                        </label>
+                        {% endif %}
                         <div style="margin-top: 8px; display: none;" id="candle-pattern-selector">
                             <label style="font-size: 0.8em; color: #333; margin-bottom: 4px; display: block;">Filter Pattern:</label>
                             <select id="candle-pattern-filter" onchange="filterCandlePattern()" style="width: 100%; padding: 4px; font-size: 0.85em; border: 1px solid #ccc; border-radius: 4px; background: white;">
@@ -538,6 +572,18 @@
         // Get interval from template variable or URL parameter, default to 1Min
         const urlParams = new URLSearchParams(window.location.search);
         const interval = urlParams.get('interval') || '{{ interval }}' || '1Min';
+
+        const chartRootEl = document.getElementById('chart-root');
+        const isSyntheticDataset = chartRootEl?.dataset.isSynthetic === 'true';
+        const syntheticSymbol = chartRootEl?.dataset.symbol || '{{ ticker }}';
+        const syntheticScenario = chartRootEl?.dataset.scenario || '';
+        const syntheticTimeframe = chartRootEl?.dataset.timeframe || intervalToTimeframe(interval);
+
+        const l2Cache = new Map(); // key: symbol|scenario|timeframe
+        const L2_DBI_DATASET_ID = 'l2-dbi';
+        let l2DbiEnabled = false;
+        let latestL2Data = null;
+
         let chartType = 'candlestick'; // Only candlestick charts
         let chartData = null;
         let chartTimestamps = null;
@@ -758,6 +804,153 @@
             updateChart();
         }
 
+        function makeL2CacheKey(symbol, scenario, timeframe) {
+            return `${symbol}|${scenario}|${timeframe}`;
+        }
+
+        function showL2Notice(message) {
+            const root = document.getElementById('chartWrapper') || document.getElementById('chart-root');
+            if (!root) return;
+
+            let el = root.querySelector('.l2-notice');
+            if (!el) {
+                el = document.createElement('div');
+                el.className = 'l2-notice';
+                root.appendChild(el);
+            }
+
+            el.textContent = message;
+            el.style.display = 'block';
+
+            clearTimeout(el._hideTimer);
+            el._hideTimer = setTimeout(() => {
+                el.style.display = 'none';
+            }, 4000);
+        }
+
+        function removeL2DbiDataset(chart, skipUpdate = false) {
+            if (!chart || !chart.data || !Array.isArray(chart.data.datasets)) return;
+            const before = chart.data.datasets.length;
+            chart.data.datasets = chart.data.datasets.filter(ds => ds.id !== L2_DBI_DATASET_ID);
+            if (!skipUpdate && before !== chart.data.datasets.length) {
+                chart.update();
+            }
+        }
+
+        function addL2DbiDataset(chart, l2Rows) {
+            if (!chart || !window.chartData || !Array.isArray(l2Rows)) return;
+
+            const labels = window.chartData.labels || [];
+            const tsToIndex = new Map();
+            labels.forEach((ts, idx) => tsToIndex.set(ts, idx));
+
+            const data = l2Rows
+                .filter(row => row && row.ts_start && row.dbi != null)
+                .map((row, idx) => {
+                    let x = tsToIndex.has(row.ts_start) ? tsToIndex.get(row.ts_start) : idx;
+                    let y = (row.dbi - 0.5) * 2; // normalize so 0.5 -> 0
+                    if (y > 2) y = 2;
+                    if (y < -2) y = -2;
+                    return { x, y };
+                });
+
+            if (!data.length) {
+                showL2Notice('L2 overlay has no usable DBI values.');
+                return;
+            }
+
+            // Add secondary axis without replacing existing scales
+            const scales = chart.options.scales || (chart.options.scales = {});
+            if (!scales.yL2) {
+                scales.yL2 = {
+                    type: 'linear',
+                    position: 'right',
+                    display: true,
+                    grid: { display: false },
+                    ticks: { callback: value => value.toFixed(1) },
+                    title: { display: true, text: 'DBI (−1 to +1)' },
+                    suggestedMin: -1,
+                    suggestedMax: 1
+                };
+            }
+
+            removeL2DbiDataset(chart, true);
+
+            chart.data.datasets.push({
+                id: L2_DBI_DATASET_ID,
+                label: 'L2 Depth Imbalance',
+                type: 'line',
+                data,
+                yAxisID: 'yL2',
+                xAxisID: 'x',
+                parsing: false,
+                borderColor: 'rgba(255,255,255,0.65)',
+                borderWidth: 1,
+                pointRadius: 0,
+                tension: 0.15,
+                order: 10
+            });
+
+            chart.update();
+        }
+
+        function setupL2OverlayToggle(symbol, scenario, timeframe) {
+            const checkbox = document.getElementById('toggle-l2-dbi');
+            if (!checkbox) return;
+
+            checkbox.addEventListener('change', async () => {
+                if (!window.stockChart) {
+                    checkbox.checked = false;
+                    return;
+                }
+
+                if (checkbox.checked) {
+                    try {
+                        const key = makeL2CacheKey(symbol, scenario, timeframe);
+                        let data = l2Cache.get(key);
+
+                        if (!data) {
+                            const params = new URLSearchParams({ symbol, scenario, timeframe });
+                            const res = await fetch(`/api/synthetic_l2?${params.toString()}`);
+                            if (!res.ok) {
+                                console.error('Failed to load L2 data', await res.text());
+                                showL2Notice('Could not load L2 overlay.');
+                                checkbox.checked = false;
+                                return;
+                            }
+                            data = await res.json();
+                            l2Cache.set(key, data);
+                        }
+
+                        latestL2Data = data;
+                        l2DbiEnabled = true;
+
+                        if (!data || !data.length) {
+                            l2DbiEnabled = false;
+                            latestL2Data = null;
+                            showL2Notice('No L2 data available for this dataset.');
+                            checkbox.checked = false;
+                            removeL2DbiDataset(window.stockChart);
+                            return;
+                        }
+
+                        addL2DbiDataset(window.stockChart, data);
+                    } catch (err) {
+                        console.error('Error loading L2 overlay', err);
+                        showL2Notice('Error loading L2 overlay.');
+                        l2DbiEnabled = false;
+                        latestL2Data = null;
+                        checkbox.checked = false;
+                        removeL2DbiDataset(window.stockChart);
+                    }
+                } else {
+                    l2DbiEnabled = false;
+                    latestL2Data = null;
+                    removeL2DbiDataset(window.stockChart);
+                }
+            });
+        }
+
         // Strategy UI helpers
         function renderStrategyParams() {
             const paramsBox = document.getElementById('strategyParams');
@@ -966,6 +1159,10 @@
             createCandlestickChart(ctx, chartData, chartTimestamps, interval, initialMin, initialMax);
 
             renderMacdSubchart();
+
+            if (isSyntheticDataset && l2DbiEnabled && latestL2Data && window.stockChart) {
+                addL2DbiDataset(window.stockChart, latestL2Data);
+            }
         }
         
         
@@ -2289,10 +2486,72 @@
             };
         }
         
+        // Helpers for synthetic data
+        function mapSyntheticBarsToChartData(bars) {
+            const labels = bars.map(b => b.ts_start);
+            const prices = bars.map(b => b.close);
+            const ohlc = bars.map(b => ({
+                open: b.open,
+                high: b.high,
+                low: b.low,
+                close: b.close,
+                volume: b.volume || 0
+            }));
+            const n = bars.length;
+            const empty = Array(n).fill(null);
+            return {
+                labels,
+                prices,
+                ohlc,
+                indicators: {},
+                indicators_ta: {
+                    ema_9: empty,
+                    ema_21: empty,
+                    ema_50: empty,
+                    vwap: empty,
+                    macd: empty,
+                    macd_signal: empty
+                },
+                market_hours: [],
+                market_opens: [],
+                strategies: {},
+                candle_bias: [],
+                pattern_counts: {}
+            };
+        }
+
+        function intervalToTimeframe(interval) {
+            const map = {
+                '1Min': '1m',
+                '5Min': '5m',
+                '15Min': '15m'
+            };
+            return map[interval] || interval.toLowerCase();
+        }
+
+        function buildApiUrl() {
+            const intervalFromRoot = chartRootEl?.dataset.interval || interval;
+            const timeframe = chartRootEl?.dataset.timeframe || intervalToTimeframe(intervalFromRoot);
+
+            if (isSyntheticDataset) {
+                const params = new URLSearchParams({
+                    symbol: syntheticSymbol,
+                    scenario: syntheticScenario,
+                    timeframe,
+                    limit: 3000
+                });
+                return { url: `/api/synthetic_bars?${params.toString()}`, isSynthetic: true };
+            }
+            return { url: `/api/ticker/${syntheticSymbol}/${intervalFromRoot}`, isSynthetic: false };
+        }
+
+        const apiInfo = buildApiUrl();
+
         // Fetch data and render chart
-        fetch(`/api/ticker/{{ ticker }}/${interval}`)
+        fetch(apiInfo.url)
             .then(response => response.json())
-            .then(data => {
+            .then(raw => {
+                const data = apiInfo.isSynthetic ? mapSyntheticBarsToChartData(raw) : raw;
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('chartWrapper').style.display = 'block';
                 document.getElementById('chartControls').style.display = 'block';
@@ -2402,6 +2661,10 @@
                 // Create initial candlestick chart (canvas dimensions already set above)
                 createCandlestickChart(ctx, chartData, chartTimestamps, interval, initialMin, initialMax);
                 renderMacdSubchart();
+
+                if (apiInfo.isSynthetic && syntheticScenario) {
+                    setupL2OverlayToggle(syntheticSymbol, syntheticScenario, syntheticTimeframe);
+                }
                 
                 // Force chart to resize multiple times to ensure it uses full width
                 const forceResize = () => {

@@ -1,10 +1,11 @@
 from flask import Flask, render_template, jsonify, request
-from database import get_db_connection, init_database
+from database import get_db_connection, init_database, get_synthetic_datasets
 from datetime import datetime, timedelta, timezone
 import alpaca_trade_api as tradeapi
 import time
 import pandas as pd
 import json
+from typing import Optional
 try:
     import pandas_ta as ta
 except ImportError:
@@ -41,6 +42,33 @@ app = Flask(__name__)
 
 # Initialize database on startup
 init_database()
+
+VALID_SYNTH_TIMEFRAMES = {"1m", "5m", "15m"}
+SYNTH_DEFAULT_LIMIT = 1000
+SYNTH_MAX_LIMIT = 5000
+
+
+def _bad_request(code: str, message: str, **extra):
+    payload = {"error": {"code": code, "message": message}}
+    if extra:
+        payload["error"].update(extra)
+    return jsonify(payload), 400
+
+
+def _parse_iso_ts(value: str) -> Optional[str]:
+    """Parse an ISO timestamp to UTC ISO string with Z, or return None on failure."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+
+    return parsed.isoformat().replace("+00:00", "Z")
+
 
 @app.route('/')
 def index():
@@ -105,12 +133,210 @@ def index():
     
     return render_template('index.html', tickers=tickers_data, date_range=date_range)
 
+@app.route("/api/synthetic_datasets")
+def api_synthetic_datasets():
+    """List available synthetic datasets (symbol/scenario/timeframe groups)."""
+    datasets = get_synthetic_datasets()
+    return jsonify(datasets)
+
+
+@app.route("/api/synthetic_bars")
+def api_synthetic_bars():
+    """Fetch synthetic OHLCV bars with validation, optional time bounds, and limits."""
+    symbol = request.args.get("symbol")
+    scenario = request.args.get("scenario")
+    timeframe = request.args.get("timeframe", "1m")
+
+    if not symbol or not scenario:
+        return _bad_request("missing_params", "symbol and scenario are required")
+
+    if timeframe not in VALID_SYNTH_TIMEFRAMES:
+        return _bad_request(
+            "invalid_timeframe",
+            "timeframe is not allowed",
+            allowed=sorted(VALID_SYNTH_TIMEFRAMES),
+        )
+
+    start_raw = request.args.get("start_ts")
+    end_raw = request.args.get("end_ts")
+    limit = request.args.get("limit", type=int) or SYNTH_DEFAULT_LIMIT
+    limit = max(1, min(SYNTH_MAX_LIMIT, limit))
+
+    start_ts = _parse_iso_ts(start_raw) if start_raw else None
+    end_ts = _parse_iso_ts(end_raw) if end_raw else None
+
+    if start_raw and not start_ts:
+        return _bad_request("invalid_start_ts", "start_ts must be ISO-8601 (e.g. 2025-01-01T09:30:00Z)")
+    if end_raw and not end_ts:
+        return _bad_request("invalid_end_ts", "end_ts must be ISO-8601 (e.g. 2025-01-01T16:00:00Z)")
+    if start_ts and end_ts and start_ts > end_ts:
+        return _bad_request("invalid_range", "start_ts must be <= end_ts")
+
+    where_clauses = [
+        "symbol = ?",
+        "scenario = ?",
+        "timeframe = ?",
+    ]
+    params = [symbol, scenario, timeframe]
+
+    if start_ts:
+        where_clauses.append("ts_start >= ?")
+        params.append(start_ts)
+    if end_ts:
+        where_clauses.append("ts_start <= ?")
+        params.append(end_ts)
+
+    where_sql = " AND ".join(where_clauses)
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT ts_start, open, high, low, close, volume
+            FROM bars_synth
+            WHERE {where_sql}
+            ORDER BY ts_start ASC
+            LIMIT ?
+            """,
+            (*params, limit),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    bars = [
+        {
+            "ts_start": ts,
+            "open": o,
+            "high": h,
+            "low": l,
+            "close": c,
+            "volume": v,
+        }
+        for (ts, o, h, l, c, v) in rows
+    ]
+    return jsonify(bars)
+
+
+@app.route("/api/synthetic_l2")
+def api_synthetic_l2():
+    """Depth imbalance + related L2 fields aligned to synthetic bars."""
+    symbol = request.args.get("symbol")
+    scenario = request.args.get("scenario")
+    timeframe = request.args.get("timeframe", "1m")
+
+    if not symbol or not scenario:
+        return _bad_request(
+            "missing_params",
+            "symbol and scenario are required",
+            fields=["symbol", "scenario"],
+        )
+
+    if timeframe not in VALID_SYNTH_TIMEFRAMES:
+        return _bad_request(
+            "invalid_timeframe",
+            "timeframe is not allowed",
+            allowed=sorted(VALID_SYNTH_TIMEFRAMES),
+        )
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                b.ts_start,
+                l.dbi,
+                l.ofi,
+                l.spr,
+                l.microprice
+            FROM bars_synth b
+            LEFT JOIN l2_state l
+                ON l.bar_id = b.id
+            WHERE b.symbol = ?
+              AND b.scenario = ?
+              AND b.timeframe = ?
+            ORDER BY b.ts_start ASC
+            """,
+            (symbol, scenario, timeframe),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    data = [
+        {
+            "ts_start": ts,
+            "dbi": dbi,
+            "ofi": ofi,
+            "spr": spr,
+            "microprice": microprice,
+        }
+        for (ts, dbi, ofi, spr, microprice) in rows
+    ]
+
+    return jsonify(data)
+
+
+def _interval_from_timeframe(timeframe: str) -> str:
+    mapping = {
+        "1m": "1Min",
+        "5m": "5Min",
+        "15m": "15Min",
+    }
+    return mapping.get(timeframe, timeframe)
+
+
+def _timeframe_from_interval(interval: str) -> str:
+    mapping = {
+        "1Min": "1m",
+        "5Min": "5m",
+        "15Min": "15m",
+    }
+    return mapping.get(interval, interval.lower())
+
+
+@app.route("/synthetic/<symbol>")
+def synthetic_detail(symbol: str):
+    """Detail page for a synthetic dataset."""
+    scenario = request.args.get("scenario")
+    timeframe = request.args.get("timeframe", "1m")
+    interval = _interval_from_timeframe(timeframe)
+
+    if not scenario:
+        return _bad_request("missing_params", "scenario is required for synthetic detail")
+
+    if timeframe not in VALID_SYNTH_TIMEFRAMES:
+        return _bad_request(
+            "invalid_timeframe",
+            "timeframe is not allowed",
+            allowed=sorted(VALID_SYNTH_TIMEFRAMES),
+        )
+
+    return render_template(
+        "detail.html",
+        ticker=symbol,
+        interval=interval,
+        is_synthetic=True,
+        scenario=scenario,
+        timeframe=timeframe,
+    )
+
+
 @app.route('/ticker/<ticker>')
 def ticker_detail(ticker):
     """Detail view for a specific ticker."""
     from flask import request
     interval = request.args.get('interval', '1Min')
-    return render_template('detail.html', ticker=ticker, interval=interval)
+    return render_template(
+        'detail.html',
+        ticker=ticker,
+        interval=interval,
+        is_synthetic=False,
+        scenario=None,
+        timeframe=_timeframe_from_interval(interval),
+    )
 
 
 @app.route('/backtest-config')

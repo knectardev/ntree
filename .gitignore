@@ -52,6 +52,8 @@ Thumbs.db
 # Project specific
 prompts.txt
 stock_data.db
+sample_data/
+Notes/
 
 # Archive folder (if you want to ignore it)
 # _archive/

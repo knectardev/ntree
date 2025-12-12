@@ -184,6 +184,67 @@
             background: #0b1220;
             color: #e2e8f0;
         }
+
+        .ticker-panels {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+            gap: 16px;
+            margin-top: 10px;
+        }
+
+        .panel {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            overflow: hidden;
+            padding: 12px;
+        }
+
+        .panel h2 {
+            margin: 0 0 10px 0;
+            color: #111827;
+        }
+
+        .synthetic-status {
+            padding: 10px 12px;
+            border-radius: 8px;
+            margin: 6px 0 10px 0;
+            background: #f8fafc;
+            color: #475569;
+            font-size: 0.95em;
+            display: none;
+        }
+
+        .synthetic-status[data-state="loading"] {
+            display: block;
+            background: #ebf8ff;
+            color: #1d4ed8;
+            border: 1px solid #bfdbfe;
+        }
+
+        .synthetic-status[data-state="error"] {
+            display: block;
+            background: #fff5f5;
+            color: #c53030;
+            border: 1px solid #fed7d7;
+        }
+
+        .synthetic-status[data-state="empty"] {
+            display: block;
+            background: #f7fafc;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+        }
+
+        #synthetic-datasets-table tbody tr.selected {
+            background-color: #eef2ff;
+        }
+
+        .synthetic-table-wrapper {
+            max-height: 320px;
+            overflow-y: auto;
+        }
+
     </style>
 </head>
 <body>
@@ -212,38 +273,62 @@
             | <strong>Total Records:</strong> {{ "{:,}".format(date_range.total_records) }}
         </div>
         {% endif %}
-        <div class="grid-container">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Ticker</th>
-                        <th>Latest Price</th>
-                        <th>Timestamp</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for ticker_data in tickers %}
-                    <tr onclick="window.location.href='/ticker/{{ ticker_data.ticker }}'">
-                        <td class="ticker">{{ ticker_data.ticker }}</td>
-                        <td class="price">
-                            {% if ticker_data.price %}
-                                ${{ "%.2f"|format(ticker_data.price) }}
-                            {% else %}
-                                <span class="no-data">No data available</span>
-                            {% endif %}
-                        </td>
-                        <td class="timestamp">
-                            {% if ticker_data.timestamp %}
-                                {{ ticker_data.timestamp }}
-                            {% else %}
-                                <span class="no-data">-</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div class="ticker-panels">
+            <div class="panel">
+                <h2>Real Symbols</h2>
+                <div class="grid-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Ticker</th>
+                                <th>Latest Price</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ticker_data in tickers %}
+                            <tr onclick="window.location.href='/ticker/{{ ticker_data.ticker }}'">
+                                <td class="ticker">{{ ticker_data.ticker }}</td>
+                                <td class="price">
+                                    {% if ticker_data.price %}
+                                        ${{ "%.2f"|format(ticker_data.price) }}
+                                    {% else %}
+                                        <span class="no-data">No data available</span>
+                                    {% endif %}
+                                </td>
+                                <td class="timestamp">
+                                    {% if ticker_data.timestamp %}
+                                        {{ ticker_data.timestamp }}
+                                    {% else %}
+                                        <span class="no-data">-</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>Synthetic Data Sets</h2>
+                <div id="syntheticStatus" class="synthetic-status" data-state="loading">Loading datasets…</div>
+                <div class="grid-container synthetic-table-wrapper">
+                    <table id="synthetic-datasets-table">
+                        <thead>
+                            <tr>
+                                <th>Label</th>
+                                <th>Bars</th>
+                                <th>Range</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="3">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
+
     </div>
     
     <script>
@@ -288,6 +373,73 @@
                 btn.textContent = 'Fetch Latest Data';
             });
         }
+    </script>
+    <script>
+        const SYNTHETIC_DEFAULT_TIMEFRAME = '1m';
+
+        function setSyntheticStatus(text, state) {
+            const el = document.getElementById('syntheticStatus');
+            if (!el) return;
+            el.textContent = text || '';
+            if (state) {
+                el.dataset.state = state;
+                el.style.display = 'block';
+            } else {
+                el.dataset.state = '';
+                el.style.display = text ? 'block' : 'none';
+            }
+        }
+
+        async function loadSyntheticDatasets() {
+            const tbody = document.querySelector('#synthetic-datasets-table tbody');
+            if (!tbody) return;
+            setSyntheticStatus('Loading datasets…', 'loading');
+            tbody.innerHTML = `<tr><td colspan="3">Loading…</td></tr>`;
+            try {
+                const res = await fetch('/api/synthetic_datasets');
+                if (!res.ok) {
+                    throw new Error(await res.text());
+                }
+                const datasets = await res.json();
+                if (!datasets || datasets.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3">No synthetic datasets yet</td></tr>`;
+                    setSyntheticStatus('No synthetic datasets yet', 'empty');
+                    return;
+                }
+                tbody.innerHTML = '';
+                setSyntheticStatus('', '');
+                datasets.forEach(ds => {
+                    const tr = document.createElement('tr');
+                    tr.dataset.symbol = ds.symbol;
+                    tr.dataset.scenario = ds.scenario;
+                    tr.dataset.timeframe = ds.timeframe;
+
+                    const label = `${ds.symbol} – ${ds.scenario}`;
+                    const range = `${(ds.ts_start_min || '').slice(0, 10)} → ${(ds.ts_start_max || '').slice(0, 10)}`;
+
+                    tr.innerHTML = `
+                        <td>${label}</td>
+                        <td>${ds.bar_count}</td>
+                        <td>${range}</td>
+                    `;
+
+                    tr.addEventListener('click', () => {
+                        const url = `/synthetic/${encodeURIComponent(ds.symbol)}?scenario=${encodeURIComponent(ds.scenario)}&timeframe=${encodeURIComponent(ds.timeframe || SYNTHETIC_DEFAULT_TIMEFRAME)}`;
+                        window.location.href = url;
+                    });
+
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error(err);
+                setSyntheticStatus('Error loading datasets', 'error');
+                tbody.innerHTML = `<tr><td colspan="3">Error loading datasets</td></tr>`;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSyntheticDatasets();
+        });
     </script>
     <script>
         (function setupGlobalNav() {

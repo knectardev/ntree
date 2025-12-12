@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from datetime import datetime
+from typing import Any, Dict, List
 
 DB_NAME = 'stock_data.db'
 
@@ -125,6 +126,11 @@ def init_database():
         CREATE INDEX IF NOT EXISTS idx_bars_source
         ON bars(data_source, scenario)
     ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_bars_synth_query
+        ON bars(symbol, scenario, timeframe, ts_start)
+        WHERE data_source = 'synthetic'
+    ''')
 
     # Level 2 state features keyed to bars
     cursor.execute('''
@@ -183,6 +189,42 @@ def get_db_connection():
     conn = sqlite3.connect(DB_NAME)
     conn.execute('PRAGMA foreign_keys = ON;')
     return conn
+
+
+def get_synthetic_datasets() -> List[Dict[str, Any]]:
+    """Return distinct synthetic datasets grouped by symbol/scenario/timeframe."""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                symbol,
+                scenario,
+                timeframe,
+                MIN(ts_start) AS ts_start_min,
+                MAX(ts_start) AS ts_start_max,
+                COUNT(*)      AS bar_count
+            FROM bars_synth
+            GROUP BY symbol, scenario, timeframe
+            ORDER BY symbol, scenario, timeframe
+            """
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "symbol": row[0],
+            "scenario": row[1],
+            "timeframe": row[2],
+            "ts_start_min": row[3],
+            "ts_start_max": row[4],
+            "bar_count": row[5],
+        }
+        for row in rows
+    ]
 
 if __name__ == '__main__':
     init_database()
