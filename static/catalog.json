@@ -1,0 +1,8 @@
+{
+  "symbols": [
+    { "dataset": "ES", "symbol": "ES_CONT" },
+    { "dataset": "ES", "symbol": "ESZ5" },
+    { "dataset": "NQ", "symbol": "NQ_CONT" }
+  ]
+}
+
