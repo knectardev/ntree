@@ -377,7 +377,10 @@
     <div class="container">
         <div class="header">
             <h1>{{ ticker }} - Stock Detail</h1>
-            <a href="/" class="back-link">← Back to Dashboard</a>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <a href="/ticker/{{ ticker }}?band" class="back-link" style="text-decoration:none;">Band view</a>
+                <a href="/" class="back-link">← Back to Dashboard</a>
+            </div>
         </div>
         
         <div class="chart-container">

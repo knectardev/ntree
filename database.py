@@ -226,6 +226,57 @@ def get_synthetic_datasets() -> List[Dict[str, Any]]:
         for row in rows
     ]
 
+
+def list_real_tickers(interval: str = "1Min") -> List[str]:
+    """Return distinct real tickers present in stock_data for the given interval."""
+    iv = (interval or "1Min").strip()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT ticker
+            FROM stock_data
+            WHERE interval = ?
+            ORDER BY ticker ASC
+            """,
+            (iv,),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    out: List[str] = []
+    for (t,) in rows:
+        if not t:
+            continue
+        out.append(str(t).strip().upper())
+    return out
+
+
+def list_all_tickers() -> List[str]:
+    """Return distinct tickers present in stock_data across all intervals."""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT ticker
+            FROM stock_data
+            ORDER BY ticker ASC
+            """
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    out: List[str] = []
+    for (t,) in rows:
+        if not t:
+            continue
+        out.append(str(t).strip().upper())
+    return out
+
 if __name__ == '__main__':
     init_database()
 

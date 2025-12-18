@@ -11,9 +11,93 @@
       --grid:#1b2838;
       --text:#d7e0ea;
       --muted:#8aa0b5;
+      --sidebarW: 280px;
     }
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
-    .wrap{max-width:1100px;margin:0 auto;padding:18px}
+    /* Full-width, responsive layout: left sidebar placeholder + right chart. */
+    .layout{
+      display:grid;
+      grid-template-columns: var(--sidebarW) 1fr;
+      /* Row 1: title. Row 2: size to the chart card so sidebar matches chart height. */
+      grid-template-rows: auto auto;
+      gap:18px;
+      padding:18px;
+      max-width: 1600px;
+      margin: 0 auto;
+      box-sizing:border-box;
+      align-items: stretch;
+    }
+    @media (max-width: 980px){
+      .layout{ grid-template-columns: 1fr; grid-template-rows: auto auto; }
+    }
+    .pageTop{ grid-column: 1 / -1; }
+    .sidebar{
+      align-self:stretch;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.07);
+      background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+      padding:12px;
+      min-height: 0;
+    }
+    .sidebar h2{margin:0 0 8px 0;font-size:13px;font-weight:750;letter-spacing:.2px;color:rgba(215,224,234,.92)}
+    .sidebar .hint{margin:0;font-size:12px;color:var(--muted);line-height:1.35}
+    .sideCard{
+      margin-top:10px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(8,12,18,.55);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+      padding:10px;
+    }
+    .sideCardTitle{
+      margin:0 0 10px 0;
+      font-size:12px;
+      font-weight:750;
+      letter-spacing:.2px;
+      color:rgba(215,224,234,.92);
+    }
+    .sideList{display:flex;flex-direction:column;gap:10px}
+    .chkRow{display:flex;gap:10px;align-items:flex-start}
+    .chkRow input[type="checkbox"]{transform: translateY(2px)}
+    .chkLbl{display:flex;flex-direction:column;gap:6px;min-width:0}
+    .chkName{font-size:12px;color:rgba(215,224,234,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .swatch{
+      width:44px;height:3px;border-radius:999px;background:rgba(255,255,255,.25);
+      box-shadow: 0 0 0 1px rgba(255,255,255,.06) inset;
+    }
+    .swatch.ema9{background:rgb(255, 80, 120)}
+    .swatch.ema21{background:rgb(0, 162, 255)}
+    .swatch.ema50{background:rgb(255, 200, 90)}
+    .swatch.vwap{background:rgb(30, 200, 170)}
+    .sideDivider{height:1px;background:rgba(255,255,255,.07);margin:10px 0}
+    .formGroup{display:flex;flex-direction:column;gap:8px}
+    .fieldLabel{font-size:12px;color:rgba(215,224,234,.92);font-weight:650}
+    .select{
+      width:100%;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.20);
+      color:rgba(215,224,234,.92);
+      outline:none;
+      font-size:12px;
+    }
+    .select:focus{border-color:rgba(90,150,255,.65)}
+    .btnPrimary{
+      cursor:pointer;
+      width:100%;
+      border-radius:10px;
+      padding:10px 12px;
+      border:1px solid rgba(90,150,255,.35);
+      background:rgba(90,150,255,.18);
+      color:rgba(235,245,255,.98);
+      font-weight:750;
+      font-size:12px;
+    }
+    .btnPrimary:hover{background:rgba(90,150,255,.24)}
+    .main{min-width:0}
+    .wrap{max-width:none;margin:0;padding:0}
     .top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:10px}
     h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
     .hint{font-size:12px;color:var(--muted);line-height:1.35}
@@ -32,7 +116,7 @@
     .btn{cursor:pointer;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);color:var(--text);border-radius:12px;padding:8px 10px;font-size:12px}
     .btn:hover{background:rgba(255,255,255,.09)}
     canvas{display:block;width:100%;height:560px}
-    .footer{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid rgba(255,255,255,.07);color:var(--muted);font-size:12px}
+    .footer{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid rgba(255,255,255,.07);color:var(--muted);font-size:12px;min-height:40px}
     .k{color:var(--text)}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
 
@@ -115,7 +199,9 @@
   </style>
   <style>
     /* Static demo tweaks */
-    #goLive{display:none !important;}
+    /* When embedded/served by Flask as an API-backed band chart, we flip body->.api in JS. */
+    body.api #pickStaticDir{display:none !important;}
+    body.api #pickBarsFile{display:none !important;}
   </style>
 </head>
 <body>
@@ -123,39 +209,92 @@
     <span class="statusDot" id="updateDot"></span>
     <span id="updateText" class="statusMono">Last update: —</span>
   </div>
-  <div class="wrap">
-    <div class="top">
-      <h1>Connected OCLH Bands + Candles (Static JSON)</h1>
-      <div class="hint">
-        Demo loads pre-aggregated OHLCV bars from a local JSON snapshot (<span class="mono">./static/</span>).<br/>
-        Tip: if you opened this via <span class="mono">file://</span>, click <span class="mono">Pick snapshot folder</span>.<br/>
-        Expected arrays: <span class="mono">t_ms,o,h,l,c,v</span> (see <span class="mono">notes.txt</span>).
-      </div>
+  <div class="layout">
+    <div class="pageTop top">
+      <h1>.</h1>
     </div>
+    <aside class="sidebar" aria-label="Indicator controls">
+      <h2>Indicators</h2>
+      <p class="hint">Placeholder panel — indicator controls will live here.</p>
 
-    <div class="card">
-      <div class="toolbar">
-        <div class="left">
-          <div class="pill">
-            <label>Ticker</label>
-            <div class="dd" id="tickerDD">
-              <button class="ddBtn mono" id="tickerBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
-                <span id="tickerLabel" class="mono">ES</span>
-                <span class="ddChevron">▾</span>
-              </button>
-              <div class="ddMenu" id="tickerMenu" role="listbox" aria-label="Ticker"></div>
-            </div>
-          </div>
-          <div class="pill">
-            <label>Symbol</label>
-            <div class="dd" id="symbolDD">
-              <button class="ddBtn mono" id="symbolBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
-                <span id="symbolLabel" class="mono">ESZ5</span>
-                <span class="ddChevron">▾</span>
-              </button>
-              <div class="ddMenu" id="symbolMenu" role="listbox" aria-label="Symbol"></div>
-            </div>
-          </div>
+      <!-- Placeholders only (no logic wired yet) -->
+      <div class="sideCard" aria-label="Indicator toggles">
+        <div class="sideList">
+          <label class="chkRow">
+            <input type="checkbox" checked />
+            <span class="chkLbl">
+              <span class="chkName">EMA 9</span>
+              <span class="swatch ema9" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <label class="chkRow">
+            <input type="checkbox" checked />
+            <span class="chkLbl">
+              <span class="chkName">EMA 21</span>
+              <span class="swatch ema21" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <label class="chkRow">
+            <input type="checkbox" />
+            <span class="chkLbl">
+              <span class="chkName">EMA 50</span>
+              <span class="swatch ema50" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <label class="chkRow">
+            <input type="checkbox" checked />
+            <span class="chkLbl">
+              <span class="chkName">VWAP</span>
+              <span class="swatch vwap" aria-hidden="true"></span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="sideCard" aria-label="Candlestick overlays">
+        <label class="chkRow">
+          <input type="checkbox" />
+          <span class="chkLbl">
+            <span class="chkName">Candlestick Bias Overlay</span>
+          </span>
+        </label>
+      </div>
+
+      <div class="sideCard" aria-label="Strategy controls">
+        <div class="sideCardTitle">Strategy</div>
+        <div class="formGroup">
+          <label class="fieldLabel" for="strategySelect">Strategy</label>
+          <select class="select" id="strategySelect" disabled>
+            <option selected>None</option>
+          </select>
+
+          <label class="fieldLabel" for="btConfigSelect">Backtest config</label>
+          <select class="select" id="btConfigSelect" disabled>
+            <option selected>Default (risk 0.5%, RR 2.0, fee 0)</option>
+          </select>
+
+          <button class="btnPrimary" type="button" disabled>Run Backtest</button>
+        </div>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="wrap">
+        <div class="card">
+          <div class="toolbar">
+            <div class="left">
+              <div class="pill">
+                <label>Ticker</label>
+                <div class="dd" id="tickerDD">
+                  <button class="ddBtn mono" id="tickerBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="tickerLabel" class="mono">ES</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="tickerMenu" role="listbox" aria-label="Ticker"></div>
+                </div>
+              </div>
 
           <div class="pill">
             <label for="window">Bar size (W)</label>
@@ -191,23 +330,19 @@
         <div class="right">
           <button class="btn" id="pickStaticDir" title="Pick a folder containing catalog.json and bars/*.json (works on file:// in Chromium browsers).">Pick snapshot folder</button>
           <button class="btn" id="pickBarsFile" title="Pick a single bars JSON file (works on file://).">Pick bars file</button>
-          <button class="btn" id="goLive" title="(hidden in static mode)">Go live</button>
           <button class="btn" id="regen">Load snapshot</button>
         </div>
+          </div>
+
+          <canvas id="c"></canvas>
+
+      <div class="footer" aria-label="Footer (reserved for future controls)">
+        <div></div>
+        <div></div>
       </div>
-
-      <canvas id="c"></canvas>
-
-      <div class="footer">
-        <div>Hover for O/C/L/H (per selected candle style). Drag chart to pan (X+Y); wheel to zoom; drag Y-axis up/down to zoom Y; double-click Y-axis to reset.</div>
-        <div>
-          <span class="muted">For live: poll/stream updates; render uses last value per bar. API should return arrays:</span>
-          <span class="mono">t_ms,o,h,l,c,v</span>
-          <span class="muted">·</span>
-          <span id="reqInfo" class="mono muted"></span>
         </div>
       </div>
-    </div>
+    </main>
   </div>
 
   <script>
@@ -225,6 +360,29 @@
     return decodeURIComponent(m[1].replace(/\+/g, ' '));
   }
 
+  function regenButtonLabel(){
+    // Single action button label.
+    return STATIC_MODE ? 'Load snapshot' : 'Fetch Latest Data';
+  }
+
+  // Mode selection:
+  // - static (default): load from ./static/*.json or file:// pickers
+  // - api: fetch from same-origin (or ?api_base=...) /window endpoint
+  var MODE = getQueryParam('mode', 'static');
+  // Static-only mode: no server calls.
+  var STATIC_MODE = (String(MODE || '').toLowerCase() !== 'api');
+  // When in api mode, the chart calls: buildUrl(API_BASE, '/window', ...)
+  // Use same-origin by default; override with ?api_base=http://127.0.0.1:5000 if needed.
+  var API_BASE = getQueryParam('api_base', '');
+  // Single-symbol convenience: when ?single=1&symbol=SPY, build a catalog from the symbol.
+  var SINGLE_MODE = (getQueryParam('single', '') !== '');
+  try{
+    if(document && document.body){
+      document.body.classList.remove('static','api');
+      document.body.classList.add(STATIC_MODE ? 'static' : 'api');
+    }
+  } catch(_e){}
+
   function buildUrl(base, path, params){
     var b = String(base || '').replace(/\/+$/,'');
     var p = String(path || '');
@@ -238,8 +396,6 @@
     return b + p + (q.length ? ('?' + q.join('&')) : '');
   }
 
-  // Static-only mode: no server calls.
-  var STATIC_MODE = true;
   // When served over http(s), we can fetch relative JSON files from here.
   var STATIC_BASE = getQueryParam('static_base', './static');
   // When opened via file://, use Directory Picker (Chromium) to read local files.
@@ -677,7 +833,27 @@
 
   async function fetchSymbolCatalog(){
     try{
-      return await loadStaticCatalog();
+      if(STATIC_MODE){
+        return await loadStaticCatalog();
+      }
+      // API mode: if we're in single mode, synthesize a 1-item catalog.
+      var symQ = String(getQueryParam('symbol', '') || '').trim();
+      if(SINGLE_MODE && symQ){
+        return [{ symbol: symQ, dataset: (inferDatasetFromSymbol(symQ) || symQ), synthetic: false }];
+      }
+      // Optional: if you later add an endpoint that returns catalog items, this will use it.
+      // Expected: [{dataset,symbol}, ...] or {symbols:[...]}
+      try{
+        var url = buildUrl(API_BASE, '/api/symbols', {});
+        var res = await fetch(url, { method:'GET', cache:'no-store' });
+        if(res && res.ok){
+          var j = await res.json();
+          if(Array.isArray(j)) return j;
+          if(j && Array.isArray(j.symbols)) return j.symbols;
+        }
+      } catch(_e2){}
+      if(symQ) return [{ symbol: symQ, dataset: (inferDatasetFromSymbol(symQ) || symQ), synthetic: false }];
+      return [];
     } catch(_e){
       return [];
     }
@@ -989,13 +1165,20 @@
     return m + 'm' + s + 's';
   }
 
-  // Display contract: minimum resolution is 30s; allow up to 1d bars.
+  // Display contract:
+  // - static mode: can support 30s (if your dataset provides it)
+  // - api mode (SQLite 1m canonical): minimum resolution is 60s (see bandchart.md note)
   // Keep this list ordered ascending.
   var SNAP_PRESETS = [
     // Canonical TFs only (client-side contract).
     // NOTE: UI and backend aggregation plans assume exactly this set.
     30, 60, 300, 1800, 3600, 14400, 86400
   ];
+
+  // If we're in API mode backed by a 1-minute store, remove 30s to keep the UI honest.
+  if(!STATIC_MODE){
+    SNAP_PRESETS = [60, 300, 1800, 3600, 14400, 86400];
+  }
 
   // Auto W targets roughly this many candles on screen.
   // Clamp is applied at call-sites to keep behavior stable if this value changes.
@@ -1069,10 +1252,6 @@
     tickerBtn: document.getElementById('tickerBtn'),
     tickerMenu: document.getElementById('tickerMenu'),
     tickerLabel: document.getElementById('tickerLabel'),
-    symbolDD: document.getElementById('symbolDD'),
-    symbolBtn: document.getElementById('symbolBtn'),
-    symbolMenu: document.getElementById('symbolMenu'),
-    symbolLabel: document.getElementById('symbolLabel'),
     window: document.getElementById('window'),
     autoW: document.getElementById('autoW'),
     grid: document.getElementById('grid'),
@@ -1090,9 +1269,7 @@
     candleStyleMenu: document.getElementById('candleStyleMenu'),
     candleStyleLabel: document.getElementById('candleStyleLabel'),
     windowVal: document.getElementById('windowVal'),
-    goLive: document.getElementById('goLive'),
-    regen: document.getElementById('regen'),
-    reqInfo: document.getElementById('reqInfo')
+    regen: document.getElementById('regen')
   };
 
     var state = {
@@ -1128,7 +1305,7 @@
     _loadedBarS: NaN
   };
 
-  // When following latest ("Go live"), periodically re-fetch so new data can extend the dataset.
+  // Live mode is disabled in this app integration (use "Fetch Latest Data" instead).
   var LIVE_POLL_MS = 10_000;
   var livePollTimer = null;
   var liveStatusTimer = null;
@@ -1477,7 +1654,7 @@
         reqEndMs = endMs0;
       }
     } else {
-      // URL-driven explicit window disables followLatest unless user clicks Go live.
+    // URL-driven explicit window disables followLatest.
       state.followLatest = false;
       if(start && end){
         reqStartMs = parseIsoToMs(start);
@@ -1813,7 +1990,7 @@
       // Avoid blocking alerts for transient reload/network blips; rely on footer + console.
       // Common during uvicorn --reload restarts.
     } finally {
-      if(ui.regen){ ui.regen.disabled = false; ui.regen.textContent = prevText || 'Load from API'; }
+      if(ui.regen){ ui.regen.disabled = false; ui.regen.textContent = regenButtonLabel(); }
     }
   }
 
@@ -1934,7 +2111,7 @@
         ui.reqInfo.textContent = 'Error: ' + msg;
       }
     } finally {
-      if(ui.regen){ ui.regen.disabled = false; ui.regen.textContent = prevText || 'Load snapshot'; }
+      if(ui.regen){ ui.regen.disabled = false; ui.regen.textContent = regenButtonLabel(); }
     }
   }
 
@@ -2616,7 +2793,7 @@
     var x = (e.clientX - r.left);
     var y = (e.clientY - r.top);
 
-    // Any mouse interaction implies manual exploration; stop snapping back to latest until Go live.
+    // Any mouse interaction implies manual exploration; stop snapping back to latest.
     state.followLatest = false;
 
     // If user clicks in the Y-axis area (left of plot), start Y-zoom drag.
@@ -2703,7 +2880,7 @@
 
   canvas.addEventListener('wheel', function(e){
     e.preventDefault();
-    // Zooming is manual exploration; stop snapping back to latest until Go live.
+    // Zooming is manual exploration; stop snapping back to latest.
     state.followLatest = false;
     var n = state.data.length;
     if(!n) return;
@@ -2852,22 +3029,7 @@
       closeCandleStyleMenu();
     }
   });
-  if(ui.goLive) ui.goLive.addEventListener('click', function(){
-    state.followLatest = true;
-    if(Number.isFinite(state.datasetEndMs)) state.viewEndMs = state.datasetEndMs;
-    // If the URL had an explicit start/end, clear them so live can extend the window end.
-    try{
-      var u = new URL(window.location.href);
-      u.searchParams.delete('start');
-      u.searchParams.delete('end');
-      // If full-history was on, turn it off for "Go live" (user can re-enable via URL).
-      u.searchParams.delete('full');
-      u.searchParams.delete('full_history');
-      window.history.replaceState(null, '', u.toString());
-    } catch(_e){}
-    updateUrlBarSize();
-    loadFromAPI();
-  });
+  // (goLive removed)
 
   function onToggleDraw(){
     draw();
@@ -2886,7 +3048,27 @@
     syncCandleStyleEnabled();
     onToggleDraw();
   });
-  ui.regen.addEventListener('click', loadFromAPI);
+  async function fetchLatestAndReload(){
+    // In API mode, this triggers the server-side fetch for *all* tickers, then reloads the window.
+    if(STATIC_MODE){
+      return loadFromAPI();
+    }
+    if(ui.regen && ui.regen.disabled) return;
+    var prev = ui.regen ? ui.regen.textContent : '';
+    if(ui.regen){ ui.regen.disabled = true; ui.regen.textContent = 'Fetching…'; }
+    try{
+      var res = await fetch('/api/fetch-latest', { method:'POST', headers:{'Content-Type':'application/json'} });
+      // Ignore response body errors here; chart reload will show empty/error in footer if needed.
+      try{ if(res && res.ok) await res.json(); } catch(_e){}
+    } catch(_e2){
+      // ignore; reload below will reflect current DB state
+    } finally {
+      if(ui.regen){ ui.regen.disabled = false; ui.regen.textContent = regenButtonLabel(); }
+    }
+    loadFromAPI();
+  }
+
+  ui.regen.addEventListener('click', fetchLatestAndReload);
   // Symbol dropdown interactions
   if(ui.tickerBtn){
     ui.tickerBtn.addEventListener('click', function(e){
@@ -2954,11 +3136,11 @@
     assert(snapToPreset(61) === 60, 'snap 61->60');
     assert(snapToPreset(89) === 60, 'snap 89->60');
     assert(snapCeilToPreset(61) === 300, 'snapCeil 61->300');
-    assert(snapCeilToPreset(1) === 30, 'snapCeil clamps min 30s');
+    assert(snapCeilToPreset(1) === (STATIC_MODE ? 30 : 60), 'snapCeil clamps min preset');
     assert(snapCeilToPreset(86400) === 86400, 'snapCeil 86400->86400');
 
-    // Minimum bar size is 30s, even if the span/target would imply smaller.
-    assert(recommendBarSec(3600*1000, 5000, 800) === 30, 'recommend 1h clamps to 30s min');
+    // Minimum bar size is the smallest preset, even if the span/target would imply smaller.
+    assert(recommendBarSec(3600*1000, 5000, 800) === (STATIC_MODE ? 30 : 60), 'recommend 1h clamps to min preset');
     // Limit guard: if limit is tiny, bar_s must grow (>= 1h/100 = 36s -> snapCeil to 60s).
     assert(recommendBarSec(3600*1000, 100, 800) >= 60, 'recommend respects max bars');
 
@@ -2987,9 +3169,6 @@
     assert(!!document.getElementById('showBands'), 'showBands exists');
     assert(!!document.getElementById('showCandles'), 'showCandles exists');
     assert(!!document.getElementById('showVolume'), 'showVolume exists');
-    assert(!!document.getElementById('symbolDD'), 'symbol dropdown exists');
-    assert(!!document.getElementById('symbolBtn'), 'symbol dropdown button exists');
-    assert(!!document.getElementById('symbolMenu'), 'symbol dropdown menu exists');
     assert(!!document.getElementById('tickerDD'), 'ticker dropdown exists');
     assert(!!document.getElementById('tickerBtn'), 'ticker dropdown button exists');
     assert(!!document.getElementById('tickerMenu'), 'ticker dropdown menu exists');
@@ -2997,7 +3176,6 @@
     assert(!!document.getElementById('candleStyleBtn'), 'candleStyle button exists');
     assert(!!document.getElementById('candleStyleMenu'), 'candleStyle menu exists');
     assert(!!document.getElementById('autoW'), 'autoW exists');
-    assert(!!document.getElementById('goLive'), 'goLive exists');
 
     var b0 = applyYScaleBounds(0, 10, 2);
     assert(Math.abs((b0.max - b0.min) - 20) < 1e-9, 'applyYScaleBounds doubles span');
@@ -3010,6 +3188,14 @@
     // Static demo: no API hint.
     // Enable bar size controls; they re-fetch the API with bar_s.
     ui.window.disabled = false;
+    // API mode backed by 1-minute store: clamp UI to >= 60s and wire the single action button.
+    try{
+      if(!STATIC_MODE && ui.window){
+        ui.window.min = '60';
+        if(Number(ui.window.value) < 60) ui.window.value = '60';
+      }
+      if(ui.regen) ui.regen.textContent = regenButtonLabel();
+    } catch(_e){}
 
     // 0) Populate ticker + symbol dropdown from the server's discovered datasets.
     try{
@@ -3069,8 +3255,12 @@
       // Optional: allow symbol in URL to override config.
       var symQ = getQueryParam('symbol', '');
       if(symQ){
-        ensureSymbolItem(String(symQ).trim());
-        setSymbol(String(symQ).trim());
+        var s0 = String(symQ).trim();
+        // With Symbol dropdown removed, treat the URL symbol as the selected ticker too.
+        ensureTickerItem(s0);
+        setTicker(s0);
+        ensureSymbolItem(s0);
+        setSymbol(s0);
       }
 
       // Auto W:

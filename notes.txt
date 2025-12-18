@@ -1,0 +1,95 @@
+Implement EMA(9/21/50) and VWAP overlays for the new chart as pure functions returning {t_ms,y,key,label} series. Add an overlayManager.compute(bars, settings) that returns enabled series based on the indicator toggles in the left panel. Render these series as line overlays on the price panel. For VWAP, use typical price (h+l+c)/3 and session-reset VWAP; ensure VWAP correctness by expanding the data fetch window back to session start whenever VWAP is enabled, then trim to the visible viewport for rendering.
+
+1) Make EMA/VWAP pure, cached series
+
+Don’t compute inside the renderer. Compute once per (symbol, timeframe, window) and cache by (indicatorKey + lastBarT).
+
+Data shapes (keep it boring)
+type Bars = { t_ms:number[]; o:number[]; h:number[]; l:number[]; c:number[]; v:number[] };
+
+type Series = { t_ms:number[]; y:number[]; key:string; label:string };
+
+2) EMA implementation (fast + stable)
+
+EMA should be based on close, aligned 1:1 with bars.
+
+function emaFromClose(t_ms:number[], close:number[], period:number): Series {
+  const k = 2 / (period + 1);
+  const y = new Array(close.length);
+  let ema = close[0];             // or SMA seed for first period (either is fine if consistent)
+  y[0] = ema;
+  for (let i = 1; i < close.length; i++) {
+    ema = close[i] * k + ema * (1 - k);
+    y[i] = ema;
+  }
+  return { t_ms, y, key:`ema_${period}`, label:`EMA ${period}` };
+}
+
+
+Seed choice:
+
+simplest: seed with close[0]
+
+“more standard”: seed with SMA of first period and start plotting after that
+Either is okay—just be consistent across chart + backtest.
+
+3) VWAP implementation (this is the one place you need a decision)
+
+VWAP is sum(price * volume) / sum(volume).
+
+Choose your “price” for VWAP
+
+Most common for bar VWAP is typical price:
+tp = (h + l + c) / 3
+(you can also use (o+h+l+c)/4, but pick one and stick with it.)
+
+Choose reset behavior (add a toggle later)
+
+Session VWAP (resets at RTH open each day)
+
+Rolling VWAP (never resets)
+
+Given your UI already has a session concept, I’d implement session-reset first, with the reset boundary driven by your session schedule.
+
+Pseudo:
+
+function vwapSession(
+  t_ms:number[], h:number[], l:number[], c:number[], v:number[],
+  isSessionReset:(t_ms:number)=>boolean
+): Series {
+  const y = new Array(c.length);
+  let cumPV = 0, cumV = 0;
+
+  for (let i = 0; i < c.length; i++) {
+    if (i === 0 || isSessionReset(t_ms[i])) { cumPV = 0; cumV = 0; }
+    const tp = (h[i] + l[i] + c[i]) / 3;
+    cumPV += tp * v[i];
+    cumV += v[i];
+    y[i] = cumV > 0 ? (cumPV / cumV) : tp;
+  }
+  return { t_ms, y, key:`vwap_session`, label:`VWAP` };
+}
+
+
+Important gotcha: if your window starts mid-session, VWAP will be “wrong” unless you preload earlier bars from the same session. Easiest fix:
+
+when VWAP is enabled, the data loader should request extra bars from session start (or at least N bars before window) and then trim to viewport for display.
+
+That one change makes VWAP feel “real.”
+
+4) Wire it into the chart in one pass
+
+You want a single “overlay manager”:
+
+function computeOverlays(bars: Bars, settings): Series[] {
+  const out: Series[] = [];
+  if (settings.ema9) out.push(emaFromClose(bars.t_ms, bars.c, 9));
+  if (settings.ema21) out.push(emaFromClose(bars.t_ms, bars.c, 21));
+  if (settings.ema50) out.push(emaFromClose(bars.t_ms, bars.c, 50));
+  if (settings.vwap) out.push(vwapSession(...));
+  return out;
+}
+
+
+Then your renderer just loops over Series[] and draws polylines.
+

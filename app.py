@@ -1,11 +1,12 @@
-from flask import Flask, render_template, jsonify, request
-from database import get_db_connection, init_database, get_synthetic_datasets
+from flask import Flask, render_template, jsonify, request, send_file
+from database import get_db_connection, init_database, get_synthetic_datasets, list_real_tickers, list_all_tickers
 from datetime import datetime, timedelta, timezone
 import alpaca_trade_api as tradeapi
 import time
 import pandas as pd
 import json
 from typing import Optional
+from typing import Any, Dict, List, Tuple
 try:
     import pandas_ta as ta
 except ImportError:
@@ -70,6 +71,256 @@ def _parse_iso_ts(value: str) -> Optional[str]:
     return parsed.isoformat().replace("+00:00", "Z")
 
 
+def _parse_iso_to_epoch_ms(value: str) -> Optional[int]:
+    """Parse an ISO timestamp into epoch ms (UTC). Returns None if parsing fails."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return int(parsed.timestamp() * 1000)
+
+
+def _epoch_ms_to_iso_z(ms: int) -> str:
+    """Convert epoch ms to compact ISO Z."""
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _aggregate_ohlcv(
+    rows: List[Tuple[int, float, float, float, float, float]],
+    target_bar_s: int,
+) -> Dict[str, List[float]]:
+    """
+    Aggregate base OHLCV rows (epoch_ms, o,h,l,c,v) into a larger bar size.
+    Aligns buckets relative to the first timestamp for stability (same as demo chart).
+    """
+    if not rows:
+        return {"t_ms": [], "o": [], "h": [], "l": [], "c": [], "v": []}
+
+    tgt = int(target_bar_s)
+    if tgt <= 0:
+        raise ValueError("bar_s must be > 0")
+    bucket_ms = tgt * 1000
+    t0 = int(rows[0][0])
+
+    out_t: List[int] = []
+    out_o: List[float] = []
+    out_h: List[float] = []
+    out_l: List[float] = []
+    out_c: List[float] = []
+    out_v: List[float] = []
+
+    cur_bucket: Optional[int] = None
+    bo = 0.0
+    bh = float("-inf")
+    bl = float("inf")
+    bc = 0.0
+    bv = 0.0
+    bt = 0
+
+    def flush() -> None:
+        nonlocal cur_bucket, bo, bh, bl, bc, bv, bt
+        if cur_bucket is None:
+            return
+        out_t.append(bt)
+        out_o.append(float(bo))
+        out_h.append(float(bh))
+        out_l.append(float(bl))
+        out_c.append(float(bc))
+        out_v.append(float(bv))
+
+    for (t_ms, o, h, l, c, v) in rows:
+        ti = int(t_ms)
+        b = (ti - t0) // bucket_ms
+        if cur_bucket is None:
+            cur_bucket = int(b)
+            bt = int(t0 + cur_bucket * bucket_ms)
+            bo = float(o)
+            bh = float(h)
+            bl = float(l)
+            bc = float(c)
+            bv = float(v or 0.0)
+            continue
+        if int(b) != cur_bucket:
+            flush()
+            cur_bucket = int(b)
+            bt = int(t0 + cur_bucket * bucket_ms)
+            bo = float(o)
+            bh = float(h)
+            bl = float(l)
+            bc = float(c)
+            bv = float(v or 0.0)
+            continue
+        # same bucket
+        bh = max(bh, float(h))
+        bl = min(bl, float(l))
+        bc = float(c)
+        bv += float(v or 0.0)
+
+    flush()
+    return {"t_ms": out_t, "o": out_o, "h": out_h, "l": out_l, "c": out_c, "v": out_v}
+
+
+@app.route("/window")
+def api_window():
+    """
+    Chart contract endpoint (bandchart-style).
+    Returns arrays: t_ms,o,h,l,c,v plus dataset_start/dataset_end and served start/end.
+    """
+    symbol = (request.args.get("symbol") or "").strip().upper()
+    if not symbol:
+        return _bad_request("missing_params", "symbol is required", fields=["symbol"])
+
+    bar_s = request.args.get("bar_s", type=int) or 60
+    if bar_s < 60:
+        # This app's canonical store is 1-minute bars; keep UI honest (see bandchart.md).
+        bar_s = 60
+
+    max_bars = request.args.get("max_bars", type=int)
+    limit_legacy = request.args.get("limit", type=int)
+    eff_max_bars = max_bars if (max_bars and max_bars > 0) else (limit_legacy if (limit_legacy and limit_legacy > 0) else 5000)
+    eff_max_bars = max(1, min(200_000, int(eff_max_bars)))
+
+    start_q = (request.args.get("start") or "").strip()
+    end_q = (request.args.get("end") or "").strip()
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        # Find dataset bounds from the canonical 1Min store.
+        cur.execute(
+            """
+            SELECT MIN(timestamp) AS min_ts, MAX(timestamp) AS max_ts
+            FROM stock_data
+            WHERE ticker = ? AND interval = '1Min'
+            """,
+            (symbol,),
+        )
+        row = cur.fetchone()
+        if not row or not row[0] or not row[1]:
+            return jsonify(
+                {
+                    "symbol": symbol,
+                    "bar_s": int(bar_s),
+                    "dataset_start": None,
+                    "dataset_end": None,
+                    "start": None,
+                    "end": None,
+                    "t_ms": [],
+                    "o": [],
+                    "h": [],
+                    "l": [],
+                    "c": [],
+                    "v": [],
+                    "truncated": False,
+                }
+            )
+
+        ds_start_ms = _parse_iso_to_epoch_ms(row[0])
+        ds_end_ms = _parse_iso_to_epoch_ms(row[1])
+        if ds_start_ms is None or ds_end_ms is None:
+            return _bad_request("dataset_parse_error", "Could not parse dataset bounds timestamps from DB")
+
+        dataset_start = _epoch_ms_to_iso_z(ds_start_ms)
+        dataset_end = _epoch_ms_to_iso_z(ds_end_ms)
+
+        # Window selection policy:
+        # - If start/end are missing: return last 1h ending at dataset_end (fast cold-load).
+        # - If end is missing but start present: treat end as dataset_end (follow-latest).
+        # - If start missing but end present: treat start as end-1h.
+        default_span_ms = 60 * 60 * 1000
+        start_ms = _parse_iso_to_epoch_ms(start_q) if start_q else None
+        end_ms = _parse_iso_to_epoch_ms(end_q) if end_q else None
+
+        if start_ms is None and end_ms is None:
+            end_ms = ds_end_ms
+            start_ms = max(ds_start_ms, end_ms - default_span_ms)
+        elif start_ms is not None and end_ms is None:
+            end_ms = ds_end_ms
+        elif start_ms is None and end_ms is not None:
+            start_ms = max(ds_start_ms, end_ms - default_span_ms)
+
+        assert start_ms is not None and end_ms is not None
+        if end_ms < start_ms:
+            return _bad_request("invalid_range", "start must be <= end")
+
+        # Clamp to dataset bounds.
+        start_ms = max(ds_start_ms, int(start_ms))
+        end_ms = min(ds_end_ms, int(end_ms))
+
+        # Pull base 1Min bars in the requested window.
+        start_sec = int(start_ms // 1000)
+        end_sec = int(end_ms // 1000)
+        cur.execute(
+            """
+            SELECT
+                timestamp,
+                COALESCE(open_price, price)  AS o,
+                COALESCE(high_price, price)  AS h,
+                COALESCE(low_price, price)   AS l,
+                price                        AS c,
+                COALESCE(volume, 0)          AS v
+            FROM stock_data
+            WHERE ticker = ?
+              AND interval = '1Min'
+              AND strftime('%s', timestamp) >= ?
+              AND strftime('%s', timestamp) <= ?
+            ORDER BY timestamp ASC
+            """,
+            (symbol, str(start_sec), str(end_sec)),
+        )
+        base_rows = cur.fetchall()
+
+        parsed: List[Tuple[int, float, float, float, float, float]] = []
+        for (ts, o, h, l, c, v) in base_rows:
+            t_ms = _parse_iso_to_epoch_ms(ts)
+            if t_ms is None:
+                continue
+            parsed.append((t_ms, float(o), float(h), float(l), float(c), float(v or 0.0)))
+
+        # Aggregate to bar_s.
+        agg = _aggregate_ohlcv(parsed, int(bar_s))
+        t_ms_arr = agg["t_ms"]
+
+        truncated = False
+        if len(t_ms_arr) > eff_max_bars:
+            truncated = True
+            # Keep last max_bars (most relevant for chart) and adjust served start.
+            keep = eff_max_bars
+            for k in ["t_ms", "o", "h", "l", "c", "v"]:
+                agg[k] = agg[k][-keep:]
+            if agg["t_ms"]:
+                start_ms = int(agg["t_ms"][0])
+
+        served_start = _epoch_ms_to_iso_z(int(start_ms)) if start_ms is not None else None
+        served_end = _epoch_ms_to_iso_z(int(end_ms)) if end_ms is not None else None
+
+        return jsonify(
+            {
+                "symbol": symbol,
+                "bar_s": int(bar_s),
+                "dataset_start": dataset_start,
+                "dataset_end": dataset_end,
+                "start": served_start,
+                "end": served_end,
+                "t_ms": agg["t_ms"],
+                "o": agg["o"],
+                "h": agg["h"],
+                "l": agg["l"],
+                "c": agg["c"],
+                "v": agg["v"],
+                "truncated": truncated,
+                "max_bars": eff_max_bars,
+                "live_merged": False,
+            }
+        )
+    finally:
+        conn.close()
+
+
 @app.route('/')
 def index():
     """Main page showing grid of tickers with latest prices."""
@@ -78,7 +329,8 @@ def index():
     
     # Get latest price for each ticker
     tickers_data = []
-    for ticker in ['SPY', 'QQQ']:
+    real_tickers = list_real_tickers("1Min")
+    for ticker in real_tickers:
         cursor.execute('''
             SELECT ticker, price, timestamp, interval
             FROM stock_data
@@ -132,6 +384,15 @@ def index():
             }
     
     return render_template('index.html', tickers=tickers_data, date_range=date_range)
+
+
+@app.route("/api/symbols")
+def api_symbols():
+    """List real symbols available in the SQLite DB (matches dashboard 'Real Symbols')."""
+    syms = list_real_tickers("1Min")
+    # demo_static.html expects items shaped like {dataset,symbol}; we set dataset=symbol
+    # so the single dropdown can show the symbols directly.
+    return jsonify([{"dataset": s, "symbol": s} for s in syms])
 
 @app.route("/api/synthetic_datasets")
 def api_synthetic_datasets():
@@ -327,7 +588,21 @@ def synthetic_detail(symbol: str):
 @app.route('/ticker/<ticker>')
 def ticker_detail(ticker):
     """Detail view for a specific ticker."""
-    from flask import request
+    # Alternate chart view: /ticker/SPY?band
+    # (keeps existing detail view intact unless explicitly requested).
+    # Legacy override: /ticker/SPY?legacy (forces the original Chart.js template).
+    if "legacy" in request.args:
+        interval = request.args.get('interval', '1Min')
+        return render_template(
+            'detail.html',
+            ticker=ticker,
+            interval=interval,
+            is_synthetic=False,
+            scenario=None,
+            timeframe=_timeframe_from_interval(interval),
+        )
+    if "band" in request.args:
+        return render_template("ticker_band.html", ticker=ticker)
     interval = request.args.get('interval', '1Min')
     return render_template(
         'detail.html',
@@ -337,6 +612,12 @@ def ticker_detail(ticker):
         scenario=None,
         timeframe=_timeframe_from_interval(interval),
     )
+
+
+@app.route("/demo_static.html")
+def demo_static_page():
+    """Serve the standalone band/candle canvas demo (also used by /ticker/<sym>?band)."""
+    return send_file("demo_static.html", mimetype="text/html")
 
 
 @app.route('/backtest-config')
@@ -917,7 +1198,9 @@ def fetch_latest_data():
         start_str = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         end_str = end_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         
-        TICKERS = ['SPY', 'QQQ']
+        # Fetch for all tickers already known to the system (present in SQLite).
+        # If none exist yet, fall back to a small default set.
+        TICKERS = list_all_tickers() or ['SPY', 'QQQ']
         INTERVALS = ['1Min', '5Min']
         
         total_records = 0
