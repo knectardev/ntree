@@ -66,9 +66,10 @@
       width:44px;height:3px;border-radius:999px;background:rgba(255,255,255,.25);
       box-shadow: 0 0 0 1px rgba(255,255,255,.06) inset;
     }
-    .swatch.ema9{background:rgb(255, 80, 120)}
-    .swatch.ema21{background:rgb(0, 162, 255)}
-    .swatch.ema50{background:rgb(255, 200, 90)}
+    /* Keep EMAs neutral (reduce color bloat); keep VWAP as the accent. */
+    .swatch.ema9{background:rgba(215,224,234,.92)}
+    .swatch.ema21{background:rgba(215,224,234,.72)}
+    .swatch.ema50{background:rgba(215,224,234,.52)}
     .swatch.vwap{background:rgb(30, 200, 170)}
     .sideDivider{height:1px;background:rgba(255,255,255,.07);margin:10px 0}
     .formGroup{display:flex;flex-direction:column;gap:8px}
@@ -217,11 +218,11 @@
       <h2>Indicators</h2>
       <p class="hint">Placeholder panel — indicator controls will live here.</p>
 
-      <!-- Placeholders only (no logic wired yet) -->
+      <!-- Indicator controls -->
       <div class="sideCard" aria-label="Indicator toggles">
         <div class="sideList">
           <label class="chkRow">
-            <input type="checkbox" checked />
+            <input id="indEma9" type="checkbox" checked />
             <span class="chkLbl">
               <span class="chkName">EMA 9</span>
               <span class="swatch ema9" aria-hidden="true"></span>
@@ -229,7 +230,7 @@
           </label>
 
           <label class="chkRow">
-            <input type="checkbox" checked />
+            <input id="indEma21" type="checkbox" checked />
             <span class="chkLbl">
               <span class="chkName">EMA 21</span>
               <span class="swatch ema21" aria-hidden="true"></span>
@@ -237,7 +238,7 @@
           </label>
 
           <label class="chkRow">
-            <input type="checkbox" />
+            <input id="indEma50" type="checkbox" />
             <span class="chkLbl">
               <span class="chkName">EMA 50</span>
               <span class="swatch ema50" aria-hidden="true"></span>
@@ -245,7 +246,7 @@
           </label>
 
           <label class="chkRow">
-            <input type="checkbox" checked />
+            <input id="indVwap" type="checkbox" checked />
             <span class="chkLbl">
               <span class="chkName">VWAP</span>
               <span class="swatch vwap" aria-hidden="true"></span>
@@ -256,7 +257,7 @@
 
       <div class="sideCard" aria-label="Candlestick overlays">
         <label class="chkRow">
-          <input type="checkbox" />
+          <input id="indCandleBias" type="checkbox" />
           <span class="chkLbl">
             <span class="chkName">Candlestick Bias Overlay</span>
           </span>
@@ -363,6 +364,162 @@
   function regenButtonLabel(){
     // Single action button label.
     return STATIC_MODE ? 'Load snapshot' : 'Fetch Latest Data';
+  }
+
+  function getOverlaySettings(){
+    return {
+      ema9: !!(ui.indEma9 && ui.indEma9.checked),
+      ema21: !!(ui.indEma21 && ui.indEma21.checked),
+      ema50: !!(ui.indEma50 && ui.indEma50.checked),
+      vwap: !!(ui.indVwap && ui.indVwap.checked),
+      candleBias: !!(ui.indCandleBias && ui.indCandleBias.checked)
+    };
+  }
+
+  function anyOverlayEnabled(s){
+    if(!s) return false;
+    return !!(s.ema9 || s.ema21 || s.ema50 || s.vwap);
+  }
+
+  // Overlay cache keyed by (symbol, bar_s, firstT, lastT, seriesKey)
+  var overlayCache = Object.create(null);
+
+  function cacheGet(key){ return overlayCache[key] || null; }
+  function cacheSet(key, val){ overlayCache[key] = val; return val; }
+
+  function emaFromClose(t_ms, close, period){
+    var n = Math.min(Array.isArray(t_ms) ? t_ms.length : 0, Array.isArray(close) ? close.length : 0);
+    if(n <= 0) return null;
+    var p = Math.max(1, Math.floor(Number(period) || 1));
+    var k = 2 / (p + 1);
+    var y = new Array(n);
+    var ema = Number(close[0]);
+    if(!Number.isFinite(ema)) ema = 0;
+    y[0] = ema;
+    for(var i=1;i<n;i++){
+      var c = Number(close[i]);
+      if(!Number.isFinite(c)) c = ema;
+      ema = c * k + ema * (1 - k);
+      y[i] = ema;
+    }
+    return { t_ms: t_ms.slice(0, n), y: y, key: 'ema_' + p, label: 'EMA ' + p };
+  }
+
+  // Efficient ET part extraction (for session-reset VWAP).
+  var _etPartsFmt = null;
+  function etParts(ms){
+    if(!_etPartsFmt){
+      _etPartsFmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: DISPLAY_TZ,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+    }
+    var parts = _etPartsFmt.formatToParts(new Date(ms));
+    var y=0,m=0,d=0,hh=0,mm=0;
+    for(var i=0;i<parts.length;i++){
+      var p = parts[i];
+      if(p.type === 'year') y = parseInt(p.value, 10);
+      else if(p.type === 'month') m = parseInt(p.value, 10);
+      else if(p.type === 'day') d = parseInt(p.value, 10);
+      else if(p.type === 'hour') hh = parseInt(p.value, 10);
+      else if(p.type === 'minute') mm = parseInt(p.value, 10);
+    }
+    var dayKey = String(y).padStart(4,'0') + String(m).padStart(2,'0') + String(d).padStart(2,'0');
+    var mins = hh * 60 + mm;
+    return { y:y, m:m, d:d, hh:hh, mm:mm, dayKey: dayKey, mins: mins };
+  }
+
+  function findUtcMsForEtLocal(y, m, d, hh, mm){
+    // Brute-force within +/- 12h of an EST guess; called rarely (per fetch) so it's fine.
+    var guess = Date.UTC(y, m-1, d, hh + 5, mm, 0, 0);
+    for(var delta=-720; delta<=720; delta++){
+      var ms = guess + delta * 60_000;
+      var p = etParts(ms);
+      if(p.y === y && p.m === m && p.d === d && p.hh === hh && p.mm === mm) return ms;
+    }
+    return guess;
+  }
+
+  function sessionStartMsForEtDay(anyMs){
+    var p = etParts(anyMs);
+    if(!p || !p.y) return NaN;
+    return findUtcMsForEtLocal(p.y, p.m, p.d, 9, 30);
+  }
+
+  function vwapSession(bars){
+    // bars: {t_ms,h,l,c,v}
+    var t_ms = bars.t_ms, h = bars.h, l = bars.l, c = bars.c, v = bars.v;
+    var n = Math.min(t_ms.length, h.length, l.length, c.length, v.length);
+    if(n <= 0) return null;
+    var y = new Array(n);
+    var cumPV = 0;
+    var cumV = 0;
+    var prevDay = '';
+    var prevMins = -1;
+    var openMins = 9*60 + 30;
+    for(var i=0;i<n;i++){
+      var tm = Number(t_ms[i]);
+      if(!Number.isFinite(tm)) { y[i] = NaN; continue; }
+      var p = etParts(tm);
+      var reset = false;
+      if(i === 0) reset = true;
+      else if(p.dayKey !== prevDay) reset = true;
+      else if(prevMins < openMins && p.mins >= openMins) reset = true;
+      if(reset){ cumPV = 0; cumV = 0; }
+      var tp = (Number(h[i]) + Number(l[i]) + Number(c[i])) / 3;
+      if(!Number.isFinite(tp)) tp = Number(c[i]);
+      var vv = Number(v[i]);
+      if(!Number.isFinite(vv) || vv < 0) vv = 0;
+      cumPV += tp * vv;
+      cumV += vv;
+      y[i] = (cumV > 0) ? (cumPV / cumV) : tp;
+      prevDay = p.dayKey;
+      prevMins = p.mins;
+    }
+    return { t_ms: t_ms.slice(0, n), y: y, key: 'vwap_session', label: 'VWAP' };
+  }
+
+  function computeOverlays(bars, settings, meta){
+    var out = [];
+    if(!bars || !Array.isArray(bars.t_ms) || !bars.t_ms.length) return out;
+    if(!settings || !anyOverlayEnabled(settings)) return out;
+    var sym = meta && meta.symbol ? String(meta.symbol) : '';
+    var barS = meta && meta.bar_s ? String(Math.floor(meta.bar_s)) : '';
+    var firstT = Number(bars.t_ms[0]);
+    var lastT = Number(bars.t_ms[bars.t_ms.length - 1]);
+    var baseKey = sym + '|' + barS + '|' + String(firstT) + '|' + String(lastT) + '|';
+
+    function getOrCompute(seriesKey, computeFn){
+      var k = baseKey + seriesKey;
+      var cached = cacheGet(k);
+      if(cached) return cached;
+      var val = computeFn();
+      if(val) cacheSet(k, val);
+      return val;
+    }
+
+    if(settings.ema9){
+      var s9 = getOrCompute('ema_9', function(){ return emaFromClose(bars.t_ms, bars.c, 9); });
+      if(s9){ s9.color = 'rgba(215,224,234,0.92)'; s9.width = 1.25; out.push(s9); }
+    }
+    if(settings.ema21){
+      var s21 = getOrCompute('ema_21', function(){ return emaFromClose(bars.t_ms, bars.c, 21); });
+      if(s21){ s21.color = 'rgba(215,224,234,0.72)'; s21.width = 1.25; out.push(s21); }
+    }
+    if(settings.ema50){
+      var s50 = getOrCompute('ema_50', function(){ return emaFromClose(bars.t_ms, bars.c, 50); });
+      if(s50){ s50.color = 'rgba(215,224,234,0.52)'; s50.width = 1.25; out.push(s50); }
+    }
+    if(settings.vwap){
+      var vw = getOrCompute('vwap_session', function(){ return vwapSession(bars); });
+      if(vw){ vw.color = 'rgb(30, 200, 170)'; vw.width = 1.55; out.push(vw); }
+    }
+    return out;
   }
 
   // Mode selection:
@@ -957,6 +1114,12 @@
       if(ui.smooth && cfg.smooth !== undefined) ui.smooth.checked = coerceBool(cfg.smooth, ui.smooth.checked);
       if(ui.outer && cfg.outer !== undefined) ui.outer.checked = coerceBool(cfg.outer, ui.outer.checked);
       if(ui.avgline && cfg.avgline !== undefined) ui.avgline.checked = coerceBool(cfg.avgline, ui.avgline.checked);
+      // Overlays (EMA/VWAP) + candle bias placeholder
+      if(ui.indEma9 && cfg.ind_ema9 !== undefined) ui.indEma9.checked = coerceBool(cfg.ind_ema9, ui.indEma9.checked);
+      if(ui.indEma21 && cfg.ind_ema21 !== undefined) ui.indEma21.checked = coerceBool(cfg.ind_ema21, ui.indEma21.checked);
+      if(ui.indEma50 && cfg.ind_ema50 !== undefined) ui.indEma50.checked = coerceBool(cfg.ind_ema50, ui.indEma50.checked);
+      if(ui.indVwap && cfg.ind_vwap !== undefined) ui.indVwap.checked = coerceBool(cfg.ind_vwap, ui.indVwap.checked);
+      if(ui.indCandleBias && cfg.ind_candle_bias !== undefined) ui.indCandleBias.checked = coerceBool(cfg.ind_candle_bias, ui.indCandleBias.checked);
 
       if(cfg.bar_s !== undefined){
         var ww = clamp(coerceInt(cfg.bar_s, 60), 30, 86400);
@@ -998,7 +1161,12 @@
       fills: !!(ui.fills && ui.fills.checked),
       smooth: !!(ui.smooth && ui.smooth.checked),
       outer: !!(ui.outer && ui.outer.checked),
-      avgline: !!(ui.avgline && ui.avgline.checked)
+      avgline: !!(ui.avgline && ui.avgline.checked),
+      ind_ema9: !!(ui.indEma9 && ui.indEma9.checked),
+      ind_ema21: !!(ui.indEma21 && ui.indEma21.checked),
+      ind_ema50: !!(ui.indEma50 && ui.indEma50.checked),
+      ind_vwap: !!(ui.indVwap && ui.indVwap.checked),
+      ind_candle_bias: !!(ui.indCandleBias && ui.indCandleBias.checked)
     };
   }
 
@@ -1252,6 +1420,12 @@
     tickerBtn: document.getElementById('tickerBtn'),
     tickerMenu: document.getElementById('tickerMenu'),
     tickerLabel: document.getElementById('tickerLabel'),
+    // Sidebar indicator toggles
+    indEma9: document.getElementById('indEma9'),
+    indEma21: document.getElementById('indEma21'),
+    indEma50: document.getElementById('indEma50'),
+    indVwap: document.getElementById('indVwap'),
+    indCandleBias: document.getElementById('indCandleBias'),
     window: document.getElementById('window'),
     autoW: document.getElementById('autoW'),
     grid: document.getElementById('grid'),
@@ -1275,6 +1449,7 @@
     var state = {
     data: [],
     ha: [],
+    overlays: [], // [{t_ms,y,key,label,color,width}]
     candleStyle: 'std', // 'std' | 'ha'
     xOffset: 0,
     xZoom: 1,
@@ -1302,7 +1477,8 @@
     _bootstrappedInitialWindow: false,
     _lastYSpan: NaN,
     _lastPlotH: NaN,
-    _loadedBarS: NaN
+    _loadedBarS: NaN,
+    _vwapTrimStartMs: NaN
   };
 
   // Live mode is disabled in this app integration (use "Fetch Latest Data" instead).
@@ -1730,6 +1906,24 @@
       } catch(_e){}
     })();
 
+    // VWAP correctness: if VWAP overlay is enabled and we have a concrete start time,
+    // preload bars back to the session open (RTH 09:30 ET) so the first bar's VWAP isn't "mid-session wrong".
+    // We'll trim back to the requested start after computing overlays.
+    var overlaySettings0 = getOverlaySettings();
+    var vwapTrimStartMs = NaN;
+    if(overlaySettings0 && overlaySettings0.vwap && start){
+      try{
+        var origStartMs0 = parseIsoToMs(start);
+        if(Number.isFinite(origStartMs0)){
+          var sess0 = sessionStartMsForEtDay(origStartMs0);
+          if(Number.isFinite(sess0) && sess0 < origStartMs0){
+            vwapTrimStartMs = origStartMs0;
+            start = msToIsoZ(sess0);
+          }
+        }
+      } catch(_e){}
+    }
+
     var url = buildUrl(API_BASE, '/window', {
       symbol: symbol,
       start: start,
@@ -1855,6 +2049,37 @@
         throw new Error('Mismatched array lengths in payload');
       }
 
+      // Compute overlays against the full payload (including any VWAP preload),
+      // then trim to the requested viewport start.
+      var overlaysFull = [];
+      try{
+        if(overlaySettings0 && anyOverlayEnabled(overlaySettings0)){
+          overlaysFull = computeOverlays(
+            { t_ms: t, o: o, h: h, l: l, c: c, v: v },
+            overlaySettings0,
+            { symbol: symbol, bar_s: effBar }
+          );
+        }
+      } catch(_e){}
+
+      var trimIdx = 0;
+      if(Number.isFinite(vwapTrimStartMs) && vwapTrimStartMs > 0){
+        while(trimIdx < n && Number(t[trimIdx]) < vwapTrimStartMs) trimIdx++;
+      }
+      if(trimIdx > 0 && trimIdx < n){
+        t = t.slice(trimIdx); o = o.slice(trimIdx); h = h.slice(trimIdx); l = l.slice(trimIdx); c = c.slice(trimIdx); v = v.slice(trimIdx);
+        n = t.length;
+        // Trim overlays to match.
+        try{
+          for(var si=0; si<overlaysFull.length; si++){
+            var s = overlaysFull[si];
+            if(!s || !Array.isArray(s.y) || !Array.isArray(s.t_ms)) continue;
+            s.t_ms = s.t_ms.slice(trimIdx);
+            s.y = s.y.slice(trimIdx);
+          }
+        } catch(_e2){}
+      }
+
       var out = new Array(n);
       for(var i=0;i<n;i++){
         out[i] = {
@@ -1888,6 +2113,7 @@
 
       state.data = out;
       state.ha = computeHeikinAshi(out);
+      state.overlays = overlaysFull || [];
       // X view policy:
       // - If following latest: keep right-aligned but do NOT reset zoom.
       // - If not following latest: keep your pan/zoom centered on the previous time anchor.
@@ -2081,6 +2307,20 @@
       if(o.length !== n || h.length !== n || l.length !== n || c.length !== n || v.length !== n){
         throw new Error('Mismatched array lengths in payload');
       }
+
+      // Overlays (EMA/VWAP) computed from the loaded payload (static mode doesn't do session preloads).
+      var overlays = [];
+      try{
+        var os = getOverlaySettings();
+        if(os && anyOverlayEnabled(os)){
+          overlays = computeOverlays(
+            { t_ms: t, o: o, h: h, l: l, c: c, v: v },
+            os,
+            { symbol: symbol, bar_s: bar_s }
+          );
+        }
+      } catch(_e){}
+
       var out = new Array(n);
       for(var i=0;i<n;i++){
         out[i] = { t:Number(t[i]), o:Number(o[i]), h:Number(h[i]), l:Number(l[i]), c:Number(c[i]), v:Number(v[i]), bid:NaN, ask:NaN };
@@ -2088,6 +2328,7 @@
       state.followLatest = false;
       state.data = out;
       state.ha = computeHeikinAshi(out);
+      state.overlays = overlays || [];
       state.hoverIdx = -1;
       if(!Number.isFinite(state.xZoom) || state.xZoom <= 0) state.xZoom = 1;
       state.xOffset = 0;
@@ -2461,7 +2702,8 @@
           var y0 = Math.floor(vBottom - hpx);
           var isUpV = (Number(bd.c) >= Number(bd.o));
           ctx.save();
-          ctx.fillStyle = isUpV ? 'rgba(30, 200, 170, 0.55)' : 'rgba(235, 65, 120, 0.55)';
+          // Volume bars: brighter, Webull-like (keep candle colors unchanged).
+          ctx.fillStyle = isUpV ? 'rgba(0, 214, 180, 0.88)' : 'rgba(255, 60, 125, 0.88)';
           ctx.fillRect(x0, y0, barW, Math.floor(vBottom - y0));
           ctx.restore();
         }
@@ -2582,6 +2824,29 @@
       // Match the bright UI blue used elsewhere (screenshot).
       strokePolyline(ctx, ptsAvg, 'rgb(0, 162, 255)', 1.15, doSmooth);
     }
+
+    // Indicator overlays (EMA/VWAP), aligned 1:1 with state.data.
+    (function drawOverlays(){
+      try{
+        var ovs = state.overlays;
+        if(!ovs || !ovs.length) return;
+        for(var si=0; si<ovs.length; si++){
+          var s = ovs[si];
+          if(!s || !Array.isArray(s.y) || s.y.length < 2) continue;
+          var pts = [];
+          for(var bi=start; bi<=end; bi++){
+            var x = xForIndex(bi + 0.5, plot, barsVisible);
+            var yyv = Number(s.y[bi]);
+            if(!Number.isFinite(yyv)){
+              pts.push([NaN, NaN]);
+            } else {
+              pts.push([x, yForPrice(yyv, pricePlot, yMin, yMax)]);
+            }
+          }
+          strokePolyline(ctx, pts, s.color || 'rgba(215,224,234,0.65)', (s.width || 1.25), doSmooth);
+        }
+      } catch(_e){}
+    })();
 
     // Bid/ask dotted lines removed (not present in API data).
 
@@ -3035,6 +3300,55 @@
     draw();
     scheduleSaveUiConfig();
   }
+
+  function recomputeOverlaysFromState(){
+    try{
+      var s = getOverlaySettings();
+      if(!s || !anyOverlayEnabled(s) || !Array.isArray(state.data) || !state.data.length){
+        state.overlays = [];
+        return;
+      }
+      var n = state.data.length;
+      var t_ms = new Array(n);
+      var o = new Array(n);
+      var h = new Array(n);
+      var l = new Array(n);
+      var c = new Array(n);
+      var v = new Array(n);
+      for(var i=0;i<n;i++){
+        var d = state.data[i];
+        t_ms[i] = Number(d.t);
+        o[i] = Number(d.o);
+        h[i] = Number(d.h);
+        l[i] = Number(d.l);
+        c[i] = Number(d.c);
+        v[i] = Number(d.v);
+      }
+      state.overlays = computeOverlays(
+        { t_ms: t_ms, o: o, h: h, l: l, c: c, v: v },
+        s,
+        { symbol: String(getSymbol() || ''), bar_s: Math.floor(Number(state.windowSec) || 60) }
+      );
+    } catch(_e){
+      state.overlays = [];
+    }
+  }
+
+  function onOverlayToggleChanged(){
+    // EMA toggles can recompute locally; VWAP prefers a refetch so we can preload to session start.
+    scheduleSaveUiConfig();
+    try{
+      var s = getOverlaySettings();
+      if(s && s.vwap && !STATIC_MODE){
+        loadFromAPI();
+        return;
+      }
+      recomputeOverlaysFromState();
+      draw();
+    } catch(_e){
+      draw();
+    }
+  }
   ui.grid.addEventListener('change', onToggleDraw);
   ui.scale.addEventListener('change', onToggleDraw);
   ui.nocross.addEventListener('change', onToggleDraw);
@@ -3042,6 +3356,11 @@
   ui.smooth.addEventListener('change', onToggleDraw);
   ui.outer.addEventListener('change', onToggleDraw);
   ui.avgline.addEventListener('change', onToggleDraw);
+  if(ui.indEma9) ui.indEma9.addEventListener('change', onOverlayToggleChanged);
+  if(ui.indEma21) ui.indEma21.addEventListener('change', onOverlayToggleChanged);
+  if(ui.indEma50) ui.indEma50.addEventListener('change', onOverlayToggleChanged);
+  if(ui.indVwap) ui.indVwap.addEventListener('change', onOverlayToggleChanged);
+  if(ui.indCandleBias) ui.indCandleBias.addEventListener('change', onOverlayToggleChanged);
   if(ui.showBands) ui.showBands.addEventListener('change', onToggleDraw);
   if(ui.showVolume) ui.showVolume.addEventListener('change', onToggleDraw);
   if(ui.showCandles) ui.showCandles.addEventListener('change', function(){
