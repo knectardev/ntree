@@ -1,0 +1,242 @@
+This checkpoint looks good to go. Cursor made the right “first cut” changes: freeze a contract, create an engine package, keep a compatibility shim, and lock behavior with tests. That’s exactly how you refactor without blowing up the UI.
+
+The only things I’d want you (or Cursor) to sanity-check before moving to the bars repository step are a handful of sharp edges that tend to bite later. No big new questions — just specific review points.
+
+✅ What looks right
+
+Strategy contract module that:
+
+defines required bar columns
+
+documents time semantics (signals at bar close; fill next open)
+
+derives canonical entry/side from legacy long_entry/direction so strategies/UI don’t churn
+
+engine/ introduced with:
+
+runner.py as stable orchestration entry point
+
+execution.py housing the execution model(s)
+
+backtesting.py turned into a shim so existing imports don’t break
+
+Tests added and run, including:
+
+signal alignment
+
+next-open fill behavior
+
+TP/SL same-bar tie-break invariants
+
+That’s the correct first “platform” milestone.
+
+🔍 5 quick review points worth checking now (before step 2)
+1) entry/side types: lists vs Series
+
+Make sure normalize_signals() returns something consistent:
+
+Either plain Python lists of length N, or
+
+pandas Series aligned to the index
+
+Mixing can silently create bugs later (especially around indexing and masks). The contract should explicitly state the type.
+
+2) Side encoding and “no entry” bars
+
+Confirm the invariant:
+
+If entry[i] == False, then side[i] must be 0 (or ignored, but then enforce 0 anyway).
+This prevents accidental “ghost side” values that confuse downstream logic.
+
+3) Tie-break rule is explicit and deterministic
+
+The test locks it, great — just ensure the rule is documented in one place (the contract docstring or execution model docstring) and not duplicated.
+
+Common choices:
+
+pessimistic: assume SL hit before TP
+
+optimistic: assume TP hit before SL
+
+or “first touched” if you simulate intrabar path (you’re not, yet)
+
+4) Time semantics: “close-of-bar signal” and data leakage
+
+If signals are computed on bar close, the engine filling at next open is consistent.
+But double-check that no strategy uses future bars implicitly via rolling windows without .shift(1) when appropriate. The contract won’t prevent that; only careful indicator implementation will. (Your upcoming data/indicators.py centralization will help a lot.)
+
+5) Compatibility shim exports
+
+Make sure backtesting.py re-exports:
+
+run_backtest
+
+RiskRewardExecutionModel
+
+any other names that existing callers import
+
+Cursor says it does, and tests import via shim (good). Just quickly confirm no other modules import removed symbols.
+
+One small suggestion before the bars repository work
+
+When Cursor moves to centralize bar loading, add one more tiny unit test:
+
+“Repository returns canonical bars with required columns + timezone-aware datetime index (UTC)”
+
+This becomes the gate that prevents creeping schema drift.
+
+Bottom line
+
+Yes — you’re good to proceed to the bars repository layer.
+
+
+Code review
+
+Yep — I reviewed all four files. Overall: this is a strong, pragmatic checkpoint. The architecture choices are good (contract module + canonicalization + engine package + shim). The tests passing makes it very likely you didn’t break any existing call sites.
+
+That said, there are a few specific improvements I’d recommend now, while the surface area is still small.
+
+1) contracts.py: a couple correctness + future-proofing tweaks
+A) side default behavior should probably be 0 when not entering
+
+Right now, derive_entry_and_side() will return side=+1 on every bar unless direction is bearish or side is provided. 
+
+contracts
+
+That’s not wrong if the engine only reads side when entry=True (yours does), but it becomes a footgun later when you add:
+
+exits,
+
+position sizing,
+
+multi-signal behavior,
+
+“side-only” events
+
+Recommendation: after computing entry + side, force:
+
+side[i] = 0 whenever entry[i] == False
+
+That makes the contract safer and self-consistent.
+
+B) _to_int_side_list default =1 is a bit dangerous
+
+_to_int_side_list(... default=1) means “missing side → long”. 
+
+contracts
+
+
+For a canonical contract, missing should usually mean “no opinion” not “long”.
+
+If you adopt the “side=0 when not entering” rule above, this becomes mostly moot — but I’d still change defaults to 0, then set to +1/-1 only where entry is true (or where explicit side is provided).
+
+C) Validation should include index monotonicity & duplicates (lightweight)
+
+validate_bars_df() checks required columns and empty DF only. 
+
+contracts
+
+
+If you’re about to centralize bar loading, this is the perfect place to add two very cheap checks that prevent brutal future bugs:
+
+df_prices.index.is_monotonic_increasing
+
+df_prices.index.has_duplicates == False
+
+(You don’t have to enforce tz-awareness here yet, but you can later.)
+
+D) Alignment policy: current code silently defaults on length mismatch
+
+_to_bool_list / _to_int_side_list replace with all-defaults if length mismatches. 
+
+contracts
+
+
+That’s friendly, but it can hide real bugs (e.g., someone returns a Series with a different index, and you silently zero out entries).
+
+Recommendation: in validate_signals(), if the user provided entry/side (or long_entry/direction) with wrong length, raise rather than default. Keep defaulting only for missing keys, not malformed values.
+
+2) execution.py: biggest semantic issue is the TP/SL tie-break
+A) “Open proximity tie-break” is not realistic and can bias results
+
+You currently decide TP vs SL when both are hit in the same bar by whichever level is closer to the bar open. 
+
+execution
+
+That rule is:
+
+deterministic ✅
+
+easy to test ✅
+
+but not physically justified unless you assume a specific intrabar path model (which you aren’t simulating)
+
+In OHLC-only systems, the standard choices are:
+
+pessimistic (assume stop hits first) — conservative
+
+optimistic (assume TP hits first) — aggressive
+
+configurable tie-break policy — best long-term
+
+Recommendation: keep your current behavior to preserve legacy results, but add a parameter like:
+
+tie_break: "open_proximity" | "stop_first" | "tp_first"
+and surface it in metrics/run config later.
+
+B) Risk edge cases
+
+risk_percent can be 0 → stop=entry and TP=entry; then the first bar will “hit both” trivially depending on H/L, producing nonsense. 
+
+execution
+
+
+You clamp risk to >=0, but I’d enforce a minimum like >0 or explicitly short-circuit “no-trade if risk==0”.
+
+C) Trade loop behavior is “single position only” (fine, but document it)
+
+You skip to after exit to avoid overlapping trades. 
+
+execution
+
+
+That’s totally fine for now — just worth documenting in the returned results (or docstring) because it affects strategies that produce frequent entry signals.
+
+D) Missing: returning trades (for debugging)
+
+Right now you only return summary stats. 
+
+execution
+
+
+You will immediately want per-trade outputs when something looks off.
+
+Recommendation: optionally return:
+
+trades list
+
+maybe entry_idx/exit_idx/side/entry_price/exit_price/ret
+
+Even if your web UI ignores it, it’ll save you hours.
+
+3) runner.py and backtesting.py: clean and correct
+
+engine.runner.run_backtest() is an appropriately thin orchestration layer. 
+
+runner
+
+backtesting.py shim is exactly what you want for compatibility. 
+
+backtesting
+
+Two tiny ideas:
+
+Type the execution_model as a protocol/interface later (not the concrete RiskRewardExecutionModel), so other models can plug in without subclassing.
+
+Consider passing a run_config dict through runner to execution model as you add settings (fill policy, tie-break).
+
+The “one change” I’d do immediately
+
+If you only do one thing now, do this:
+
+Make side=0 on all non-entry bars in normalize_signals() (or right after derive). It costs almost nothing and prevents a whole class of subtle future mistakes.

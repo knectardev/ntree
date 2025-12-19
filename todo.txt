@@ -1,0 +1,7 @@
+todos
+
+Pull in 3 or 6 months of additional data for SPY and QQQ from Alpaca 
+
+
+
+

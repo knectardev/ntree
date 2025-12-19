@@ -121,6 +121,43 @@
     .k{color:var(--text)}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
 
+    /* Footer bar-size control (bottom-left, like trading charts) */
+    .footerLeft{display:flex;align-items:center;gap:10px;min-width:0}
+    .pill.pill--barSize{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+    .pill.pill--barSize input[type="range"]{width:220px}
+    @media (max-width: 720px){
+      .pill.pill--barSize input[type="range"]{width:160px}
+    }
+    /* Footer session shading toggles (center) */
+    .footerMid{display:flex;align-items:center;justify-content:center;gap:10px;flex:1;min-width:0}
+    .sessionChecks{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;min-width:0}
+    .sessionChecks label{display:inline-flex;align-items:center;gap:8px;color:rgba(215,224,234,.92);user-select:none;white-space:nowrap}
+    .sessionChecks .meta{color:var(--muted)}
+
+    /* Footer scale radios (bottom-right) */
+    .footerRight{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
+    .scaleRadios{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+    .scaleOpt{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.03);
+      color:rgba(215,224,234,.92);
+      font-size:12px;
+      user-select:none;
+      cursor:pointer;
+    }
+    .scaleOpt input{margin:0}
+    .scaleOpt.isDisabled{
+      opacity: .45;
+      cursor: not-allowed;
+      filter: grayscale(40%);
+    }
+    .scaleOpt.isDisabled input{pointer-events:none}
+
     /* Custom dropdown (replaces native <select> so colors are consistent in dark theme) */
     .dd{position:relative}
     .ddBtn{
@@ -298,15 +335,6 @@
               </div>
 
           <div class="pill">
-            <label for="window">Bar size (W)</label>
-            <input id="window" type="range" min="30" max="86400" value="60" step="30" />
-            <span id="windowVal" class="k mono">60s</span>
-          </div>
-
-          <div class="pill"><label><input id="autoW" type="checkbox" checked /> Auto W</label></div>
-
-          <div class="pill"><label><input id="showBands" type="checkbox" checked /> Bands</label></div>
-          <div class="pill">
             <label><input id="showCandles" type="checkbox" /> Candles</label>
             <div class="dd" id="candleStyleDD">
               <button class="ddBtn" id="candleStyleBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
@@ -319,9 +347,8 @@
               </div>
             </div>
           </div>
-          <div class="pill"><label><input id="showVolume" type="checkbox" checked /> Volume</label></div>
-          <div class="pill"><label><input id="grid" type="checkbox" checked /> Grid</label></div>
-          <div class="pill"><label><input id="scale" type="checkbox" checked /> Auto-scale Y</label></div>
+          <div class="pill"><label><input id="showBands" type="checkbox" checked /> Bands</label></div>
+
           <div class="pill pill--nocross"><label><input id="nocross" type="checkbox" checked /> No-cross</label></div>
           <div class="pill"><label><input id="fills" type="checkbox" checked /> Fill bands</label></div>
           <div class="pill"><label><input id="smooth" type="checkbox" checked /> Smooth</label></div>
@@ -338,8 +365,44 @@
           <canvas id="c"></canvas>
 
       <div class="footer" aria-label="Footer (reserved for future controls)">
-        <div></div>
-        <div></div>
+        <div class="footerLeft">
+          <div class="pill pill--barSize" id="barSizeFooter">
+            <label for="window">Bar size (W)</label>
+            <input id="window" type="range" min="30" max="86400" value="60" step="30" />
+            <span id="windowVal" class="k mono">60s</span>
+          </div>
+        </div>
+        <div class="footerMid" aria-label="Market session shading toggles">
+          <div class="sessionChecks" id="sessionChecks">
+            <label title="Bars in window: pre-market">
+              <input id="sessPreMarket" type="checkbox" checked /> Pre-Market:
+              <span class="meta mono">4AM - 9:30AM</span>
+              <span class="meta mono">(<span id="sessCountPre">—</span>)</span>
+            </label>
+            <label title="Bars in window: after-hours">
+              <input id="sessAfterHours" type="checkbox" checked /> After-Hours:
+              <span class="meta mono">4PM - 8PM</span>
+              <span class="meta mono">(<span id="sessCountAfter">—</span>)</span>
+            </label>
+            <label title="Bars in window: closed (often 0 for equities)">
+              <input id="sessClosed" type="checkbox" checked /> Closed:
+              <span class="meta mono">8PM - 4AM</span>
+              <span class="meta mono">(<span id="sessCountClosed">—</span>)</span>
+            </label>
+          </div>
+        </div>
+        <div class="footerRight" aria-label="Time scale">
+          <div class="scaleRadios" role="radiogroup" aria-label="Scale">
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="1d" checked /> 1D</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="5d" /> 5D</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="1m" /> 1M</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="3m" /> 3M</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="6m" /> 6M</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="1y" /> 1Y</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="3y" /> 3Y</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="5y" /> 5Y</label>
+          </div>
+        </div>
       </div>
         </div>
       </div>
@@ -451,6 +514,249 @@
     return findUtcMsForEtLocal(p.y, p.m, p.d, 9, 30);
   }
 
+  // Market session vertical shading (ET schedule)
+  var MARKET_HOURS_COLORS = {
+    // Keep regular-hours overlay faint so grid lines remain visible
+    regular: 'rgba(0, 0, 0, 0.9)',
+    pre_market: 'rgba(0, 0, 0, 0.6)',
+    after_hours: 'rgba(0, 0, 0, 0.3)',
+    closed: 'rgba(149, 165, 166, 0.10)'
+  };
+
+  function sessionTypeForMsEt(ms){
+    // Returns one of: 'regular' | 'pre_market' | 'after_hours' | 'closed'
+    var p = etParts(ms);
+    if(!p || !Number.isFinite(p.mins)) return 'closed';
+    var mins = p.mins;
+    var preStart = 4*60;          // 04:00
+    var rthStart = 9*60 + 30;     // 09:30
+    var rthEnd = 16*60;           // 16:00
+    var ahEnd = 20*60;            // 20:00
+    if(mins >= preStart && mins < rthStart) return 'pre_market';
+    if(mins >= rthStart && mins < rthEnd) return 'regular';
+    if(mins >= rthEnd && mins < ahEnd) return 'after_hours';
+    return 'closed';
+  }
+
+  function computeSessionTypesForData(data){
+    var n = Array.isArray(data) ? data.length : 0;
+    var out = new Array(n);
+    for(var i=0;i<n;i++){
+      var d = data[i];
+      var tm = d ? Number(d.t) : NaN;
+      out[i] = Number.isFinite(tm) ? sessionTypeForMsEt(tm) : 'closed';
+    }
+    return out;
+  }
+
+  function drawSessionShading(plot, start, end, barsVisible){
+    try{
+      if(!plot || plot.w <= 1 || plot.h <= 1) return;
+      if(!Array.isArray(state.data) || !state.data.length) return;
+      var types = state._sessionType;
+      if(!Array.isArray(types) || types.length !== state.data.length){
+        // Lazy repair (should normally be set on load/merge).
+        state._sessionType = computeSessionTypesForData(state.data);
+        types = state._sessionType;
+      }
+
+      var showPre = ui.sessPreMarket ? !!ui.sessPreMarket.checked : true;
+      var showAfter = ui.sessAfterHours ? !!ui.sessAfterHours.checked : true;
+      var showClosed = ui.sessClosed ? !!ui.sessClosed.checked : true;
+
+      function enabledForType(t){
+        if(t === 'pre_market') return showPre;
+        if(t === 'after_hours') return showAfter;
+        if(t === 'closed') return showClosed;
+        return true; // regular always on
+      }
+
+      function paintSeg(type, i0, i1){
+        if(!enabledForType(type)) return;
+        var x0 = xForIndex(i0, plot, barsVisible);
+        var x1 = xForIndex(i1 + 1, plot, barsVisible);
+        if(!Number.isFinite(x0) || !Number.isFinite(x1)) return;
+        // Clamp to plot bounds
+        var left = Math.max(plot.x, Math.min(x0, x1));
+        var right = Math.min(plot.x + plot.w, Math.max(x0, x1));
+        if(right <= left) return;
+        ctx.save();
+        ctx.fillStyle = MARKET_HOURS_COLORS[type] || MARKET_HOURS_COLORS.closed;
+        ctx.fillRect(left, plot.y, right - left, plot.h);
+        ctx.restore();
+      }
+
+      var curType = null;
+      var segStart = start;
+      for(var i=start; i<=end; i++){
+        var t = types[i] || 'closed';
+        if(curType === null){ curType = t; segStart = i; continue; }
+        if(t !== curType){
+          paintSeg(curType, segStart, i-1);
+          curType = t;
+          segStart = i;
+        }
+      }
+      if(curType !== null) paintSeg(curType, segStart, end);
+    } catch(_e){
+      // Never let shading break the chart.
+    }
+  }
+
+  function getSessionFilterFlags(){
+    return {
+      pre: ui.sessPreMarket ? !!ui.sessPreMarket.checked : true,
+      after: ui.sessAfterHours ? !!ui.sessAfterHours.checked : true,
+      closed: ui.sessClosed ? !!ui.sessClosed.checked : true
+    };
+  }
+
+  function sessionTypeAllowed(type, flags){
+    // Regular is always included; the toggles control extended/closed sessions.
+    if(type === 'pre_market') return !!(flags && flags.pre);
+    if(type === 'after_hours') return !!(flags && flags.after);
+    if(type === 'closed') return !!(flags && flags.closed);
+    return true;
+  }
+
+  function barsToArrays(data){
+    var n = Array.isArray(data) ? data.length : 0;
+    var t_ms = new Array(n);
+    var o = new Array(n);
+    var h = new Array(n);
+    var l = new Array(n);
+    var c = new Array(n);
+    var v = new Array(n);
+    for(var i=0;i<n;i++){
+      var d = data[i];
+      t_ms[i] = d ? Number(d.t) : NaN;
+      o[i] = d ? Number(d.o) : NaN;
+      h[i] = d ? Number(d.h) : NaN;
+      l[i] = d ? Number(d.l) : NaN;
+      c[i] = d ? Number(d.c) : NaN;
+      v[i] = d ? Number(d.v) : NaN;
+    }
+    return { t_ms: t_ms, o: o, h: h, l: l, c: c, v: v };
+  }
+
+  function captureViewAnchor(){
+    // Snapshot a time anchor near the center of the current view so filtering doesn't "jump" wildly.
+    try{
+      var anchorZoom = Number(state.xZoom);
+      if(!Number.isFinite(anchorZoom) || anchorZoom <= 0) anchorZoom = 1;
+      var anchorT = NaN;
+      if(!state.followLatest && Array.isArray(state.data) && state.data.length){
+        var n0 = state.data.length;
+        var barsVis0 = Math.min(n0, Math.max(8, Math.floor(n0 / anchorZoom)));
+        var off0 = Number(state.xOffset);
+        if(!Number.isFinite(off0)) off0 = 0;
+        var centerIdx = Math.floor(off0 + barsVis0 * 0.5);
+        centerIdx = clamp(centerIdx, 0, n0 - 1);
+        anchorT = Number(state.data[centerIdx].t);
+      }
+      return { t: anchorT, zoom: anchorZoom };
+    } catch(_e){
+      return { t: NaN, zoom: Number(state.xZoom) || 1 };
+    }
+  }
+
+  function applySessionFilter(opts){
+    // TradingView-style: toggles remove the actual bars (candles/volume/indicators), not just shading.
+    var o = opts || {};
+    var base = (Array.isArray(state.dataFull) && state.dataFull.length) ? state.dataFull : state.data;
+    if(!Array.isArray(base)) base = [];
+
+    var anchor = o.anchor || captureViewAnchor();
+    var flags = getSessionFilterFlags();
+
+    var filtered = [];
+    for(var i=0;i<base.length;i++){
+      var d = base[i];
+      if(!d) continue;
+      var tm = Number(d.t);
+      var st = Number.isFinite(tm) ? sessionTypeForMsEt(tm) : 'closed';
+      if(sessionTypeAllowed(st, flags)) filtered.push(d);
+    }
+
+    state.data = filtered;
+    state._sessionType = computeSessionTypesForData(filtered);
+    state.ha = computeHeikinAshi(filtered);
+
+    // Recompute overlays against the filtered bars so EMA/VWAP match visible data.
+    try{
+      var os = getOverlaySettings();
+      if(os && anyOverlayEnabled(os) && filtered.length){
+        var arrs = barsToArrays(filtered);
+        state.overlays = computeOverlays(
+          arrs,
+          os,
+          { symbol: String(getSymbol() || ''), bar_s: Math.floor(Number(state.windowSec) || 60) }
+        );
+      } else {
+        state.overlays = [];
+      }
+    } catch(_e2){
+      state.overlays = [];
+    }
+
+    // Keep view policy consistent with loads: followLatest stays right-aligned, otherwise re-center on anchor time.
+    try{
+      if(!Number.isFinite(state.xZoom) || state.xZoom <= 0) state.xZoom = 1;
+      if(state.followLatest){
+        rightAlignXView();
+      } else if(Number.isFinite(anchor && anchor.t) && state.data.length){
+        state.xZoom = Number(anchor.zoom) || state.xZoom;
+        var n1 = state.data.length;
+        var barsVis1 = Math.min(n1, Math.max(8, Math.floor(n1 / state.xZoom)));
+        var idx1 = findIndexByTimeMs(state.data, anchor.t);
+        state.xOffset = idx1 - barsVis1 * 0.5;
+      }
+    } catch(_e3){}
+
+    // Clamp xOffset to new bounds and clear hover (indices changed).
+    try{
+      state.hoverIdx = -1;
+      var n2 = state.data.length;
+      if(n2){
+        var barsVisible = Math.min(n2, Math.max(8, Math.floor(n2 / state.xZoom)));
+        var maxOff = Math.max(0, n2 - barsVisible);
+        state.xOffset = clamp(Number(state.xOffset) || 0, 0, maxOff);
+      } else {
+        state.xOffset = 0;
+      }
+    } catch(_e4){}
+
+    // Update counts from the unfiltered window so users can tell when a session has 0 bars.
+    updateSessionCountsUi();
+
+    if(!o.skipDraw) draw();
+    if(!o.skipSave) scheduleSaveUiConfig();
+  }
+
+  function updateSessionCountsUi(){
+    try{
+      var base = (Array.isArray(state.dataFull) && state.dataFull.length) ? state.dataFull : state.data;
+      if(!Array.isArray(base) || !base.length) return;
+      var pre = 0, after = 0, closed = 0, reg = 0;
+      for(var i=0;i<base.length;i++){
+        var d = base[i];
+        if(!d) continue;
+        var tm = Number(d.t);
+        var st = Number.isFinite(tm) ? sessionTypeForMsEt(tm) : 'closed';
+        if(st === 'pre_market') pre++;
+        else if(st === 'after_hours') after++;
+        else if(st === 'closed') closed++;
+        else reg++;
+      }
+      var elPre = document.getElementById('sessCountPre');
+      var elAfter = document.getElementById('sessCountAfter');
+      var elClosed = document.getElementById('sessCountClosed');
+      if(elPre) elPre.textContent = String(pre);
+      if(elAfter) elAfter.textContent = String(after);
+      if(elClosed) elClosed.textContent = String(closed);
+    } catch(_e){}
+  }
+
   function vwapSession(bars){
     // bars: {t_ms,h,l,c,v}
     var t_ms = bars.t_ms, h = bars.h, l = bars.l, c = bars.c, v = bars.v;
@@ -492,7 +798,10 @@
     var barS = meta && meta.bar_s ? String(Math.floor(meta.bar_s)) : '';
     var firstT = Number(bars.t_ms[0]);
     var lastT = Number(bars.t_ms[bars.t_ms.length - 1]);
-    var baseKey = sym + '|' + barS + '|' + String(firstT) + '|' + String(lastT) + '|';
+    // Include length so cached overlays can't be incorrectly reused for filtered windows that share
+    // the same [firstT,lastT] but contain fewer bars (e.g. when extended hours are hidden).
+    var n0 = Math.floor(Number(bars.t_ms.length) || 0);
+    var baseKey = sym + '|' + barS + '|' + String(firstT) + '|' + String(lastT) + '|' + String(n0) + '|';
 
     function getOrCompute(seriesKey, computeFn){
       var k = baseKey + seriesKey;
@@ -1103,17 +1412,18 @@
         setSymbol(cfg.symbol.trim());
       }
 
-      if(ui.autoW && cfg.auto_w !== undefined) ui.autoW.checked = coerceBool(cfg.auto_w, ui.autoW.checked);
+      // Always-on options (removed from UI): ignore persisted values.
       if(ui.showBands && cfg.showBands !== undefined) ui.showBands.checked = coerceBool(cfg.showBands, ui.showBands.checked);
       if(ui.showCandles && cfg.showCandles !== undefined) ui.showCandles.checked = coerceBool(cfg.showCandles, ui.showCandles.checked);
-      if(ui.showVolume && cfg.showVolume !== undefined) ui.showVolume.checked = coerceBool(cfg.showVolume, ui.showVolume.checked);
-      if(ui.grid && cfg.grid !== undefined) ui.grid.checked = coerceBool(cfg.grid, ui.grid.checked);
-      if(ui.scale && cfg.scale !== undefined) ui.scale.checked = coerceBool(cfg.scale, ui.scale.checked);
       if(ui.nocross && cfg.nocross !== undefined) ui.nocross.checked = coerceBool(cfg.nocross, ui.nocross.checked);
       if(ui.fills && cfg.fills !== undefined) ui.fills.checked = coerceBool(cfg.fills, ui.fills.checked);
       if(ui.smooth && cfg.smooth !== undefined) ui.smooth.checked = coerceBool(cfg.smooth, ui.smooth.checked);
       if(ui.outer && cfg.outer !== undefined) ui.outer.checked = coerceBool(cfg.outer, ui.outer.checked);
       if(ui.avgline && cfg.avgline !== undefined) ui.avgline.checked = coerceBool(cfg.avgline, ui.avgline.checked);
+      // Session shading toggles (footer)
+      if(ui.sessPreMarket && cfg.sess_pre_market !== undefined) ui.sessPreMarket.checked = coerceBool(cfg.sess_pre_market, ui.sessPreMarket.checked);
+      if(ui.sessAfterHours && cfg.sess_after_hours !== undefined) ui.sessAfterHours.checked = coerceBool(cfg.sess_after_hours, ui.sessAfterHours.checked);
+      if(ui.sessClosed && cfg.sess_closed !== undefined) ui.sessClosed.checked = coerceBool(cfg.sess_closed, ui.sessClosed.checked);
       // Overlays (EMA/VWAP) + candle bias placeholder
       if(ui.indEma9 && cfg.ind_ema9 !== undefined) ui.indEma9.checked = coerceBool(cfg.ind_ema9, ui.indEma9.checked);
       if(ui.indEma21 && cfg.ind_ema21 !== undefined) ui.indEma21.checked = coerceBool(cfg.ind_ema21, ui.indEma21.checked);
@@ -1129,11 +1439,18 @@
         if(ui.windowVal) ui.windowVal.textContent = formatWindow(ww);
       }
 
+      // Scale preset (requested window span).
+      // Kept intentionally simple: store as a small key ('1d','5d','1m','3m').
+      if(typeof cfg.span === 'string' && cfg.span.trim()){
+        setSpanPreset(cfg.span.trim(), { skipLoad: true, skipSave: true, skipUrl: true });
+      }
+
       if(typeof cfg.candleStyle === 'string' && cfg.candleStyle){
         setCandleStyle(cfg.candleStyle);
       }
 
       syncCandleStyleEnabled();
+      enforceAlwaysOnOptions();
       return true;
     } catch(_e){
       return false;
@@ -1150,6 +1467,7 @@
       ticker: getTicker(),
       symbol: getSymbol(),
       bar_s: Math.floor(Number(state.windowSec) || 60),
+      span: String(state.spanPreset || '1d'),
       auto_w: !!(ui.autoW && ui.autoW.checked),
       showBands: !!(ui.showBands && ui.showBands.checked),
       showCandles: !!(ui.showCandles && ui.showCandles.checked),
@@ -1162,6 +1480,9 @@
       smooth: !!(ui.smooth && ui.smooth.checked),
       outer: !!(ui.outer && ui.outer.checked),
       avgline: !!(ui.avgline && ui.avgline.checked),
+      sess_pre_market: !!(ui.sessPreMarket && ui.sessPreMarket.checked),
+      sess_after_hours: !!(ui.sessAfterHours && ui.sessAfterHours.checked),
+      sess_closed: !!(ui.sessClosed && ui.sessClosed.checked),
       ind_ema9: !!(ui.indEma9 && ui.indEma9.checked),
       ind_ema21: !!(ui.indEma21 && ui.indEma21.checked),
       ind_ema50: !!(ui.indEma50 && ui.indEma50.checked),
@@ -1427,6 +1748,8 @@
     indVwap: document.getElementById('indVwap'),
     indCandleBias: document.getElementById('indCandleBias'),
     window: document.getElementById('window'),
+    // These checkboxes are intentionally removed from the UI and forced always-on.
+    // They are kept as "virtual" controls so existing logic can continue to read ui.*.checked.
     autoW: document.getElementById('autoW'),
     grid: document.getElementById('grid'),
     scale: document.getElementById('scale'),
@@ -1443,13 +1766,242 @@
     candleStyleMenu: document.getElementById('candleStyleMenu'),
     candleStyleLabel: document.getElementById('candleStyleLabel'),
     windowVal: document.getElementById('windowVal'),
-    regen: document.getElementById('regen')
+    regen: document.getElementById('regen'),
+    // Footer session toggles
+    sessPreMarket: document.getElementById('sessPreMarket'),
+    sessAfterHours: document.getElementById('sessAfterHours'),
+    sessClosed: document.getElementById('sessClosed')
   };
 
-    var state = {
+  function makeAlwaysOnCheckbox(){
+    // Minimal interface used by the app: `.checked` and `.addEventListener`.
+    // We keep these as virtual controls so we can remove checkboxes from the UI
+    // while preserving existing code paths.
+    return {
+      checked: true,
+      disabled: true,
+      addEventListener: function(){ /* no-op */ }
+    };
+  }
+
+  function enforceAlwaysOnOptions(){
+    if(ui.autoW) ui.autoW.checked = true;
+    if(ui.showVolume) ui.showVolume.checked = true;
+    if(ui.grid) ui.grid.checked = true;
+    if(ui.scale) ui.scale.checked = true;
+  }
+
+  // Ensure virtual always-on controls exist even though their checkboxes are removed from the UI.
+  if(!ui.autoW) ui.autoW = makeAlwaysOnCheckbox();
+  if(!ui.showVolume) ui.showVolume = makeAlwaysOnCheckbox();
+  if(!ui.grid) ui.grid = makeAlwaysOnCheckbox();
+  if(!ui.scale) ui.scale = makeAlwaysOnCheckbox();
+  enforceAlwaysOnOptions();
+
+  // Scale preset (requested window span) helpers.
+  var SPAN_PRESETS = {
+    '1d': 24 * 60 * 60 * 1000,
+    '5d': 5 * 24 * 60 * 60 * 1000,
+    '1m': 30 * 24 * 60 * 60 * 1000,
+    '3m': 90 * 24 * 60 * 60 * 1000,
+    // Longer presets (future-proof). These are approximations; exact calendar months/years
+    // vary, but this is sufficient for bucket sizing + navigation UX.
+    '6m': 180 * 24 * 60 * 60 * 1000,
+    '1y': 365 * 24 * 60 * 60 * 1000,
+    '3y': 3 * 365 * 24 * 60 * 60 * 1000,
+    '5y': 5 * 365 * 24 * 60 * 60 * 1000
+  };
+  var SPAN_PRESET_ORDER = ['1d','5d','1m','3m','6m','1y','3y','5y'];
+
+  function normalizeSpanPreset(v){
+    var k = String(v || '').trim().toLowerCase();
+    if(SPAN_PRESETS[k]) return k;
+    return '1d';
+  }
+
+  function inferSpanPresetFromSpanMs(spanMs){
+    // "Reverse bracketing" (round-up / ceiling):
+    // - If span is between 5D and 1M, select 1M (even if not exact).
+    // - This matches the user expectation that the selector reflects the nearest *bucket above*.
+    var s = Number(spanMs);
+    if(!Number.isFinite(s) || s <= 0) return '1d';
+    var items = [];
+    for(var ii=0; ii<SPAN_PRESET_ORDER.length; ii++){
+      var kk = SPAN_PRESET_ORDER[ii];
+      var mm = Number(SPAN_PRESETS[kk]);
+      if(Number.isFinite(mm) && mm > 0) items.push({ k: kk, ms: mm });
+    }
+    items.sort(function(a,b){ return a.ms - b.ms; });
+    if(!items.length) return '1d';
+    for(var i=0;i<items.length;i++){
+      if(s <= items[i].ms) return items[i].k;
+    }
+    return items[items.length-1].k;
+  }
+
+  function updateSpanPresetAvailability(){
+    // Disable presets that exceed available dataset history.
+    // This is both UX (avoid "clickable but no data") and an implicit hint about history limits.
+    try{
+      var ds0 = Number(state && state.datasetStartMs);
+      var de0 = Number(state && state.datasetEndMs);
+      if(!Number.isFinite(ds0) || !Number.isFinite(de0) || de0 <= ds0) return;
+      var datasetSpan = de0 - ds0;
+      // Tolerance for "almost exactly N days" datasets (weekends, partial sessions, etc.)
+      var slack = 6 * 60 * 60 * 1000; // 6h
+      var keys = SPAN_PRESET_ORDER.slice();
+      var enabled = {};
+      for(var i=0;i<keys.length;i++){
+        var k = keys[i];
+        var need = Number(SPAN_PRESETS[k]) || 0;
+        var ok = (need <= 0) ? true : ((datasetSpan + slack) >= need);
+        enabled[k] = !!ok;
+        // Update DOM controls if present.
+        var input = document.querySelector('input[type="radio"][name="spanPreset"][value="' + k + '"]');
+        if(input){
+          input.disabled = !ok;
+          var lab = input.closest ? input.closest('label') : null;
+          if(lab){
+            if(!ok) lab.classList.add('isDisabled');
+            else lab.classList.remove('isDisabled');
+            lab.setAttribute('aria-disabled', (!ok) ? 'true' : 'false');
+          }
+        }
+      }
+      // Keep a copy for other logic (e.g. reverse-bracketing) to consult.
+      state._spanPresetEnabled = enabled;
+
+      // If current preset is no longer available, fall back to the largest available.
+      var cur = normalizeSpanPreset(state.spanPreset || '1d');
+      if(!enabled[cur]){
+        var pick = null;
+        for(var j=keys.length-1; j>=0; j--){
+          if(enabled[keys[j]]){ pick = keys[j]; break; }
+        }
+        if(!pick) pick = '1d';
+        // Only update indicator + persistence here; do not force a refetch loop.
+        state.spanPreset = pick;
+        state.viewSpanMs = Number(SPAN_PRESETS[pick]) || DEFAULT_INIT_SPAN_MS;
+        syncSpanPresetUi();
+        updateUrlBarSize();
+        scheduleSaveUiConfig();
+      } else {
+        // Keep UI consistent (e.g. after first bounds arrive).
+        syncSpanPresetUi();
+      }
+    } catch(_e){}
+  }
+
+  function currentEffectiveVisibleSpanMs(){
+    // Effective visible span is driven by zoom: visibleSpan = requestedSpan / xZoom.
+    // This matches user expectation when zooming in/out: the selector should reflect what you see.
+    try{
+      if(!Number.isFinite(state.viewSpanMs) || state.viewSpanMs <= 0) return NaN;
+      return getVisibleSpanMs(state.viewSpanMs);
+    } catch(_e){
+      return NaN;
+    }
+  }
+
+  function syncSpanPresetFromNavigation(opts){
+    // Keep the active radio (and optionally persistence) in sync with how the user has navigated.
+    // IMPORTANT: this does NOT change the span; it only updates the indicator + persistence.
+    var o = opts || {};
+    var span = currentEffectiveVisibleSpanMs();
+    if(!Number.isFinite(span) || span <= 0) return;
+    // Choose the "rounded up" preset, but never choose a disabled preset.
+    var inferred = inferSpanPresetFromSpanMs(span);
+    try{
+      var enabledMap = (state && state._spanPresetEnabled) ? state._spanPresetEnabled : null;
+      function isEnabled(k){
+        if(enabledMap && enabledMap[k] !== undefined) return !!enabledMap[k];
+        var el = document.querySelector('input[type="radio"][name="spanPreset"][value="' + k + '"]');
+        return el ? !el.disabled : true;
+      }
+      if(!isEnabled(inferred)){
+        // Find the smallest enabled preset >= current span (round-up among enabled),
+        // else fall back to the largest enabled.
+        var items2 = [];
+        for(var ii=0; ii<SPAN_PRESET_ORDER.length; ii++){
+          var kk = SPAN_PRESET_ORDER[ii];
+          var mm = Number(SPAN_PRESETS[kk]);
+          if(Number.isFinite(mm) && mm > 0) items2.push({ k: kk, ms: mm });
+        }
+        items2.sort(function(a,b){ return a.ms - b.ms; });
+        var pick = null;
+        for(var j=0;j<items2.length;j++){
+          if(span <= items2[j].ms && isEnabled(items2[j].k)){ pick = items2[j].k; break; }
+        }
+        if(!pick){
+          for(var r=items2.length-1; r>=0; r--){
+            if(isEnabled(items2[r].k)){ pick = items2[r].k; break; }
+          }
+        }
+        if(pick) inferred = pick;
+      }
+    } catch(_e){}
+    if(inferred !== state.spanPreset){
+      state.spanPreset = inferred;
+      syncSpanPresetUi();
+      if(!o.skipUrl) updateUrlBarSize();
+      if(!o.skipSave) scheduleSaveUiConfig();
+    } else {
+      // Still ensure UI reflects current state (e.g. after DOM reloads).
+      syncSpanPresetUi();
+    }
+  }
+
+  function syncSpanPresetUi(){
+    try{
+      var k = normalizeSpanPreset(state && state.spanPreset ? state.spanPreset : '1d');
+      var els = document.querySelectorAll('input[type="radio"][name="spanPreset"]');
+      for(var i=0;i<els.length;i++){
+        var el = els[i];
+        if(!el) continue;
+        el.checked = (String(el.value || '').toLowerCase() === k);
+      }
+    } catch(_e){}
+  }
+
+  function setSpanPreset(v, opts){
+    var o = opts || {};
+    var key = normalizeSpanPreset(v);
+    // If dataset bounds are known and this preset is not available, fall back to the largest available.
+    try{
+      updateSpanPresetAvailability();
+      var el = document.querySelector('input[type="radio"][name="spanPreset"][value="' + key + '"]');
+      if(el && el.disabled){
+        // pick the largest enabled
+        var keys = SPAN_PRESET_ORDER.slice();
+        for(var i=keys.length-1;i>=0;i--){
+          var k2 = keys[i];
+          var el2 = document.querySelector('input[type="radio"][name="spanPreset"][value="' + k2 + '"]');
+          if(el2 && !el2.disabled){ key = k2; break; }
+        }
+      }
+    } catch(_e){}
+    state.spanPreset = key;
+    state.viewSpanMs = Number(SPAN_PRESETS[key]) || DEFAULT_INIT_SPAN_MS;
+    // Picking a preset should show (roughly) that preset span immediately.
+    state.xZoom = 1;
+    // Preset selection implies "show me the latest N"; keep following latest.
+    state.followLatest = true;
+    if(Number.isFinite(state.datasetEndMs)) state.viewEndMs = state.datasetEndMs;
+    syncSpanPresetUi();
+    updateSpanPresetAvailability();
+    if(!o.skipUrl) updateUrlBarSize();
+    if(!o.skipSave) scheduleSaveUiConfig();
+    if(!o.skipLoad && !STATIC_MODE) loadFromAPI();
+  }
+
+  var state = {
+    // dataFull is the unfiltered window returned by the loader.
+    // data is the currently displayed view after applying session filters (TradingView-style).
+    dataFull: [],
     data: [],
     ha: [],
-    overlays: [], // [{t_ms,y,key,label,color,width}]
+    overlaysFull: [], // [{t_ms,y,key,label,color,width}] aligned with dataFull
+    overlays: [],     // [{t_ms,y,key,label,color,width}] aligned with data (filtered)
     candleStyle: 'std', // 'std' | 'ha'
     xOffset: 0,
     xZoom: 1,
@@ -1471,6 +2023,7 @@
     // Navigation anchor: requested window span (not the full dataset span).
     viewSpanMs: NaN,
     viewEndMs: NaN,
+    spanPreset: '1d',
     followLatest: true,
     datasetStartMs: NaN,
     datasetEndMs: NaN,
@@ -1600,28 +2153,70 @@
     draw();
   }
 
-  function drawGrid(plot){
-    var x = plot.x, y = plot.y, w = plot.w, h = plot.h;
+  function drawGrid(pricePlot, opts){
+    // If opts aren't provided (e.g. no-data state), fall back to a simple evenly-spaced grid.
+    var x = pricePlot.x, y = pricePlot.y, w = pricePlot.w, h = pricePlot.h;
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.06)';
     ctx.lineWidth = 1;
 
-    var rows = 6;
-    for(var i=0;i<=rows;i++){
-      var yy = y + (h/rows)*i;
+    var haveOpts = !!(opts && Number.isFinite(opts.yMin) && Number.isFinite(opts.yMax));
+    if(!haveOpts){
+      var rows = 6;
+      for(var i=0;i<=rows;i++){
+        var yy0 = y + (h/rows)*i;
+        ctx.beginPath();
+        ctx.moveTo(x, yy0);
+        ctx.lineTo(x+w, yy0);
+        ctx.stroke();
+      }
+      var cols = 10;
+      for(var j=0;j<=cols;j++){
+        var xx0 = x + (w/cols)*j;
+        ctx.beginPath();
+        ctx.moveTo(xx0, y);
+        ctx.lineTo(xx0, y+h);
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
+
+    // Horizontal grid lines: align to Y-axis price ticks.
+    var yMin = Number(opts.yMin), yMax = Number(opts.yMax);
+    var yTicksInfo = computePriceTicks(yMin, yMax, pricePlot.h, 58);
+    var yTicks = yTicksInfo && yTicksInfo.ticks ? yTicksInfo.ticks : [];
+    for(var yi=0; yi<yTicks.length; yi++){
+      var p = yTicks[yi];
+      var yy = yForPrice(p, pricePlot, yMin, yMax);
+      if(!Number.isFinite(yy)) continue;
       ctx.beginPath();
       ctx.moveTo(x, yy);
       ctx.lineTo(x+w, yy);
       ctx.stroke();
     }
 
-    var cols = 10;
-    for(var j=0;j<=cols;j++){
-      var xx = x + (w/cols)*j;
-      ctx.beginPath();
-      ctx.moveTo(xx, y);
-      ctx.lineTo(xx, y+h);
-      ctx.stroke();
+    // Vertical grid lines: align to X-axis time/date ticks (same step selection as axis labels).
+    var start = opts.start, end = opts.end, barsVisible = opts.barsVisible, plot = opts.plot;
+    var data = (state && Array.isArray(state.data)) ? state.data : null;
+    if(data && Number.isFinite(start) && Number.isFinite(end) && Number.isFinite(barsVisible) && plot && plot.w > 4){
+      var t0 = Number(data[start] && data[start].t);
+      var t1 = Number(data[end] && data[end].t);
+      var tInfo = computeTimeTicksBySpan(t0, t1, plot.w, 140);
+      if(tInfo){
+        for(var tm = tInfo.first; tm <= tInfo.t1; tm += tInfo.stepMs){
+          var idx = findIndexByTimeMs(data, tm);
+          if(idx < start) idx = start;
+          if(idx > end) idx = end;
+          var xx = xForIndex(idx + 0.5, plot, barsVisible);
+          if(!Number.isFinite(xx)) continue;
+          if(xx < x - 2 || xx > x + w + 2) continue;
+          ctx.beginPath();
+          ctx.moveTo(xx, y);
+          ctx.lineTo(xx, y+h);
+          ctx.stroke();
+        }
+      }
     }
 
     ctx.restore();
@@ -1635,6 +2230,64 @@
   function yForPrice(p, plot, yMin, yMax){
     var t = (p - yMin) / (yMax - yMin);
     return plot.y + plot.h * (1 - t);
+  }
+
+  function niceStep(step){
+    // "Nice number" tick step: 1, 2, 5 * 10^n
+    var s = Math.abs(Number(step));
+    if(!Number.isFinite(s) || s <= 0) return 1;
+    var exp = Math.floor(Math.log10(s));
+    var f = s / Math.pow(10, exp);
+    var nf;
+    if(f <= 1) nf = 1;
+    else if(f <= 2) nf = 2;
+    else if(f <= 5) nf = 5;
+    else nf = 10;
+    return nf * Math.pow(10, exp);
+  }
+
+  function decimalsForStep(step){
+    var s = Math.abs(Number(step));
+    if(!Number.isFinite(s) || s <= 0) return 2;
+    if(s >= 1) return 2;
+    // Enough precision to show distinct ticks; cap to keep labels sane.
+    var d = Math.ceil(-Math.log10(s)) + 1;
+    return clamp(d, 2, 6);
+  }
+
+  function computePriceTicks(yMin, yMax, plotH, minPxPerTick){
+    var a = Number(yMin), b = Number(yMax);
+    if(!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return [];
+    var h = Number(plotH);
+    if(!Number.isFinite(h) || h <= 0) h = 500;
+    var minPx = Number(minPxPerTick);
+    if(!Number.isFinite(minPx) || minPx < 20) minPx = 58;
+
+    var targetTicks = clamp(Math.floor(h / minPx), 3, 12);
+    var raw = (b - a) / targetTicks;
+    var step = niceStep(raw);
+    if(!Number.isFinite(step) || step <= 0) step = raw;
+
+    // Expand to nice boundaries so ticks align to round prices.
+    var lo = Math.floor(a / step) * step;
+    var hi = Math.ceil(b / step) * step;
+    // Guard against floating drift.
+    var eps = step * 1e-9;
+
+    var out = [];
+    for(var v = lo; v <= hi + eps; v += step){
+      // Avoid -0.00
+      var vv = (Math.abs(v) < eps) ? 0 : v;
+      out.push(vv);
+      if(out.length > 200) break;
+    }
+    // Keep only ticks that land within the visible range (with small epsilon).
+    var out2 = [];
+    for(var i=0;i<out.length;i++){
+      var t = out[i];
+      if(t >= a - eps && t <= b + eps) out2.push(t);
+    }
+    return { ticks: out2, step: step };
   }
 
   function chooseTimeStepMs(spanMs, plotW, minPxPerTick){
@@ -1661,6 +2314,16 @@
       if(steps[i] >= target) return steps[i];
     }
     return steps[steps.length-1];
+  }
+
+  function computeTimeTicksBySpan(t0, t1, plotW, minPxPerTick){
+    var a = Number(t0), b = Number(t1);
+    if(!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
+    var spanMs = b - a;
+    var stepMs = chooseTimeStepMs(spanMs, plotW, minPxPerTick);
+    var first = Math.floor(a / stepMs) * stepMs;
+    if(first < a) first += stepMs;
+    return { stepMs: stepMs, first: first, t0: a, t1: b };
   }
 
   // Display timezone: NYSE / Eastern Time (handles EST/EDT automatically).
@@ -1764,6 +2427,17 @@
     return clamp(lo, 0, data.length - 1);
   }
 
+  function rightAlignXView(){
+    // Default trading-chart convention: start with "current" (right edge) in view.
+    // This is the programmatic equivalent of panning all the way to the right.
+    var n = (state && Array.isArray(state.data)) ? state.data.length : 0;
+    if(!n) return;
+    var z = Number(state.xZoom);
+    if(!Number.isFinite(z) || z <= 0) z = 1;
+    var barsVisible = Math.min(n, Math.max(8, Math.floor(n / z)));
+    state.xOffset = Math.max(0, n - barsVisible);
+  }
+
   async function loadFromAPI(force){
     if(STATIC_MODE){
       return await loadFromStatic(force);
@@ -1820,6 +2494,7 @@
 
         state.viewSpanMs = spanMs0;
         state.viewEndMs = endMs0;
+        syncSpanPresetFromNavigation();
 
         start = msToIsoZ(startMs0);
         // omit end only in followLatest mode so server can extend window with live
@@ -1975,6 +2650,7 @@
         var de = parseIsoToMs(j.dataset_end);
         if(Number.isFinite(de)) state.datasetEndMs = de;
       }
+      updateSpanPresetAvailability();
       state._lastFullSyncAtMs = Date.now();
 
       // Cold-load UX:
@@ -1985,7 +2661,10 @@
         if(!state._bootstrappedInitialWindow){
           state._bootstrappedInitialWindow = true;
           state.viewEndMs = state.datasetEndMs;
-          state.viewSpanMs = clamp(DEFAULT_INIT_SPAN_MS, 60*1000, Math.max(60*1000, state.datasetEndMs - state.datasetStartMs));
+          // Respect any pre-selected preset; otherwise fall back to the default.
+          var pref = (Number.isFinite(state.viewSpanMs) && state.viewSpanMs > 0) ? Number(state.viewSpanMs) : DEFAULT_INIT_SPAN_MS;
+          state.viewSpanMs = clamp(pref, 60*1000, Math.max(60*1000, state.datasetEndMs - state.datasetStartMs));
+          syncSpanPresetFromNavigation();
           postBootstrapInitialWindow = true;
         }
       }
@@ -1994,6 +2673,7 @@
       if((explicitWindow || derivedWindow) && Number.isFinite(reqEndMs) && Number.isFinite(reqStartMs) && reqEndMs > reqStartMs){
         state.viewEndMs = reqEndMs;
         state.viewSpanMs = reqEndMs - reqStartMs;
+        syncSpanPresetFromNavigation();
       } else if(!hadReqWindow && j && j.start && j.end){
         // Discovery only: set end anchor so subsequent requests can be anchored consistently.
         var we2 = parseIsoToMs(j.end);
@@ -2111,15 +2791,21 @@
         } catch(_e){}
       }
 
+      // Store unfiltered window, then apply TradingView-style session filtering to build state.data.
+      state.dataFull = out;
+      state.overlaysFull = overlaysFull || [];
       state.data = out;
+      state._sessionType = computeSessionTypesForData(out);
       state.ha = computeHeikinAshi(out);
       state.overlays = overlaysFull || [];
+      applySessionFilter({ anchor: { t: anchorT, zoom: anchorZoom }, skipSave: true, skipDraw: true });
+      updateSessionCountsUi();
       // X view policy:
       // - If following latest: keep right-aligned but do NOT reset zoom.
       // - If not following latest: keep your pan/zoom centered on the previous time anchor.
       if(!Number.isFinite(state.xZoom) || state.xZoom <= 0) state.xZoom = 1;
       if(state.followLatest){
-        state.xOffset = 0; // draw() will right-align based on barsVisible
+        rightAlignXView();
       } else if(Number.isFinite(anchorT) && state.data.length){
         state.xZoom = anchorZoom;
         var n1 = state.data.length;
@@ -2298,6 +2984,7 @@
       }
       if(!Number.isFinite(state.datasetStartMs) && Array.isArray(j.t_ms) && j.t_ms.length) state.datasetStartMs = Number(j.t_ms[0]);
       if(!Number.isFinite(state.datasetEndMs) && Array.isArray(j.t_ms) && j.t_ms.length) state.datasetEndMs = Number(j.t_ms[j.t_ms.length-1]);
+      updateSpanPresetAvailability();
 
       var t = j.t_ms, o = j.o, h = j.h, l = j.l, c = j.c, v = j.v;
       if(!Array.isArray(t) || !Array.isArray(o) || !Array.isArray(h) || !Array.isArray(l) || !Array.isArray(c) || !Array.isArray(v)){
@@ -2326,12 +3013,18 @@
         out[i] = { t:Number(t[i]), o:Number(o[i]), h:Number(h[i]), l:Number(l[i]), c:Number(c[i]), v:Number(v[i]), bid:NaN, ask:NaN };
       }
       state.followLatest = false;
+      // Store full window, then filter displayed bars.
+      state.dataFull = out;
+      state.overlaysFull = overlays || [];
       state.data = out;
+      state._sessionType = computeSessionTypesForData(out);
       state.ha = computeHeikinAshi(out);
       state.overlays = overlays || [];
+      applySessionFilter({ skipSave: true, skipDraw: true });
+      updateSessionCountsUi();
       state.hoverIdx = -1;
       if(!Number.isFinite(state.xZoom) || state.xZoom <= 0) state.xZoom = 1;
-      state.xOffset = 0;
+      rightAlignXView();
       draw();
 
       if(ui.reqInfo){
@@ -2364,7 +3057,7 @@
       // Don't compete with an in-flight full request.
       if(ui.regen && ui.regen.disabled) return;
       // If we don't have a baseline yet, wait for the next full /window sync.
-      if(!Array.isArray(state.data) || state.data.length === 0) return;
+      if((!Array.isArray(state.dataFull) || state.dataFull.length === 0) && (!Array.isArray(state.data) || state.data.length === 0)) return;
 
       var sym = String(getSymbol() || '').trim();
       if(!sym) return;
@@ -2372,7 +3065,8 @@
       if(!Number.isFinite(barS) || barS <= 0) barS = 60;
       barS = snapToPreset(clamp(barS, 30, 86400));
 
-      var lastT = Number(state.data[state.data.length - 1].t);
+      var base = (Array.isArray(state.dataFull) && state.dataFull.length) ? state.dataFull : state.data;
+      var lastT = Number(base[base.length - 1].t);
       if(!Number.isFinite(lastT)) return;
       // Overlap a couple buckets to handle in-progress-bar updates.
       var sinceMs = lastT - (barS * 1000 * 2);
@@ -2387,11 +3081,15 @@
       if(!n) return;
 
       // Merge/append in time order.
+      if(!Array.isArray(state.dataFull) || !state.dataFull.length){
+        // Establish a full baseline if we only had filtered state.data.
+        state.dataFull = Array.isArray(state.data) ? state.data.slice() : [];
+      }
       for(var i=0;i<n;i++){
         var tt = Number(t[i]);
         if(!Number.isFinite(tt)) continue;
         var nb = { t: tt, o: Number(o[i]), h: Number(h[i]), l: Number(l[i]), c: Number(c[i]), v: Number(v[i]), bid: NaN, ask: NaN };
-        var cur = state.data;
+        var cur = state.dataFull;
         var m = cur.length;
         if(m === 0){
           cur.push(nb);
@@ -2413,9 +3111,11 @@
         }
       }
 
-      state.ha = computeHeikinAshi(state.data);
+      // Re-apply session filtering to update the visible dataset.
+      applySessionFilter({ skipSave: true, skipDraw: true });
+      updateSessionCountsUi();
       // Following latest: keep right-aligned.
-      state.xOffset = 0;
+      rightAlignXView();
       draw();
 
       // If the server reports a live_end watermark, use it to keep datasetEndMs moving.
@@ -2425,6 +3125,7 @@
           if(!Number.isFinite(state.datasetEndMs) || le > state.datasetEndMs) state.datasetEndMs = le;
         }
       }
+      updateSpanPresetAvailability();
     } catch(_e){
       // ignore transient errors during reloads
     }
@@ -2494,18 +3195,31 @@
     // Only the price pane participates in Y pan/zoom interactions.
     state._lastPlotH = pricePlot.h;
 
-    // y labels
+    // y labels (aligned to the same "nice" tick positions used by the grid)
     ctx.save();
     ctx.fillStyle = 'rgba(215,224,234,0.85)';
     ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    var rows = 6;
-    for(var i=0;i<=rows;i++){
-      var tt = i/rows;
-      var price = lerp(yMax, yMin, tt);
-      var yy = pricePlot.y + pricePlot.h * tt;
-      ctx.fillText(price.toFixed(2), pricePlot.x - 8, yy);
+    var yTicksInfo = computePriceTicks(yMin, yMax, pricePlot.h, 58);
+    var yTicks = (yTicksInfo && yTicksInfo.ticks && yTicksInfo.ticks.length) ? yTicksInfo.ticks : null;
+    if(!yTicks){
+      // Fallback to legacy fixed-row labels if tick computation fails.
+      var rows = 6;
+      for(var i=0;i<=rows;i++){
+        var tt = i/rows;
+        var price = lerp(yMax, yMin, tt);
+        var yy = pricePlot.y + pricePlot.h * tt;
+        ctx.fillText(price.toFixed(2), pricePlot.x - 8, yy);
+      }
+    } else {
+      var dec = decimalsForStep(yTicksInfo.step);
+      for(var yi=0; yi<yTicks.length; yi++){
+        var p = yTicks[yi];
+        var yy = yForPrice(p, pricePlot, yMin, yMax);
+        if(!Number.isFinite(yy)) continue;
+        ctx.fillText(Number(p).toFixed(dec), pricePlot.x - 8, yy);
+      }
     }
     ctx.restore();
 
@@ -2550,10 +3264,10 @@
       var t1 = Number(state.data[end].t);
       if(!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return;
 
-      var spanMs = t1 - t0;
-      var stepMs = chooseTimeStepMs(spanMs, plot.w, 140);
-      var first = Math.floor(t0 / stepMs) * stepMs;
-      if(first < t0) first += stepMs;
+      var tInfo = computeTimeTicksBySpan(t0, t1, plot.w, 140);
+      if(!tInfo) return;
+      var stepMs = tInfo.stepMs;
+      var first = tInfo.first;
 
       ctx.save();
       ctx.strokeStyle = 'rgba(255,255,255,0.08)';
@@ -2620,7 +3334,12 @@
     roundRect(ctx, plot.x + clipInset, plot.y + clipInset, plot.w - clipInset*2, plot.h - clipInset*2, 14 - clipInset);
     ctx.clip();
 
-    if(ui.grid.checked && pricePlot.w > 4 && pricePlot.h > 4) drawGrid(pricePlot);
+    // Session shading behind everything else (grid/candles/bands/volume).
+    drawSessionShading(plot, start, end, barsVisible);
+
+    if(ui.grid.checked && pricePlot.w > 4 && pricePlot.h > 4){
+      drawGrid(pricePlot, { yMin: yMin, yMax: yMax, plot: plot, start: start, end: end, barsVisible: barsVisible });
+    }
 
     var showBands = ui.showBands ? !!ui.showBands.checked : true;
     var showCandles = ui.showCandles ? !!ui.showCandles.checked : false;
@@ -3170,6 +3889,8 @@
     state.xOffset = anchorBar - tt * newBarsVisible;
 
     draw();
+    // Update the selector immediately (UI-only) based on what the user now sees.
+    try{ syncSpanPresetFromNavigation({ skipSave: true, skipUrl: true }); } catch(_e){}
 
     // If user zooms out to the point where we would show (nearly) all loaded bars, expand the
     // requested window span and refetch more history so zoom-out keeps working.
@@ -3189,11 +3910,20 @@
           var monthMs = 30 * 24 * 60 * 60 * 1000;
           var nextSpan = (curSpan >= monthMs) ? fullSpan : Math.floor(curSpan * 4.0);
           state.viewSpanMs = Math.min(fullSpan, Math.max(curSpan + 60*1000, nextSpan));
+          syncSpanPresetFromNavigation();
           if(windowTimer) clearTimeout(windowTimer);
           windowTimer = setTimeout(function(){ loadFromAPI(); }, 90);
         }
       }
     } catch(_e){}
+
+    // Debounce persistence (URL + localStorage) so we don't spam while wheel-scrolling.
+    try{
+      if(state._spanPresetCommitTimer) clearTimeout(state._spanPresetCommitTimer);
+      state._spanPresetCommitTimer = setTimeout(function(){
+        try{ syncSpanPresetFromNavigation({ skipSave: false, skipUrl: false }); } catch(_e2){}
+      }, 220);
+    } catch(_e3){}
 
     // Auto W recompute on zoom: if the recommended bar size changes, refetch.
     try{
@@ -3219,6 +3949,8 @@
     try{
       var u = new URL(window.location.href);
       u.searchParams.set('bar_s', String(Math.floor(state.windowSec)));
+      // Time scale preset (requested span).
+      if(state && state.spanPreset) u.searchParams.set('span', String(state.spanPreset));
       if(ui.autoW && ui.autoW.checked) u.searchParams.set('auto_w', '1');
       else u.searchParams.delete('auto_w');
       u.searchParams.set('max_bars', String(Math.floor(Number(getQueryParam('max_bars','') || '5000') || 5000)));
@@ -3231,10 +3963,8 @@
   }
 
   function setWindowSecFromUI(fromSlider){
-    // UX: if the user touches the bar size slider, treat that as "manual mode" and disable Auto W.
-    if(fromSlider && ui.autoW && ui.autoW.checked){
-      ui.autoW.checked = false;
-    }
+    // Auto W is always-on (removed from UI); bar-size changes do not disable it.
+    enforceAlwaysOnOptions();
     // Any direct interaction implies the user is exploring history; stop snapping back to latest.
     if(fromSlider) state.followLatest = false;
     var w = Number(ui.window.value);
@@ -3255,6 +3985,24 @@
   ui.window.addEventListener('input', function(){ setWindowSecFromUI(true); });
   ui.window.addEventListener('change', function(){ setWindowSecFromUI(true); });
   if(ui.autoW) ui.autoW.addEventListener('change', function(){ setWindowSecFromUI(false); });
+  // Scale preset radios (footer).
+  (function bindSpanPresetRadios(){
+    try{
+      var els = document.querySelectorAll('input[type="radio"][name="spanPreset"]');
+      for(var i=0;i<els.length;i++){
+        (function(el){
+          if(!el) return;
+          el.addEventListener('change', function(){
+            try{
+              if(!el.checked) return;
+              setSpanPreset(el.value, { skipLoad: false, skipSave: false, skipUrl: false });
+            } catch(_e){}
+          });
+        })(els[i]);
+      }
+      syncSpanPresetUi();
+    } catch(_e){}
+  })();
   // Candle style dropdown interactions
   if(ui.candleStyleBtn){
     ui.candleStyleBtn.addEventListener('click', function(e){
@@ -3299,6 +4047,11 @@
   function onToggleDraw(){
     draw();
     scheduleSaveUiConfig();
+  }
+
+  function onSessionFilterChanged(){
+    // Use TradingView-style filtering: remove off-hours bars from the rendered dataset.
+    applySessionFilter({ skipSave: false, skipDraw: false });
   }
 
   function recomputeOverlaysFromState(){
@@ -3363,6 +4116,9 @@
   if(ui.indCandleBias) ui.indCandleBias.addEventListener('change', onOverlayToggleChanged);
   if(ui.showBands) ui.showBands.addEventListener('change', onToggleDraw);
   if(ui.showVolume) ui.showVolume.addEventListener('change', onToggleDraw);
+  if(ui.sessPreMarket) ui.sessPreMarket.addEventListener('change', onSessionFilterChanged);
+  if(ui.sessAfterHours) ui.sessAfterHours.addEventListener('change', onSessionFilterChanged);
+  if(ui.sessClosed) ui.sessClosed.addEventListener('change', onSessionFilterChanged);
   if(ui.showCandles) ui.showCandles.addEventListener('change', function(){
     syncCandleStyleEnabled();
     onToggleDraw();
@@ -3487,14 +4243,19 @@
 
     assert(!!document.getElementById('showBands'), 'showBands exists');
     assert(!!document.getElementById('showCandles'), 'showCandles exists');
-    assert(!!document.getElementById('showVolume'), 'showVolume exists');
     assert(!!document.getElementById('tickerDD'), 'ticker dropdown exists');
     assert(!!document.getElementById('tickerBtn'), 'ticker dropdown button exists');
     assert(!!document.getElementById('tickerMenu'), 'ticker dropdown menu exists');
     assert(!!document.getElementById('candleStyleDD'), 'candleStyle dropdown exists');
     assert(!!document.getElementById('candleStyleBtn'), 'candleStyle button exists');
     assert(!!document.getElementById('candleStyleMenu'), 'candleStyle menu exists');
-    assert(!!document.getElementById('autoW'), 'autoW exists');
+    assert(!!document.getElementById('sessPreMarket'), 'session toggle pre-market exists');
+    assert(!!document.getElementById('sessAfterHours'), 'session toggle after-hours exists');
+    assert(!!document.getElementById('sessClosed'), 'session toggle closed exists');
+    assert(!!ui.autoW && ui.autoW.checked === true, 'autoW forced on');
+    assert(!!ui.showVolume && ui.showVolume.checked === true, 'showVolume forced on');
+    assert(!!ui.grid && ui.grid.checked === true, 'grid forced on');
+    assert(!!ui.scale && ui.scale.checked === true, 'scale forced on');
 
     var b0 = applyYScaleBounds(0, 10, 2);
     assert(Math.abs((b0.max - b0.min) - 20) < 1e-9, 'applyYScaleBounds doubles span');
@@ -3587,12 +4348,8 @@
       // - otherwise, if we did NOT load a saved config, default to enabled unless bar size is in URL
       var autoQ = getQueryParam('auto_w', '');
       if(ui.autoW){
-        if(autoQ !== ''){
-          ui.autoW.checked = (String(autoQ) === '1' || String(autoQ).toLowerCase() === 'true');
-        } else if(!persist.hadConfig) {
-          var hadBar = (getQueryParam('bar_s', '') !== '' || getQueryParam('w', '') !== '');
-          ui.autoW.checked = !hadBar;
-        }
+        // Auto W is always-on (removed from UI): ignore URL overrides.
+        ui.autoW.checked = true;
       }
 
       // Bar size from URL (?bar_s=60) or legacy (?w=60), else keep existing (config/default).
@@ -3606,6 +4363,18 @@
       ui.window.value = String(ww);
       ui.windowVal.textContent = formatWindow(state.windowSec);
 
+      // Scale preset from URL (?span=1d/5d/1m/3m), else keep config/default.
+      var spanQ = getQueryParam('span', '');
+      if(spanQ !== ''){
+        setSpanPreset(spanQ, { skipLoad: true, skipSave: true, skipUrl: true });
+      } else if(!persist.hadConfig) {
+        // Default to 1d unless a saved config provided something else.
+        setSpanPreset('1d', { skipLoad: true, skipSave: true, skipUrl: true });
+      } else {
+        // Ensure UI matches current state from config.
+        syncSpanPresetUi();
+      }
+
       // Candle style from URL or existing (config/default).
       var csQ = getQueryParam('candle_style', '');
       if(csQ !== '') setCandleStyle(csQ);
@@ -3613,6 +4382,7 @@
       syncCandleStyleEnabled();
 
       updateUrlBarSize();
+      enforceAlwaysOnOptions();
     })();
 
     // 3) Enable persistence after initial state is coherent.

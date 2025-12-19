@@ -1,247 +1,464 @@
-# Stock Ticker Dashboard - Requirements
+# ntree — Requirements & Technical Specification
+
+This document describes the **current** functionality and technical specifications implemented in this repo (Flask app, SQLite schema, APIs, UI pages, strategy/backtest semantics, and dependencies).
+
+---
 
 ## Overview
-A Python-based web application for displaying real-time stock ticker data for SPY and QQQ using the Alpaca API. The application provides a dashboard interface with interactive charts, technical indicators, trading strategy signals, backtesting capabilities, and incremental data updates.
 
-## Core Functionality
+`ntree` is a **local Flask web app** for:
 
-### 1. Data Storage
-- **Database**: SQLite database (`stock_data.db`)
-- **Schema**: 
-  - Stores OHLC (Open, High, Low, Close) price data
-  - Volume information
-  - Technical indicators: EMA 9, EMA 21, EMA 50, VWAP (both Alpaca-imported and pandas_ta calculated)
-  - MACD and MACD Signal (pandas_ta calculated)
-  - Supports multiple intervals (1-minute and 5-minute)
-  - Unique constraint on (ticker, timestamp, interval)
-  - Indexed for efficient queries on (ticker, interval, timestamp)
+- Viewing **real market OHLCV bars** ingested from **Alpaca** into SQLite (`stock_data.db`)
+- Viewing **synthetic OHLCV + L2-derived features** stored in SQLite (`bars` + `l2_state`)
+- Rendering interactive charts via **Chart.js (candlestick)** and an embedded **bandchart-style** demo page
+- Running strategy backtests via a small **engine** with explicit fill/stop/TP assumptions
 
-### 2. Data Ingestion
-- **Initial Data Load**: 
-  - Fetches last 5 days of historical data for SPY and QQQ
-  - Supports 1-minute and 5-minute intervals
-  - Uses Alpaca API IEX feed (free tier compatible)
-  - Calculates technical indicators during ingestion:
-    - EMA 9, EMA 21, EMA 50 (both pandas ewm() and pandas_ta)
-    - VWAP (anchored per trading day, resets at market open)
-- **Incremental Updates**:
-  - Fetches data from last timestamp in database
-  - Prevents duplicate data insertion
-  - Can be triggered via web interface button
-  - Automatically calculates technical indicators for new data
+### What this repo is *not*
 
-### 3. Web Dashboard
-- **Main Page (`/`)**:
-  - Grid view displaying all tickers (SPY, QQQ)
-  - Shows latest price and timestamp for each ticker
-  - Displays data range information (earliest to latest timestamp)
-  - Shows total number of records in database
-  - "Fetch Latest Data" button for manual incremental updates
-  - "Package POC" button to verify analytics packages installation
-  - Clickable rows to navigate to detailed ticker views
-  - Responsive design with modern gradient UI
+- Not a streaming “tick-by-tick” platform: real market data is ingested via **historical bars** and updated via a manual “Fetch Latest Data” action (`/api/fetch-latest`).
+- Not a Databento/FastAPI service: `bandchart.md` is a **design/notes** document; the running server here is **Flask** (`app.py`).
 
-### 4. Detail View
-- **Ticker Detail Page (`/ticker/<ticker>`)**:
-  - Interactive candlestick charts using Chart.js
-  - Interval selector (1-minute and 5-minute views)
-  - Toggleable technical indicators:
-    - **Alpaca imported indicators**: EMA 9, EMA 21, EMA 50, VWAP
-    - **Pandas calculated indicators**: EMA 9, EMA 21, EMA 50, VWAP, MACD + Signal
-  - MACD sub-chart display
-  - Market hours visualization (regular, pre-market, after-hours, closed)
-  - VWAP anchor points marked with green dots at market opens
-  - Strategy signal markers on chart
-  - Chart features:
-    - Zoom functionality (mouse wheel or Shift+Drag)
-    - Pan functionality (click and drag)
-    - Double-click to reset zoom
-    - Crosshair with price and time display
-    - Initial view shows last 1 day of data
-    - Custom tooltips showing OHLC values and strategy entry details
-    - Date labels below time axis
-  - Strategy backtesting interface:
-    - Strategy selector dropdown
-    - Run backtest button
-    - Display of backtest results (trades, win rate, avg return, median return)
-  - Back navigation to dashboard
+---
 
-### 5. Trading Strategies
-- **EMA + VWAP Pullback (v1.3)**:
-  - Trend filter: EMA21 > VWAP and EMA21 slope > 0
-  - Pullback: at least 2 of last 3 bars closed below EMA9
-  - Entry: close crosses up through EMA9
-  - Throttle: at most one entry every 20 bars
-  - Session: Regular Trading Hours (RTH) only
-- **VWAP Cross-over (v1)**:
-  - Intersection: VWAP crosses down from above both EMA9 and EMA21
-  - Follow-through: EMA9, EMA21, and VWAP slopes positive for at least 8 bars
-  - Entry at next bar open
-  - Session: RTH only
-- **VWAP / EMA Crossover (v1)**:
-  - Marks every intersection between VWAP and EMA21
-  - Session: All sessions (including off-hours)
-  - Direction indicators (bullish/bearish)
+## Runtime & Technology
 
-### 6. Backtesting
-- Simple backtest engine:
-  - Enter at next bar open
-  - Exit at same-bar close (toy implementation)
-  - Configurable fee basis points
-  - Metrics: number of trades, win rate, average return, median return
+- **Python**: **3.10+** (uses PEP-604 unions like `sqlite3.Connection | None`)
+- **Web server**: Flask dev server (`python app.py`)
+- **Database**: SQLite (`stock_data.db`)
+- **Frontend**: server-rendered HTML templates + CDN JS (Chart.js + financial/zoom plugins)
 
-### 7. API Endpoints
-- **GET `/`**: Main dashboard page
-- **GET `/ticker/<ticker>`**: Detail view for a specific ticker
-  - Query parameter: `interval` (1Min or 5Min, default: 1Min)
-- **GET `/api/ticker/<ticker>/<interval>`**: JSON API endpoint for chart data
-  - Returns: labels (timestamps), prices, OHLC data, technical indicators, market hours info, strategy signals
-- **POST `/api/fetch-latest`**: Fetches latest data from Alpaca API
-  - Returns: success status, records added, last timestamp
-- **POST `/api/strategy/<name>/backtest`**: Run backtest for a strategy
-  - Request body: `{ticker, interval, fee_bp}`
-  - Returns: strategy name, ticker, interval, metrics, number of bars, generated timestamp
-- **GET `/package-proof-of-concept`**: Package verification page
-  - Demonstrates numpy, scipy, statsmodels, pandas functionality
-  - Shows package versions and sample calculations
+---
 
-## Technical Requirements
+## Data Storage (SQLite)
 
-### Python Dependencies
-- **Flask 3.0.0** (web framework)
-- **alpaca-trade-api 3.1.1** (Alpaca API client)
-- **pandas >= 2.2.3** (data processing and analysis)
-- **pytz 2024.1** (timezone handling)
-- **numpy >= 1.24.0** (numerical computing, optional for analytics)
-- **scipy >= 1.10.0** (scientific computing, optional for analytics)
-- **statsmodels >= 0.14.0** (statistical modeling, optional for analytics)
-- **pandas-ta 0.4.71b0** (technical analysis indicators)
-- **SQLite3** (database, built-in Python module)
+Database is initialized on app startup (`init_database()` in `database.py`).
 
-### Frontend Libraries (CDN)
-- **Chart.js 4.4.0** (charting library)
-- **chartjs-adapter-date-fns 3.0.0** (date adapter for Chart.js)
-- **chartjs-plugin-zoom 2.0.1** (zoom/pan functionality)
-- **chartjs-chart-financial 0.2.1** (candlestick charts)
-- **Hammer.js 2.0.8** (touch gestures for mobile support)
+### 1) Legacy real bars table: `stock_data`
 
-### Configuration
-- Alpaca API credentials configured in `ingest_data.py` and `app.py`
-- Uses Alpaca paper trading API endpoint
-- IEX feed for data (free tier compatible)
-- Rate limiting: 0.5 second delay between API calls
-- Market hours: Regular Trading Hours (9:30 AM - 4:00 PM ET)
-- VWAP calculation: Anchored per trading day, resets at market open (9:30 AM ET)
+Used by:
+- Dashboard “Real Symbols”
+- `/api/ticker/<ticker>/<interval>`
+- `/window` (always pulls from `interval = '1Min'` and aggregates)
+- Alpaca ingestion scripts (`ingest_data.py`, `/api/fetch-latest`)
 
-### Database Requirements
-- SQLite database file: `stock_data.db`
-- Automatic schema initialization on application startup
-- Migration support for adding new columns
-- Unique constraint prevents duplicate entries
-- Indexed for efficient queries on (ticker, interval, timestamp)
+Key columns:
+- `ticker` (TEXT)
+- `timestamp` (TEXT, ISO string)
+- `interval` (TEXT, e.g. `1Min`, `5Min`)
+- OHLCV: `price` (close), `open_price`, `high_price`, `low_price`, `volume`
 
-## User Workflows
+Constraints:
+- `UNIQUE(ticker, timestamp, interval)`
+- Indexed by `(ticker, interval, timestamp)`
 
-### Initial Setup
-1. Install dependencies: `pip install -r requirements.txt`
-2. Initialize database: `python database.py` (or automatic on app startup)
-3. Ingest initial data: `python ingest_data.py`
-4. Start web application: `python app.py`
-5. Access dashboard at `http://localhost:5000`
-6. Verify packages: Visit `http://localhost:5000/package-proof-of-concept`
+### 2) Backtest persistence
 
-### Daily Usage
-1. View dashboard to see latest prices
-2. Click on ticker row to view detailed charts
-3. Switch between 1-minute and 5-minute intervals
-4. Toggle technical indicators on/off (Alpaca imported vs pandas calculated)
-5. View MACD sub-chart
-6. Select and run trading strategy backtests
-7. Use "Fetch Latest Data" button to update with new data
-8. Interact with charts (zoom, pan, reset, crosshair)
+#### `backtest_configs`
+Stores reusable parameter presets:
+- `name`
+- `risk_percent`
+- `reward_multiple`
+- `fee_bp`
 
-## Data Flow
-1. **Initial Ingestion**: `ingest_data.py` → Alpaca API → Calculate Indicators → SQLite
-2. **Incremental Update**: Web UI → `/api/fetch-latest` → Alpaca API → Calculate Indicators → SQLite
-3. **Display**: SQLite → Flask Routes → JSON API → Chart.js → Interactive Charts
-4. **Strategy Signals**: Price Data → Strategy Functions → Signal Markers on Chart
-5. **Backtesting**: Price Data + Strategy Signals → Backtest Engine → Performance Metrics
+#### `backtests`
+Stores named backtests and (optionally) saved metrics:
+- `name`, `strategy`, `ticker`, `interval`
+- `risk_percent`, `reward_multiple`, `fee_bp`
+- `metrics_json` (JSON string)
 
-## Technical Indicators
+### 3) Canonical bars table: `bars` (real + synthetic)
 
-### EMA (Exponential Moving Average)
-- Calculated using pandas `ewm()` function and pandas_ta library
-- Periods: 9, 21, 50
-- Used for trend analysis
-- Stored separately for Alpaca-imported and pandas_ta-calculated versions
+Used by synthetic flows today (and intended as the long-term canonical store):
+- `bars` (base rows)
+- `l2_state` (L2-derived features keyed by bar)
+- views: `bars_synth`, `bars_real`, `l2_state_synth`, `l2_state_real`
 
-### VWAP (Volume Weighted Average Price)
-- Calculated per trading day, anchored at market open (9:30 AM ET)
-- Resets each trading day
-- Typical price = (high + low + close) / 3
-- Used for intraday trading reference
-- Handles pre-market, regular hours, and after-hours data
+Key columns:
+- `symbol`, `timeframe` (`1m`, `5m`, `15m`, …)
+- `ts_start` (ISO string, bar open timestamp)
+- `duration_sec` (e.g. 60)
+- OHLCV: `open`, `high`, `low`, `close`, `volume`
+- `data_source` (e.g. `synthetic`, `alpaca_hist`, `alpaca_live`)
+- `scenario` (nullable; used for synthetic)
 
-### MACD (Moving Average Convergence Divergence)
-- Calculated using pandas_ta library
-- MACD line and Signal line
-- Displayed in separate sub-chart below main price chart
+Uniqueness:
+- unique index on `(symbol, timeframe, ts_start, data_source, scenario)`
 
-## Market Hours Detection
-- **Regular Trading Hours**: 9:30 AM - 4:00 PM ET
-- **Pre-Market**: 4:00 AM - 9:30 AM ET
-- **After-Hours**: 4:00 PM - 8:00 PM ET
-- **Closed**: 8:00 PM - 4:00 AM ET
-- Visual shading on charts to indicate market session type
-- VWAP resets at market open (9:30 AM ET)
+### 4) L2 feature table: `l2_state`
 
-## UI/UX Features
-- Modern gradient design (purple/blue theme)
-- Responsive layout with full-width chart support
-- Loading states and status messages
-- Error handling with user-friendly messages
-- Smooth transitions and hover effects
-- Accessible color scheme and contrast
-- Interactive crosshair with price/time display
-- Market hours legend
-- Strategy parameter and result cards
-- Volume bars with color coding (green/red based on price movement)
+Keyed by `bar_id` (FK to `bars.id`, cascade delete).
 
-## Error Handling
-- Graceful handling of missing data
-- API error handling with user feedback
-- Database error handling
-- Timestamp parsing fallbacks
-- Empty data set handling
-- Optional package imports (numpy, scipy, statsmodels) - app works without them
-- Fallback indicator calculations when pandas_ta unavailable
+Fields include:
+- `dbi` (depth imbalance)
+- `ofi` (order flow imbalance)
+- `spr` (spread)
+- `microprice`
+- plus additional research fields (`bbs`, `bas`, `sigma_spr`, `frag`, `d_micro`, `tss`)
 
-## Performance Considerations
-- Database indexing for fast queries
-- Rate limiting for API calls
-- Efficient data processing with pandas
-- Chart rendering optimization
-- Initial zoom to show recent data only
-- Lazy loading of strategy signals
-- On-demand indicator calculation when missing from database
+---
 
-## Analytics Package Support
-- Optional packages (numpy, scipy, statsmodels) for advanced analytics
-- Package verification page to test installations
-- Graceful degradation when packages unavailable
-- Future-ready for advanced statistical analysis and modeling
+## Data Ingestion & Updates
 
-## Future Enhancement Opportunities
-- Support for additional tickers
-- Additional time intervals (15Min, 1Hour, 1Day)
-- More technical indicators (RSI, Bollinger Bands, Stochastic)
-- Real-time data streaming via WebSockets
-- Historical data export (CSV, JSON)
-- User preferences/settings persistence
-- Alert/notification system
-- Portfolio tracking features
-- Advanced backtesting with position sizing and risk management
-- Strategy optimization and parameter tuning
-- Paper trading simulation
-- Performance analytics and reporting
+### Alpaca (real data)
+
+There are two ways real data enters `stock_data`:
+
+- **Initial backfill**: `python ingest_data.py`
+  - Fetches last ~5 days of 1Min/5Min bars for `SPY` and `QQQ`
+  - Inserts OHLCV into `stock_data`
+  - Uses the Alpaca IEX feed (`feed='iex'`)
+  - Sleeps `0.5s` between requests (rate limiting)
+
+- **Incremental update via UI**: `POST /api/fetch-latest`
+  - Finds the max timestamp in `stock_data`, then fetches bars from `last+1min` to now
+  - Uses `list_all_tickers()` if the DB already contains symbols; otherwise defaults to `['SPY','QQQ']`
+  - Inserts OHLCV into `stock_data`
+
+**Credential handling (current implementation)**:
+- `ingest_data.py` and `app.py` currently contain **hard-coded Alpaca credentials**.
+- `python-dotenv` exists in `requirements.txt` and `test_env.py` can load `.env`, but the main Flask app does **not** currently call `load_dotenv()` automatically.
+
+### Synthetic data generation
+
+Synthetic series are generated in Python and persisted into `bars` + `l2_state`.
+
+- Example script: `python test_synth.py`
+- Generator: `synthetic_generators/trend_regime_v1.py`
+  - Produces OHLCV bars and aligned L2 feature rows
+  - Scenario name: `trend_regime_v1`
+  - Supported timeframes: `1m`, `5m`, `15m` (app validation)
+
+Persistence helper:
+- `synthetic_generators.base.write_synthetic_series_to_db()`
+
+---
+
+## Web UI Pages
+
+### Dashboard
+
+- **GET `/`**
+  - Shows “Real Symbols” (from `stock_data`, interval `1Min`)
+  - Shows “Synthetic Data Sets” (from `bars_synth` view)
+  - “Fetch Latest Data” triggers `POST /api/fetch-latest`
+  - Clicking a real symbol opens **band view**: `/ticker/<SYMBOL>?band`
+  - Clicking a synthetic dataset opens: `/synthetic/<SYMBOL>?scenario=<...>&timeframe=<...>`
+
+### Real symbol detail
+
+- **GET `/ticker/<ticker>`**
+  - Default renders `templates/detail.html` (candlestick + indicators + strategy tools)
+  - Query params:
+    - `interval` (default `1Min`; commonly `1Min`/`5Min`)
+    - `band` (renders `templates/ticker_band.html`, which iframes `demo_static.html?mode=api`)
+    - `legacy` (reserved override; currently still renders `detail.html`)
+
+### Synthetic symbol detail
+
+- **GET `/synthetic/<symbol>`**
+  - Requires query params:
+    - `scenario` (required)
+    - `timeframe` in `{1m,5m,15m}` (default `1m`)
+  - Renders `templates/detail.html` with synthetic mode enabled:
+    - Data fetched from `/api/synthetic_bars`
+    - Optional L2 overlay can be loaded from `/api/synthetic_l2`
+
+### Standalone demo page
+
+- **GET `/demo_static.html`**
+  - Serves the static demo (`demo_static.html`)
+  - Used by band view: `/ticker/<sym>?band` → iframe → `/demo_static.html?mode=api&symbol=<sym>`
+  - Grid lines are axis-driven:
+    - Horizontal grid aligns to Y-axis price ticks (nice intervals)
+    - Vertical grid aligns to X-axis time/date ticks (adaptive with zoom/span)
+
+### Backtest configuration page
+
+- **GET `/backtest-config`**
+  - UI for running and storing backtests/presets.
+
+### Package proof-of-concept
+
+- **GET `/package-proof-of-concept`**
+  - Displays versions and sample calculations for optional analytics packages:
+    - numpy/scipy/statsmodels (if installed)
+
+---
+
+## HTTP API (Flask)
+
+### Bandchart-style window endpoint
+
+- **GET `/window`**
+
+Purpose:
+- Provide a **windowed** bar payload shaped for the bandchart demo.
+
+Query parameters:
+- `symbol` (required): symbol/ticker (uppercased)
+- `bar_s` (optional, default `60`): aggregation size in seconds; values `<60` are forced to `60`
+- `start`, `end` (optional ISO timestamps): window selection; if both omitted, defaults to **last 1 hour**
+- `max_bars` (optional) or legacy `limit` (optional): truncation cap (clamped to `[1, 200000]`)
+
+Data source:
+- Always reads base 1-minute rows from `stock_data` where `interval='1Min'`, then aggregates to `bar_s`.
+
+Response shape (arrays aligned 1:1):
+- `t_ms`, `o`, `h`, `l`, `c`, `v`
+- `dataset_start`, `dataset_end` (bounds of available data for the symbol)
+- `start`, `end` (served window bounds)
+- `truncated`, `max_bars`
+
+### Symbol discovery
+
+- **GET `/api/symbols`**
+  - Returns chart-ready symbols from `stock_data` interval `1Min`
+  - Response items shaped like: `{ "dataset": "<sym>", "symbol": "<sym>" }`
+
+### Real ticker chart data
+
+- **GET `/api/ticker/<ticker>/<interval>`**
+
+Returns a JSON payload for `templates/detail.html` including:
+- `labels`: list of ISO timestamps (from `stock_data.timestamp`)
+- `prices`: list of closes
+- `ohlc`: list of `{open,high,low,close,volume}`
+- `indicators`: `{}` (deprecated; “alpaca imported” indicators are no longer used)
+- `indicators_ta`:
+  - `ema_9`, `ema_21`, `ema_50`
+  - `vwap` (anchored per trading day via `utils.calculate_vwap_per_trading_day()`)
+  - `macd`, `macd_signal`
+  - Calculated on-the-fly (pandas_ta if installed; otherwise pandas fallbacks)
+- `market_hours`: session segmentation (regular / pre_market / after_hours / closed)
+- `market_opens`: market open timestamps used for VWAP reset markers
+- `strategies`: per-strategy signal payloads
+- `candle_bias`: candlestick pattern classifications (educational overlay)
+- `pattern_counts`: counts of pattern occurrences in `candle_bias`
+
+### Synthetic dataset discovery
+
+- **GET `/api/synthetic_datasets`**
+  - Returns distinct (symbol, scenario, timeframe) groups from `bars_synth`
+  - Includes min/max timestamps and bar counts
+
+### Synthetic bars
+
+- **GET `/api/synthetic_bars`**
+
+Query parameters:
+- `symbol` (required)
+- `scenario` (required)
+- `timeframe` (optional, default `1m`, allowed: `1m|5m|15m`)
+- `start_ts`, `end_ts` (optional ISO bounds)
+- `limit` (optional, default 1000, max 5000)
+
+Response:
+- List of `{ts_start, open, high, low, close, volume}`
+
+### Synthetic L2 series
+
+- **GET `/api/synthetic_l2`**
+  - Query params: `symbol`, `scenario`, `timeframe`
+  - Response rows aligned to bars by `ts_start`:
+    - `{ts_start, dbi, ofi, spr, microprice}`
+
+### Strategy backtest (ad-hoc)
+
+- **POST `/api/strategy/<name>/backtest`**
+  - Request body:
+    - `ticker`, `interval`
+    - `fee_bp` (default 0)
+    - `risk_percent` (default 0.5)
+    - `reward_multiple` (default 2.0)
+  - Runs: strategy signals → engine execution model → summary metrics
+
+### Backtest configs (presets)
+
+- **GET `/api/backtest-configs`**
+- **POST `/api/backtest-configs`**
+- **DELETE `/api/backtest-configs/<id>`**
+
+### Saved backtests
+
+- **GET `/api/backtests`** (list most recent 100)
+- **POST `/api/backtests`** (create a named record; can optionally run immediately)
+- **GET `/api/backtests/<id>`**
+- **POST `/api/backtests/<id>/run`** (re-run and update stored metrics)
+- **DELETE `/api/backtests/<id>`**
+
+### Real data refresh
+
+- **POST `/api/fetch-latest`**
+  - Fetches latest bars from Alpaca and upserts into `stock_data`
+
+---
+
+## Strategies (current)
+
+Strategies live in `strategies/` and are registered in `strategies.STRATEGY_REGISTRY`.
+
+### Strategy input contract
+
+Each strategy expects a `pandas.DataFrame`:
+- Index: timestamps (converted via `pd.to_datetime`)
+- Columns: `open`, `high`, `low`, `close`, `volume`
+
+`rth_mask`:
+- Optional boolean mask aligned to bars
+- If missing/invalid, strategies default to allowing all sessions
+
+### Strategy output contract (UI + engine compatibility)
+
+Strategy functions return a dict of same-length arrays. For engine compatibility, the following are used:
+- `long_entry`: list[bool] aligned 1:1 with bars
+- `direction`: list of `'bullish'|'bearish'|None` aligned 1:1 with bars
+
+The engine normalizes these into canonical:
+- `entry` (from `entry` if present else `long_entry`)
+- `side` (+1 long, -1 short derived from `direction`)
+
+### Implemented strategies
+
+- **`vwap_ema_crossover_v1`**
+  - Computes `ema21` and anchored `vwap` if missing
+  - Entry on sign change of `(vwap - ema21)`
+  - Direction labeling: `'bullish'` when `vwap - ema21 < 0`, else `'bearish'`
+
+- **`fools_paradise`**
+  - Computes `ema9`, `ema21`, `ema50`, and anchored `vwap` if missing
+  - Bullish setup: EMA slopes up + close > vwap; enter on first green candle
+  - Bearish setup: EMA slopes down + close < vwap; enter on first red candle
+  - Emits exit markers for visualization, but **the backtest engine currently ignores explicit strategy exits**
+
+---
+
+## Backtesting Engine & Execution Semantics
+
+Backtesting entry point:
+- `engine.runner.run_backtest()`
+- Compatibility shim: `backtesting.py` re-exports `run_backtest` and `RiskRewardExecutionModel`
+
+Default execution model:
+- `engine.execution.RiskRewardExecutionModel`
+
+Key semantics (also validated in `tests/test_engine_execution_model.py`):
+- **Signal timing**: signals are computed on bar close (strategy contract)
+- **Fill policy**: entry signal at bar `i` fills at **next bar open** (`i+1`)
+- **Stops/targets**:
+  - `risk_percent` is a percentage distance from entry
+  - `reward_multiple` sets TP distance = `reward_multiple * risk`
+- **Tie-break**: if TP and SL are both crossed in the same bar, whichever is **closer to the bar open** is assumed to hit first
+- **Fees**: `fee_bp` subtracts `fee_bp/10000` from return per trade
+- **No overlapping trades**: engine skips signals during an open position window
+
+Returned metrics:
+- `n_trades`, `win_rate`, `avg_ret`, `median_ret`
+
+---
+
+## Technical Indicators & Overlays
+
+### Indicator computation (real tickers)
+
+Indicators are computed **on demand** in `/api/ticker/...` (not stored in SQLite):
+- EMA(9/21/50): `pandas_ta.ema` if available; otherwise pandas `ewm()`
+- MACD + signal: `pandas_ta.macd` if available; otherwise EMA(12/26/9) fallback
+- VWAP: anchored per trading day in **US/Eastern** (see `utils.calculate_vwap_per_trading_day`)
+
+### Candlestick bias overlay (educational)
+
+`/api/ticker/...` also computes:
+- `candle_bias`: per-bar pattern classification (single/pair/trio + fair value gap)
+- `pattern_counts`: counts of each pattern type
+
+This is an educational overlay, not used by the backtest engine.
+
+---
+
+## Dependencies
+
+### Python (`requirements.txt`)
+
+Installed via:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Core:
+- `flask==3.0.0`
+- `alpaca-trade-api==3.1.1`
+- `pandas>=2.2.3`
+- `pytz==2024.1`
+- `numpy>=1.24.0` (used by candlestick analysis + general numeric ops)
+- `pandas-ta==0.4.71b0` (used when available; code has fallbacks but dependency is included)
+- `python-dotenv>=1.0.0` (used by scripts; app does not auto-load `.env` today)
+
+Optional (only used by `/package-proof-of-concept` when installed):
+- `scipy>=1.10.0`
+- `statsmodels>=0.14.0`
+
+### Frontend (CDN, templates)
+
+From `templates/detail.html` / `templates/synthetic_detail.html`:
+- `chart.js@3.9.1`
+- `chartjs-adapter-date-fns@2.0.0`
+- `chartjs-chart-financial@0.2.1`
+- `chartjs-plugin-zoom@1.2.1` (detail view)
+- `hammerjs@2.0.8` (detail view)
+
+---
+
+## Common Workflows
+
+### Initial setup
+
+1) Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+2) Initialize DB schema:
+
+```bash
+python database.py
+```
+
+3) Ingest initial real bars:
+
+```bash
+python ingest_data.py
+```
+
+4) (Optional) Generate synthetic bars:
+
+```bash
+python test_synth.py
+```
+
+5) Start the app:
+
+```bash
+python app.py
+```
+
+Open:
+- `http://127.0.0.1:5000/`
+
+### Run tests
+
+```bash
+python -m unittest
+```
+
+---
+
+## Notes & Constraints
+
+- **Base resolution**: real data is stored/queried as 1-minute bars; `/window` aggregates upward and will not serve sub-minute candles (`bar_s < 60` is forced to 60).
+- **Time zones**:
+  - DB timestamps are treated as ISO strings, generally UTC
+  - VWAP anchoring and “trading day” logic is based on **US/Eastern** market session rules.
+
 
