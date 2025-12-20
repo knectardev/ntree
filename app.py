@@ -1,5 +1,5 @@
 from flask import Flask, render_template, jsonify, request, send_file
-from database import get_db_connection, init_database, get_synthetic_datasets, list_real_tickers, list_all_tickers
+from database import get_db_connection, init_database, get_synthetic_datasets, list_real_tickers, list_all_tickers, list_chart_tickers
 from datetime import datetime, timedelta, timezone
 import alpaca_trade_api as tradeapi
 import time
@@ -175,9 +175,16 @@ def api_window():
         return _bad_request("missing_params", "symbol is required", fields=["symbol"])
 
     bar_s = request.args.get("bar_s", type=int) or 60
-    if bar_s < 60:
-        # This app's canonical store is 1-minute bars; keep UI honest (see bandchart.md).
+    # UI supports 30s minimum and expects bar sizes snapped to sensible presets.
+    # Normalize to a multiple of 30 seconds to keep candle boundaries consistent.
+    try:
+        bar_s = int(bar_s)
+    except Exception:
         bar_s = 60
+    if bar_s < 30:
+        bar_s = 30
+    if bar_s % 30 != 0:
+        bar_s = max(30, (bar_s // 30) * 30)
 
     max_bars = request.args.get("max_bars", type=int)
     limit_legacy = request.args.get("limit", type=int)
@@ -190,14 +197,35 @@ def api_window():
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-        # Find dataset bounds from the canonical 1Min store.
+
+        # Choose the best available base interval for this symbol.
+        # - Prefer 30-second bars if present (supports sub-minute band chart).
+        # - Fall back to 1-minute otherwise.
+        cur.execute(
+            """
+            SELECT 1
+            FROM stock_data
+            WHERE ticker = ? AND interval = '30Sec'
+            LIMIT 1
+            """,
+            (symbol,),
+        )
+        has_30s = cur.fetchone() is not None
+        base_interval = "30Sec" if has_30s else "1Min"
+        base_bar_s = 30 if has_30s else 60
+
+        # Never downsample below the stored base resolution.
+        if int(bar_s) < int(base_bar_s):
+            bar_s = int(base_bar_s)
+
+        # Find dataset bounds from the base store.
         cur.execute(
             """
             SELECT MIN(timestamp) AS min_ts, MAX(timestamp) AS max_ts
             FROM stock_data
-            WHERE ticker = ? AND interval = '1Min'
+            WHERE ticker = ? AND interval = ?
             """,
-            (symbol,),
+            (symbol, base_interval),
         )
         row = cur.fetchone()
         if not row or not row[0] or not row[1]:
@@ -251,7 +279,7 @@ def api_window():
         start_ms = max(ds_start_ms, int(start_ms))
         end_ms = min(ds_end_ms, int(end_ms))
 
-        # Pull base 1Min bars in the requested window.
+        # Pull base bars in the requested window.
         start_sec = int(start_ms // 1000)
         end_sec = int(end_ms // 1000)
         cur.execute(
@@ -265,12 +293,12 @@ def api_window():
                 COALESCE(volume, 0)          AS v
             FROM stock_data
             WHERE ticker = ?
-              AND interval = '1Min'
+              AND interval = ?
               AND strftime('%s', timestamp) >= ?
               AND strftime('%s', timestamp) <= ?
             ORDER BY timestamp ASC
             """,
-            (symbol, str(start_sec), str(end_sec)),
+            (symbol, base_interval, str(start_sec), str(end_sec)),
         )
         base_rows = cur.fetchall()
 
@@ -329,7 +357,7 @@ def index():
     
     # Get latest price for each ticker
     tickers_data = []
-    real_tickers = list_real_tickers("1Min")
+    real_tickers = list_chart_tickers()
     for ticker in real_tickers:
         cursor.execute('''
             SELECT ticker, price, timestamp, interval
@@ -389,7 +417,7 @@ def index():
 @app.route("/api/symbols")
 def api_symbols():
     """List real symbols available in the SQLite DB (matches dashboard 'Real Symbols')."""
-    syms = list_real_tickers("1Min")
+    syms = list_chart_tickers()
     # demo_static.html expects items shaped like {dataset,symbol}; we set dataset=symbol
     # so the single dropdown can show the symbols directly.
     return jsonify([{"dataset": s, "symbol": s} for s in syms])

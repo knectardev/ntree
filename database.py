@@ -254,6 +254,36 @@ def list_real_tickers(interval: str = "1Min") -> List[str]:
     return out
 
 
+def list_chart_tickers() -> List[str]:
+    """
+    Return distinct tickers that are chartable in this app.
+
+    The band chart (`/window`) supports 30-second bars when present, otherwise falls back to 1-minute.
+    We therefore include tickers with either `interval='30Sec'` or `interval='1Min'`.
+    """
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT ticker
+            FROM stock_data
+            WHERE interval IN ('30Sec', '1Min')
+            ORDER BY ticker ASC
+            """
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    out: List[str] = []
+    for (t,) in rows:
+        if not t:
+            continue
+        out.append(str(t).strip().upper())
+    return out
+
+
 def list_all_tickers() -> List[str]:
     """Return distinct tickers present in stock_data across all intervals."""
     conn = get_db_connection()

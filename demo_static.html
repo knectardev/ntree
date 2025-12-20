@@ -370,6 +370,9 @@
             <label for="window">Bar size (W)</label>
             <input id="window" type="range" min="30" max="86400" value="60" step="30" />
             <span id="windowVal" class="k mono">60s</span>
+            <label title="Auto-select bar size to keep the number of candles reasonable for the current zoom/span. Turn off to manually pick bar size.">
+              <input id="autoW" type="checkbox" checked /> Auto
+            </label>
           </div>
         </div>
         <div class="footerMid" aria-label="Market session shading toggles">
@@ -676,6 +679,18 @@
       var tm = Number(d.t);
       var st = Number.isFinite(tm) ? sessionTypeForMsEt(tm) : 'closed';
       if(sessionTypeAllowed(st, flags)) filtered.push(d);
+    }
+
+    // If the chosen session filters yield no bars, auto-recover to "show all sessions"
+    // to avoid an empty/blank chart (common source of "crash" reports when zooming).
+    if(!filtered.length && base.length){
+      try{
+        if(ui.sessPreMarket) ui.sessPreMarket.checked = true;
+        if(ui.sessAfterHours) ui.sessAfterHours.checked = true;
+        if(ui.sessClosed) ui.sessClosed.checked = true;
+      } catch(_e0){}
+      filtered = base.slice();
+      flags = getSessionFilterFlags();
     }
 
     state.data = filtered;
@@ -1658,16 +1673,10 @@
   // - static mode: can support 30s (if your dataset provides it)
   // - api mode (SQLite 1m canonical): minimum resolution is 60s (see bandchart.md note)
   // Keep this list ordered ascending.
-  var SNAP_PRESETS = [
-    // Canonical TFs only (client-side contract).
-    // NOTE: UI and backend aggregation plans assume exactly this set.
-    30, 60, 300, 1800, 3600, 14400, 86400
-  ];
-
-  // If we're in API mode backed by a 1-minute store, remove 30s to keep the UI honest.
-  if(!STATIC_MODE){
-    SNAP_PRESETS = [60, 300, 1800, 3600, 14400, 86400];
-  }
+  //
+  // API mode can serve 30s for symbols that have 30-second base data (e.g. Databento-ingested),
+  // and the backend will clamp to 60s for symbols that only have 1-minute data.
+  var SNAP_PRESETS = [30, 60, 300, 1800, 3600, 14400, 86400];
 
   // Auto W targets roughly this many candles on screen.
   // Clamp is applied at call-sites to keep behavior stable if this value changes.
@@ -1748,8 +1757,8 @@
     indVwap: document.getElementById('indVwap'),
     indCandleBias: document.getElementById('indCandleBias'),
     window: document.getElementById('window'),
-    // These checkboxes are intentionally removed from the UI and forced always-on.
-    // They are kept as "virtual" controls so existing logic can continue to read ui.*.checked.
+    // Some checkboxes may be removed from the UI; we keep "virtual" controls so existing
+    // logic can continue to read ui.*.checked.
     autoW: document.getElementById('autoW'),
     grid: document.getElementById('grid'),
     scale: document.getElementById('scale'),
@@ -1785,13 +1794,13 @@
   }
 
   function enforceAlwaysOnOptions(){
-    if(ui.autoW) ui.autoW.checked = true;
     if(ui.showVolume) ui.showVolume.checked = true;
     if(ui.grid) ui.grid.checked = true;
     if(ui.scale) ui.scale.checked = true;
   }
 
-  // Ensure virtual always-on controls exist even though their checkboxes are removed from the UI.
+  // Ensure virtual always-on controls exist even though their checkboxes may be removed from the UI.
+  // Auto W is user-controllable; the others are forced on.
   if(!ui.autoW) ui.autoW = makeAlwaysOnCheckbox();
   if(!ui.showVolume) ui.showVolume = makeAlwaysOnCheckbox();
   if(!ui.grid) ui.grid = makeAlwaysOnCheckbox();
@@ -3963,10 +3972,11 @@
   }
 
   function setWindowSecFromUI(fromSlider){
-    // Auto W is always-on (removed from UI); bar-size changes do not disable it.
+    // If the user touches the bar size slider, treat that as a manual override and disable Auto W.
     enforceAlwaysOnOptions();
     // Any direct interaction implies the user is exploring history; stop snapping back to latest.
     if(fromSlider) state.followLatest = false;
+    if(fromSlider && ui.autoW) ui.autoW.checked = false;
     var w = Number(ui.window.value);
     // App is always in snapped mode: bar size is restricted to preset increments.
     w = snapToPreset(w);
@@ -4049,8 +4059,18 @@
     scheduleSaveUiConfig();
   }
 
-  function onSessionFilterChanged(){
+  function onSessionFilterChanged(e){
     // Use TradingView-style filtering: remove off-hours bars from the rendered dataset.
+    // Guard: never allow all sessions to be disabled (otherwise the chart becomes empty/blank).
+    try{
+      var pre = ui.sessPreMarket ? !!ui.sessPreMarket.checked : true;
+      var after = ui.sessAfterHours ? !!ui.sessAfterHours.checked : true;
+      var closed = ui.sessClosed ? !!ui.sessClosed.checked : true;
+      if(!pre && !after && !closed){
+        // Re-enable the one the user just tried to turn off.
+        if(e && e.target && typeof e.target.checked === 'boolean') e.target.checked = true;
+      }
+    } catch(_e){}
     applySessionFilter({ skipSave: false, skipDraw: false });
   }
 
@@ -4211,11 +4231,11 @@
     assert(snapToPreset(61) === 60, 'snap 61->60');
     assert(snapToPreset(89) === 60, 'snap 89->60');
     assert(snapCeilToPreset(61) === 300, 'snapCeil 61->300');
-    assert(snapCeilToPreset(1) === (STATIC_MODE ? 30 : 60), 'snapCeil clamps min preset');
+    assert(snapCeilToPreset(1) === 30, 'snapCeil clamps min preset');
     assert(snapCeilToPreset(86400) === 86400, 'snapCeil 86400->86400');
 
     // Minimum bar size is the smallest preset, even if the span/target would imply smaller.
-    assert(recommendBarSec(3600*1000, 5000, 800) === (STATIC_MODE ? 30 : 60), 'recommend 1h clamps to min preset');
+    assert(recommendBarSec(3600*1000, 5000, 800) === 30, 'recommend 1h clamps to min preset');
     // Limit guard: if limit is tiny, bar_s must grow (>= 1h/100 = 36s -> snapCeil to 60s).
     assert(recommendBarSec(3600*1000, 100, 800) >= 60, 'recommend respects max bars');
 
@@ -4252,7 +4272,7 @@
     assert(!!document.getElementById('sessPreMarket'), 'session toggle pre-market exists');
     assert(!!document.getElementById('sessAfterHours'), 'session toggle after-hours exists');
     assert(!!document.getElementById('sessClosed'), 'session toggle closed exists');
-    assert(!!ui.autoW && ui.autoW.checked === true, 'autoW forced on');
+    assert(!!ui.autoW, 'autoW control exists');
     assert(!!ui.showVolume && ui.showVolume.checked === true, 'showVolume forced on');
     assert(!!ui.grid && ui.grid.checked === true, 'grid forced on');
     assert(!!ui.scale && ui.scale.checked === true, 'scale forced on');
@@ -4268,11 +4288,11 @@
     // Static demo: no API hint.
     // Enable bar size controls; they re-fetch the API with bar_s.
     ui.window.disabled = false;
-    // API mode backed by 1-minute store: clamp UI to >= 60s and wire the single action button.
+    // API mode: allow 30s; backend will clamp to 60s for symbols that only have 1-minute data.
     try{
       if(!STATIC_MODE && ui.window){
-        ui.window.min = '60';
-        if(Number(ui.window.value) < 60) ui.window.value = '60';
+        ui.window.min = '30';
+        if(Number(ui.window.value) < 30) ui.window.value = '30';
       }
       if(ui.regen) ui.regen.textContent = regenButtonLabel();
     } catch(_e){}
@@ -4348,8 +4368,14 @@
       // - otherwise, if we did NOT load a saved config, default to enabled unless bar size is in URL
       var autoQ = getQueryParam('auto_w', '');
       if(ui.autoW){
-        // Auto W is always-on (removed from UI): ignore URL overrides.
-        ui.autoW.checked = true;
+        if(autoQ !== ''){
+          ui.autoW.checked = !(String(autoQ).trim() === '0');
+        } else if(!persist.hadConfig){
+          // Default: enabled unless bar size is explicitly specified in URL.
+          var qsBar0 = getQueryParam('bar_s', '');
+          var qsW0 = getQueryParam('w', '');
+          ui.autoW.checked = !((qsBar0 !== '') || (qsW0 !== ''));
+        }
       }
 
       // Bar size from URL (?bar_s=60) or legacy (?w=60), else keep existing (config/default).
