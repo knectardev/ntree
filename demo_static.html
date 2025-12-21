@@ -70,7 +70,7 @@
     .swatch.ema9{background:rgba(215,224,234,.92)}
     .swatch.ema21{background:rgba(215,224,234,.72)}
     .swatch.ema50{background:rgba(215,224,234,.52)}
-    .swatch.vwap{background:rgb(30, 200, 170)}
+    .swatch.vwap{background:rgb(255, 215, 0)}
     .sideDivider{height:1px;background:rgba(255,255,255,.07);margin:10px 0}
     .formGroup{display:flex;flex-direction:column;gap:8px}
     .fieldLabel{font-size:12px;color:rgba(215,224,234,.92);font-weight:650}
@@ -792,6 +792,8 @@
     var prevDay = '';
     var prevMins = -1;
     var openMins = 9*60 + 30;
+    var closeMins = 16*60;
+    var lastRegVwap = NaN;
     for(var i=0;i<n;i++){
       var tm = Number(t_ms[i]);
       if(!Number.isFinite(tm)) { y[i] = NaN; continue; }
@@ -800,7 +802,24 @@
       if(i === 0) reset = true;
       else if(p.dayKey !== prevDay) reset = true;
       else if(prevMins < openMins && p.mins >= openMins) reset = true;
-      if(reset){ cumPV = 0; cumV = 0; }
+      if(reset){ cumPV = 0; cumV = 0; lastRegVwap = NaN; }
+
+      // Anchor VWAP to 09:30 ET:
+      // - Before 09:30: no VWAP (don't accumulate premarket prints)
+      // - Regular session: accumulate
+      // - After 16:00: hold last regular VWAP flat
+      if(p.mins < openMins){
+        y[i] = NaN;
+        prevDay = p.dayKey;
+        prevMins = p.mins;
+        continue;
+      }
+      if(p.mins >= closeMins){
+        y[i] = Number.isFinite(lastRegVwap) ? lastRegVwap : NaN;
+        prevDay = p.dayKey;
+        prevMins = p.mins;
+        continue;
+      }
       var tp = (Number(h[i]) + Number(l[i]) + Number(c[i])) / 3;
       if(!Number.isFinite(tp)) tp = Number(c[i]);
       var vv = Number(v[i]);
@@ -808,6 +827,7 @@
       cumPV += tp * vv;
       cumV += vv;
       y[i] = (cumV > 0) ? (cumPV / cumV) : tp;
+      lastRegVwap = y[i];
       prevDay = p.dayKey;
       prevMins = p.mins;
     }
@@ -850,7 +870,7 @@
     }
     if(settings.vwap){
       var vw = getOrCompute('vwap_session', function(){ return vwapSession(bars); });
-      if(vw){ vw.color = 'rgb(30, 200, 170)'; vw.width = 1.55; out.push(vw); }
+      if(vw){ vw.color = 'rgb(255, 215, 0)'; vw.width = 1.55; out.push(vw); }
     }
     return out;
   }

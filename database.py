@@ -3,7 +3,10 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List
 
-DB_NAME = 'stock_data.db'
+_REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+# Always anchor the DB path to the repo (avoids accidentally creating/reading a DB from whatever the current
+# working directory is when you start the server).
+DB_NAME = os.environ.get("NTREE_DB_PATH") or os.path.join(_REPO_DIR, "stock_data.db")
 
 def init_database():
     """Initialize the SQLite database with the required schema."""

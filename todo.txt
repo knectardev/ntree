@@ -1,7 +1,7 @@
 todos
 
-Pull in 3 or 6 months of additional data for SPY and QQQ from Alpaca 
-
+Simulator practice game 
+https://chatgpt.com/share/6946cd45-e2e0-8008-83dd-97d32d3b6c46
 
 
 

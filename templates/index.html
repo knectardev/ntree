@@ -164,6 +164,84 @@
             cursor: not-allowed;
             transform: none;
         }
+
+        .add-ticker-form{
+            display:flex;
+            gap:10px;
+            align-items:center;
+            flex-wrap: wrap;
+            justify-content:flex-end;
+        }
+
+        .add-ticker-form .field{
+            display:flex;
+            flex-direction:column;
+            gap:4px;
+            min-width: 140px;
+        }
+
+        .add-ticker-form label{
+            font-size:11px;
+            color: rgba(138,160,181,.92);
+            user-select:none;
+        }
+
+        .add-ticker-form input{
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,.10);
+            background: rgba(8,12,18,.78);
+            color: rgba(215,224,234,.92);
+            outline: none;
+            font-size: 12px;
+            font-weight: 600;
+            min-width: 140px;
+        }
+
+        .add-ticker-form input::placeholder{
+            color: rgba(138,160,181,.75);
+        }
+
+        /* Date input: custom light calendar button (cross-browser). */
+        .add-ticker-form input[type="date"]{
+            color-scheme: dark;
+        }
+        .date-wrap{
+            position: relative;
+            display: block;
+        }
+        .date-wrap input[type="date"]{
+            padding-right: 44px; /* space for the icon button */
+        }
+        /* Hide native icon where possible so we don't show two icons */
+        .date-wrap input[type="date"]::-webkit-calendar-picker-indicator{
+            opacity: 0;
+            cursor: pointer;
+        }
+        .date-btn{
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 30px;
+            height: 30px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,.10);
+            background: rgba(255,255,255,.06);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+        }
+        .date-btn:hover{
+            background: rgba(255,255,255,.09);
+        }
+        .date-btn svg{
+            width: 16px;
+            height: 16px;
+            fill: rgba(215,224,234,.92);
+        }
         
         .status-message {
             margin-top: 10px;
@@ -279,7 +357,34 @@
     <div class="container">
         <div class="header-section">
             <h1 style="margin: 0;">Stock Ticker Dashboard</h1>
-            <div style="display: flex; gap: 10px;">
+            <div class="add-ticker-form">
+                <div class="field">
+                    <label for="newTickerInput">Add ticker</label>
+                    <input id="newTickerInput" type="text" placeholder="e.g. MSFT" autocomplete="off" />
+                </div>
+                <div class="field">
+                    <label for="startDateInput">Start date (UTC)</label>
+                    <div class="date-wrap">
+                        <input id="startDateInput" type="date" />
+                        <button type="button" class="date-btn" data-target="startDateInput" aria-label="Pick start date">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1.5A2.5 2.5 0 0 1 22 6.5v13A2.5 2.5 0 0 1 19.5 22h-15A2.5 2.5 0 0 1 2 19.5v-13A2.5 2.5 0 0 1 4.5 4H6V3a1 1 0 0 1 1-1Zm12.5 6h-15a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h15a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5ZM7 11a1 1 0 0 1 1-1h1a1 1 0 0 1 0 2H8a1 1 0 0 1-1-1Zm5-1a1 1 0 1 1 0 2h-1a1 1 0 1 1 0-2h1Zm3 0h1a1 1 0 1 1 0 2h-1a1 1 0 1 1 0-2ZM7 15a1 1 0 0 1 1-1h1a1 1 0 0 1 0 2H8a1 1 0 0 1-1-1Zm5-1h-1a1 1 0 1 0 0 2h1a1 1 0 0 0 0-2Zm3 0h1a1 1 0 1 0 0 2h-1a1 1 0 0 0 0-2Z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="endDateInput">End date (UTC)</label>
+                    <div class="date-wrap">
+                        <input id="endDateInput" type="date" />
+                        <button type="button" class="date-btn" data-target="endDateInput" aria-label="Pick end date">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1.5A2.5 2.5 0 0 1 22 6.5v13A2.5 2.5 0 0 1 19.5 22h-15A2.5 2.5 0 0 1 2 19.5v-13A2.5 2.5 0 0 1 4.5 4H6V3a1 1 0 0 1 1-1Zm12.5 6h-15a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h15a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5ZM7 11a1 1 0 0 1 1-1h1a1 1 0 0 1 0 2H8a1 1 0 0 1-1-1Zm5-1a1 1 0 1 1 0 2h-1a1 1 0 1 1 0-2h1Zm3 0h1a1 1 0 1 1 0 2h-1a1 1 0 1 1 0-2ZM7 15a1 1 0 0 1 1-1h1a1 1 0 0 1 0 2H8a1 1 0 0 1-1-1Zm5-1h-1a1 1 0 1 0 0 2h1a1 1 0 0 0 0-2Zm3 0h1a1 1 0 1 0 0 2h-1a1 1 0 0 0 0-2Z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <button class="fetch-button" id="addTickerBtn" onclick="addTickerAndFetchRange()">Add + Fetch Range</button>
                 <button class="fetch-button" id="fetchLatestBtn" onclick="fetchLatestData()">Fetch Latest Data</button>
             </div>
         </div>
@@ -391,6 +496,135 @@
                 btn.textContent = 'Fetch Latest Data';
             });
         }
+    </script>
+    <script>
+        function addTickerAndFetchRange() {
+            const btn = document.getElementById('addTickerBtn');
+            const statusDiv = document.getElementById('statusMessage');
+            const tickerEl = document.getElementById('newTickerInput');
+            const startEl = document.getElementById('startDateInput');
+            const endEl = document.getElementById('endDateInput');
+
+            const tickerRaw = (tickerEl && tickerEl.value) ? String(tickerEl.value).trim().toUpperCase() : '';
+            const startDate = (startEl && startEl.value) ? String(startEl.value).trim() : '';
+            const endDate = (endEl && endEl.value) ? String(endEl.value).trim() : '';
+
+            if (!tickerRaw) {
+                statusDiv.style.display = 'block';
+                statusDiv.className = 'status-message status-error';
+                statusDiv.textContent = 'Please enter a ticker (e.g. MSFT).';
+                return;
+            }
+            if (!startDate || !endDate) {
+                statusDiv.style.display = 'block';
+                statusDiv.className = 'status-message status-error';
+                statusDiv.textContent = 'Please choose both a start date and an end date.';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Fetching...';
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'status-message status-loading';
+            statusDiv.textContent = `Fetching ${tickerRaw} 1Min bars from ${startDate} to ${endDate} (UTC) ...`;
+
+            fetch('/api/fetch-latest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ticker: tickerRaw,
+                    start_date: startDate,
+                    end_date: endDate,
+                    interval: '1Min'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    statusDiv.className = 'status-message status-success';
+                    statusDiv.textContent = `Success! Fetched ${data.records_added} records for ${tickerRaw}. Last update: ${data.last_timestamp || 'N/A'}`;
+                    setTimeout(() => window.location.reload(), 1500);
+                } else {
+                    statusDiv.className = 'status-message status-error';
+                    statusDiv.textContent = 'Error: ' + (data.error || 'Failed to fetch data');
+                    btn.disabled = false;
+                    btn.textContent = 'Add + Fetch Range';
+                }
+            })
+            .catch(error => {
+                statusDiv.className = 'status-message status-error';
+                statusDiv.textContent = 'Error: ' + error.message;
+                btn.disabled = false;
+                btn.textContent = 'Add + Fetch Range';
+            });
+        }
+
+        // Convenience: pressing Enter in the ticker field triggers the range fetch.
+        document.addEventListener('DOMContentLoaded', () => {
+            const tickerEl = document.getElementById('newTickerInput');
+            if (tickerEl) {
+                tickerEl.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addTickerAndFetchRange();
+                    }
+                });
+            }
+
+            // Date picker UX:
+            // - Use the browser-native date picker (type="date") where available.
+            // - Default end date to today.
+            // - Prevent selecting future dates.
+            // - Ensure end >= start.
+            const startEl = document.getElementById('startDateInput');
+            const endEl = document.getElementById('endDateInput');
+            const today = new Date();
+            const todayIso = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))
+                .toISOString()
+                .slice(0, 10);
+
+            if (startEl) startEl.max = todayIso;
+            if (endEl) endEl.max = todayIso;
+
+            if (endEl && (!endEl.value || String(endEl.value).trim() === '')) {
+                endEl.value = todayIso;
+            }
+
+            function syncEndMin() {
+                if (!startEl || !endEl) return;
+                const s = (startEl.value || '').trim();
+                if (s) {
+                    endEl.min = s;
+                    if (endEl.value && endEl.value < s) endEl.value = s;
+                } else {
+                    endEl.min = '';
+                }
+            }
+
+            if (startEl) startEl.addEventListener('change', syncEndMin);
+            if (endEl) endEl.addEventListener('change', syncEndMin);
+            syncEndMin();
+
+            // Custom calendar buttons: open native picker where supported.
+            document.querySelectorAll('.date-btn').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const targetId = btn.getAttribute('data-target');
+                    if (!targetId) return;
+                    const input = document.getElementById(targetId);
+                    if (!input) return;
+                    try {
+                        if (typeof input.showPicker === 'function') {
+                            input.showPicker();
+                        } else {
+                            input.focus();
+                            input.click();
+                        }
+                    } catch (_e) {
+                        try { input.focus(); } catch (_e2) {}
+                    }
+                });
+            });
+        });
     </script>
     <script>
         const SYNTHETIC_DEFAULT_TIMEFRAME = '1m';

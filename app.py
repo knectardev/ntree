@@ -164,6 +164,88 @@ def _aggregate_ohlcv(
     return {"t_ms": out_t, "o": out_o, "h": out_h, "l": out_l, "c": out_c, "v": out_v}
 
 
+def _fetch_stock_data_ohlcv(
+    cursor,
+    *,
+    ticker: str,
+    interval: str,
+) -> List[Tuple[str, float, float, float, float, float]]:
+    """
+    Fetch OHLCV rows from `stock_data` as:
+      (timestamp_iso, close, open, high, low, volume)
+
+    Important fallback:
+    - If interval='1Min' is requested but not stored (because we keep only 30Sec to save space),
+      we will derive 1-minute bars by aggregating from 30-second rows.
+    """
+    cursor.execute(
+        """
+        SELECT timestamp, price, open_price, high_price, low_price, volume
+        FROM stock_data
+        WHERE ticker = ? AND interval = ?
+        ORDER BY timestamp ASC
+        """,
+        (ticker, interval),
+    )
+    results = cursor.fetchall()
+    if results or interval != "1Min":
+        out: List[Tuple[str, float, float, float, float, float]] = []
+        for (ts, c, o, h, l, v) in results:
+            out.append(
+                (
+                    ts,
+                    float(c),
+                    float(o) if o is not None else float(c),
+                    float(h) if h is not None else float(c),
+                    float(l) if l is not None else float(c),
+                    float(v) if v is not None else 0.0,
+                )
+            )
+        return out
+
+    # Fallback: derive 1Min from stored 30Sec.
+    cursor.execute(
+        """
+        SELECT timestamp,
+               COALESCE(open_price, price) AS o,
+               COALESCE(high_price, price) AS h,
+               COALESCE(low_price, price)  AS l,
+               price                       AS c,
+               COALESCE(volume, 0)         AS v
+        FROM stock_data
+        WHERE ticker = ? AND interval = '30Sec'
+        ORDER BY timestamp ASC
+        """,
+        (ticker,),
+    )
+    base_rows = cursor.fetchall()
+    if not base_rows:
+        return []
+
+    parsed: List[Tuple[int, float, float, float, float, float]] = []
+    for (ts, o, h, l, c, v) in base_rows:
+        t_ms = _parse_iso_to_epoch_ms(ts)
+        if t_ms is None:
+            continue
+        parsed.append((t_ms, float(o), float(h), float(l), float(c), float(v or 0.0)))
+
+    agg = _aggregate_ohlcv(parsed, 60)
+    out2: List[Tuple[str, float, float, float, float, float]] = []
+    for i, t_ms in enumerate(agg["t_ms"]):
+        ts = _epoch_ms_to_iso_z(int(t_ms))
+        out2.append(
+            (
+                ts,
+                float(agg["c"][i]),
+                float(agg["o"][i]),
+                float(agg["h"][i]),
+                float(agg["l"][i]),
+                float(agg["v"][i]),
+            )
+        )
+    return out2
+
+
 @app.route("/window")
 def api_window():
     """
@@ -672,30 +754,24 @@ def perform_strategy_backtest(name, ticker, interval, fee_bp, risk_percent, rewa
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        SELECT timestamp, price, open_price, high_price, low_price, volume
-        FROM stock_data
-        WHERE ticker = ? AND interval = ?
-        ORDER BY timestamp ASC
-    ''', (ticker, interval))
-    results = cursor.fetchall()
+    fetched = _fetch_stock_data_ohlcv(cursor, ticker=ticker, interval=interval)
     conn.close()
 
-    if not results:
+    if not fetched:
         raise LookupError('no data')
 
-    timestamps = [row[0] for row in results]
+    timestamps = [row[0] for row in fetched]
     market_hours = get_market_hours_info(timestamps)
     regular_mask = build_regular_mask(timestamps, market_hours)
     ohlc = [
         {
-            'open': row[2] if row[2] is not None else row[1],
-            'high': row[3] if row[3] is not None else row[1],
-            'low': row[4] if row[4] is not None else row[1],
+            'open': row[2],
+            'high': row[3],
+            'low': row[4],
             'close': row[1],
-            'volume': row[5] if row[5] is not None else 0
+            'volume': row[5] if row[5] is not None else 0,
         }
-        for row in results
+        for row in fetched
     ]
 
     try:
@@ -743,29 +819,22 @@ def get_ticker_data(ticker, interval):
     cursor = conn.cursor()
     
     # Get all data for the ticker and interval (OHLC + volume only)
-    cursor.execute('''
-        SELECT timestamp, price, open_price, high_price, low_price, volume
-        FROM stock_data
-        WHERE ticker = ? AND interval = ?
-        ORDER BY timestamp ASC
-    ''', (ticker, interval))
-    
-    results = cursor.fetchall()
+    fetched = _fetch_stock_data_ohlcv(cursor, ticker=ticker, interval=interval)
     conn.close()
     
-    timestamps = [row[0] for row in results]
+    timestamps = [row[0] for row in fetched]
     market_hours = get_market_hours_info(timestamps)
     market_opens = get_market_open_times(timestamps)
 
     ohlc = [
         {
-            'open': row[2] if row[2] is not None else row[1],
-            'high': row[3] if row[3] is not None else row[1],
-            'low': row[4] if row[4] is not None else row[1],
+            'open': row[2],
+            'high': row[3],
+            'low': row[4],
             'close': row[1],
-            'volume': row[5] if row[5] is not None else 0
+            'volume': row[5] if row[5] is not None else 0,
         }
-        for row in results
+        for row in fetched
     ]
 
     # Compute pandas_ta indicators on the fly (always)
@@ -867,7 +936,7 @@ def get_ticker_data(ticker, interval):
 
     data = {
         'labels': timestamps,
-        'prices': _clean([row[1] for row in results]),
+        'prices': _clean([row[1] for row in fetched]),
         'ohlc': [
             {
                 'open': None if (entry['open'] is None or (isinstance(entry['open'], float) and math.isnan(entry['open']))) else entry['open'],
@@ -1188,6 +1257,42 @@ def delete_backtest_config(cfg_id):
 def fetch_latest_data():
     """Fetch latest data from Alpaca API starting from the last timestamp in database."""
     try:
+        payload = request.get_json(silent=True) or {}
+        req_ticker = (payload.get("ticker") or payload.get("symbol") or "").strip().upper()
+        req_interval = (payload.get("interval") or "1Min").strip()
+        start_date_raw = (payload.get("start_date") or payload.get("start") or "").strip()
+        end_date_raw = (payload.get("end_date") or payload.get("end") or "").strip()
+
+        def _parse_date_or_iso(s: str, *, end_of_day: bool = False) -> Optional[datetime]:
+            """
+            Accepts:
+              - YYYY-MM-DD (date input)
+              - full ISO timestamp (with or without Z)
+            Returns timezone-aware UTC datetime, or None if invalid/empty.
+            """
+            s0 = (s or "").strip()
+            if not s0:
+                return None
+            # Date-only
+            try:
+                if "T" not in s0 and len(s0) == 10:
+                    d = datetime.fromisoformat(s0).date()
+                    if end_of_day:
+                        return datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=timezone.utc)
+                    return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=timezone.utc)
+            except Exception:
+                pass
+            # ISO timestamp
+            try:
+                dt = datetime.fromisoformat(s0.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+                return dt
+            except Exception:
+                return None
+
         conn = get_db_connection()
         cursor = conn.cursor()
         
@@ -1209,27 +1314,49 @@ def fetch_latest_data():
         
         # Calculate time range
         end_time = datetime.now(timezone.utc)
-        
-        if latest_timestamp:
-            # Start from the latest timestamp (add 1 minute to avoid duplicates)
-            try:
-                start_time = datetime.fromisoformat(latest_timestamp.replace('Z', '+00:00'))
-                start_time = start_time + timedelta(minutes=1)  # Start 1 minute after last record
-            except:
-                # Fallback: use 1 day ago if timestamp parsing fails
-                start_time = end_time - timedelta(days=1)
+
+        # Optional: user-provided date range (for adding a new ticker / backfilling).
+        req_start = _parse_date_or_iso(start_date_raw, end_of_day=False)
+        req_end = _parse_date_or_iso(end_date_raw, end_of_day=True)
+        if req_start and req_end and req_end < req_start:
+            conn.close()
+            return jsonify({"success": False, "error": "Invalid range: end_date must be >= start_date"}), 400
+
+        if req_start or req_end:
+            # If only one side provided, clamp the other to "now" or same day.
+            start_time = req_start or (req_end or end_time) - timedelta(days=5)
+            end_time = req_end or end_time
         else:
-            # No data exists, fetch last 5 days
-            start_time = end_time - timedelta(days=5)
+            # Default behavior: incremental update from max timestamp.
+            if latest_timestamp:
+                # Start from the latest timestamp (add 1 minute to avoid duplicates)
+                try:
+                    start_time = datetime.fromisoformat(latest_timestamp.replace('Z', '+00:00'))
+                    if start_time.tzinfo is None:
+                        start_time = start_time.replace(tzinfo=timezone.utc)
+                    else:
+                        start_time = start_time.astimezone(timezone.utc)
+                    start_time = start_time + timedelta(minutes=1)  # Start 1 minute after last record
+                except Exception:
+                    # Fallback: use 1 day ago if timestamp parsing fails
+                    start_time = end_time - timedelta(days=1)
+            else:
+                # No data exists, fetch last 5 days
+                start_time = end_time - timedelta(days=5)
         
         # Format as RFC3339 strings
         start_str = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         end_str = end_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         
-        # Fetch for all tickers already known to the system (present in SQLite).
-        # If none exist yet, fall back to a small default set.
-        TICKERS = list_all_tickers() or ['SPY', 'QQQ']
-        INTERVALS = ['1Min', '5Min']
+        # Determine which tickers to fetch:
+        # - If user provided a ticker: only fetch that ticker (lets you add new symbols).
+        # - Else: fetch for all tickers already known to the system (present in SQLite),
+        #   falling back to a small default set.
+        TICKERS = [req_ticker] if req_ticker else (list_all_tickers() or ['SPY', 'QQQ'])
+
+        # Focus: Alpaca free tier 1-minute data.
+        # Allow overriding interval explicitly, but default to 1Min.
+        INTERVALS = [req_interval] if req_interval else ['1Min']
         
         total_records = 0
         last_timestamp = None
@@ -1277,7 +1404,9 @@ def fetch_latest_data():
                             continue
                     
                     conn.commit()
-                    time.sleep(0.5)  # Rate limiting
+                    # Rate limiting: if you're fetching many symbols, keep this gentle.
+                    # For single-symbol range loads, it's usually fine, but we keep the old behavior.
+                    time.sleep(0.5)
                     
                 except Exception as e:
                     print(f"Error fetching data for {ticker} at {interval} interval: {e}")

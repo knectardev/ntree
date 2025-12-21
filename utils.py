@@ -17,8 +17,11 @@ ET = pytz.timezone('US/Eastern')
 def get_trading_day(timestamp):
     """
     Get the trading day for a given timestamp.
-    Trading day is determined by the date in Eastern Time.
-    If before 4:00 AM ET, it belongs to the previous trading day.
+    Trading day is determined by the calendar date in Eastern Time.
+
+    Notes:
+    - We intentionally do **not** roll timestamps before 4:00 AM ET into the previous day.
+      For VWAP anchoring, we want each calendar day to reset at 09:30 ET.
     """
     if isinstance(timestamp, str):
         # Parse ISO format string
@@ -32,15 +35,7 @@ def get_trading_day(timestamp):
         timestamp = timestamp.replace(tzinfo=timezone.utc)
     
     et_time = timestamp.astimezone(ET)
-    et_date = et_time.date()
-    et_time_only = et_time.time()
-    
-    # If before 4:00 AM ET, it belongs to previous trading day
-    if et_time_only < PRE_MARKET_START:
-        from datetime import timedelta
-        et_date = et_date - timedelta(days=1)
-    
-    return et_date
+    return et_time.date()
 
 
 def is_market_hours(timestamp):
@@ -95,41 +90,36 @@ def calculate_vwap_per_trading_day(bars):
     # Calculate VWAP per trading day
     result = pd.Series(index=bars.index, dtype=float)
     
-    for trading_day, group in bars.groupby('trading_day'):
-        # Filter to regular market hours only (9:30 AM - 4:00 PM ET)
+    for _day, group in bars.groupby('trading_day'):
+        # VWAP is anchored to 09:30 ET and uses regular session volume only.
         group_regular = group[group.index.map(lambda ts: is_market_hours(ts) == 'regular')]
-        
-        if group_regular.empty:
-            # No regular hours data for this day, use all data
-            group_regular = group
-        
-        if group_regular['volume'].sum() > 0:
-            # Calculate cumulative VWAP for this trading day
-            typical = (group_regular['high'] + group_regular['low'] + group_regular['close']) / 3
-            vwap_day = (typical * group_regular['volume']).cumsum() / group_regular['volume'].cumsum()
-            
-            # Create a series with VWAP values for regular hours
-            vwap_series = pd.Series(index=group_regular.index, data=vwap_day.values)
-            
-            # Map VWAP to all timestamps in this trading day
-            last_vwap = None
-            for idx in group.index:
-                if idx in vwap_series.index:
-                    # Regular hours - use calculated VWAP
-                    result[idx] = vwap_series[idx]
-                    last_vwap = vwap_series[idx]
-                else:
-                    # Non-regular hours - use last known VWAP from regular hours
-                    if last_vwap is not None:
-                        result[idx] = last_vwap
-                    elif len(vwap_series) > 0:
-                        # Use the first VWAP value if we haven't seen any yet
-                        result[idx] = vwap_series.iloc[0]
-                    else:
-                        result[idx] = None
-        else:
-            # No volume data - set all to None
+
+        if group_regular.empty or group_regular['volume'].sum() <= 0:
+            # No regular-hours bars (or no volume) in this visible slice -> no VWAP for the day.
             result[group.index] = None
+            continue
+
+        typical = (group_regular['high'] + group_regular['low'] + group_regular['close']) / 3
+        vwap_day = (typical * group_regular['volume']).cumsum() / group_regular['volume'].cumsum()
+        vwap_series = pd.Series(index=group_regular.index, data=vwap_day.values)
+
+        # Map VWAP:
+        # - pre-market (before first regular bar): None
+        # - regular: computed VWAP
+        # - after-hours: last regular VWAP (flat)
+        first_regular_idx = vwap_series.index[0] if len(vwap_series) else None
+        last_vwap = None
+        for idx in group.index:
+            if idx in vwap_series.index:
+                result[idx] = vwap_series[idx]
+                last_vwap = vwap_series[idx]
+            else:
+                if first_regular_idx is not None and idx < first_regular_idx:
+                    result[idx] = None
+                elif last_vwap is not None:
+                    result[idx] = last_vwap
+                else:
+                    result[idx] = None
     
     return result
 
