@@ -124,10 +124,8 @@
     /* Footer bar-size control (bottom-left, like trading charts) */
     .footerLeft{display:flex;align-items:center;gap:10px;min-width:0}
     .pill.pill--barSize{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
-    .pill.pill--barSize input[type="range"]{width:220px}
-    @media (max-width: 720px){
-      .pill.pill--barSize input[type="range"]{width:160px}
-    }
+    .pill.pill--barSize input[type="hidden"]{display:none}
+    .pill.pill--barSize .barRadios{gap:8px;flex-wrap:wrap}
     /* Footer session shading toggles (center) */
     .footerMid{display:flex;align-items:center;justify-content:center;gap:10px;flex:1;min-width:0}
     .sessionChecks{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;min-width:0}
@@ -157,6 +155,7 @@
       filter: grayscale(40%);
     }
     .scaleOpt.isDisabled input{pointer-events:none}
+    .scaleOpt.isHidden{display:none}
 
     /* Custom dropdown (replaces native <select> so colors are consistent in dark theme) */
     .dd{position:relative}
@@ -368,7 +367,17 @@
         <div class="footerLeft">
           <div class="pill pill--barSize" id="barSizeFooter">
             <label for="window">Bar size (W)</label>
-            <input id="window" type="range" min="30" max="86400" value="60" step="30" />
+            <!-- Keep a hidden value input so existing code can continue reading ui.window.value -->
+            <input id="window" type="hidden" value="60" />
+            <div class="scaleRadios barRadios" role="radiogroup" aria-label="Bar size (W)">
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="30" /> 30s</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="60" checked /> 1m</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="300" /> 5m</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="1800" /> 30m</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="3600" /> 1h</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="14400" /> 4h</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="86400" /> 1d</label>
+            </div>
             <span id="windowVal" class="k mono">60s</span>
             <label title="Auto-select bar size to keep the number of candles reasonable for the current zoom/span. Turn off to manually pick bar size.">
               <input id="autoW" type="checkbox" checked /> Auto
@@ -1452,6 +1461,7 @@
         state.windowSec = ww;
         if(ui.window) ui.window.value = String(ww);
         if(ui.windowVal) ui.windowVal.textContent = formatWindow(ww);
+        syncBarPresetUi();
       }
 
       // Scale preset (requested window span).
@@ -1708,6 +1718,18 @@
     return best;
   }
 
+  function syncBarPresetUi(){
+    try{
+      var cur = snapToPreset(clamp(Number(state.windowSec || (ui.window ? ui.window.value : 60) || 60), 30, 86400));
+      var els = document.querySelectorAll('input[type="radio"][name="windowPreset"]');
+      for(var i=0;i<els.length;i++){
+        var el = els[i];
+        if(!el) continue;
+        el.checked = (Number(el.value) === cur);
+      }
+    } catch(_e){}
+  }
+
   function snapCeilToPreset(sec){
     var s = Math.max(30, Math.floor(Number(sec) || 30));
     for(var i=0;i<SNAP_PRESETS.length;i++){
@@ -1873,6 +1895,9 @@
           if(lab){
             if(!ok) lab.classList.add('isDisabled');
             else lab.classList.remove('isDisabled');
+            // Hide non-applicable options entirely (instead of showing disabled/grayed out).
+            if(!ok) lab.classList.add('isHidden');
+            else lab.classList.remove('isHidden');
             lab.setAttribute('aria-disabled', (!ok) ? 'true' : 'false');
           }
         }
@@ -2536,6 +2561,7 @@
         state.windowSec = rec;
         if(ui.window) ui.window.value = String(rec);
         if(ui.windowVal) ui.windowVal.textContent = formatWindow(rec);
+        syncBarPresetUi();
         updateUrlBarSize();
       }
     } else if(autoW && Number.isFinite(state.viewSpanMs) && state.viewSpanMs > 0){
@@ -2546,6 +2572,7 @@
         state.windowSec = rec2;
         if(ui.window) ui.window.value = String(rec2);
         if(ui.windowVal) ui.windowVal.textContent = formatWindow(rec2);
+        syncBarPresetUi();
         updateUrlBarSize();
       }
     }
@@ -2557,6 +2584,7 @@
     state.windowSec = bar_s;
     if(ui.window) ui.window.value = String(bar_s);
     if(ui.windowVal) ui.windowVal.textContent = formatWindow(bar_s);
+    syncBarPresetUi();
 
     // If the full-history span would exceed the max bars budget, bump bar_s up to the smallest
     // preset that fits within effMaxBars (even if Auto W is off).
@@ -2584,6 +2612,7 @@
             state.windowSec = bar_s;
             if(ui.window) ui.window.value = String(bar_s);
             if(ui.windowVal) ui.windowVal.textContent = formatWindow(bar_s);
+            syncBarPresetUi();
             updateUrlBarSize();
           }
         }
@@ -2702,6 +2731,7 @@
             state.windowSec = rec2;
             if(ui.window) ui.window.value = String(rec2);
             if(ui.windowVal) ui.windowVal.textContent = formatWindow(rec2);
+            syncBarPresetUi();
             updateUrlBarSize();
             // Re-fetch with the refined bar size (one hop). Bump reqSeq via recursion; current response is discarded.
             loadFromAPI(true);
@@ -2727,6 +2757,7 @@
         state.windowSec = clamp(effBar, 30, 86400);
         if(ui.window) ui.window.value = String(state.windowSec);
         if(ui.windowVal) ui.windowVal.textContent = formatWindow(state.windowSec);
+        syncBarPresetUi();
         updateUrlBarSize();
       }
 
@@ -2931,6 +2962,7 @@
     state.windowSec = bar_s;
     if(ui.window) ui.window.value = String(bar_s);
     if(ui.windowVal) ui.windowVal.textContent = formatWindow(bar_s);
+    syncBarPresetUi();
     if(ui.reqInfo) ui.reqInfo.textContent = 'bar_s=' + Math.floor(bar_s) + ' (loading…)';
 
     var prevText = ui.regen ? ui.regen.textContent : '';
@@ -3945,6 +3977,7 @@
           state.windowSec = rec;
           if(ui.window) ui.window.value = String(rec);
           if(ui.windowVal) ui.windowVal.textContent = formatWindow(rec);
+          syncBarPresetUi();
           updateUrlBarSize();
           if(windowTimer) clearTimeout(windowTimer);
           windowTimer = setTimeout(function(){ loadFromAPI(); }, 90);
@@ -3984,6 +4017,7 @@
 
     ui.windowVal.textContent = formatWindow(state.windowSec);
     ui.window.value = String(state.windowSec);
+    syncBarPresetUi();
 
     updateUrlBarSize();
     scheduleSaveUiConfig();
@@ -3992,9 +4026,26 @@
     windowTimer = setTimeout(function(){ loadFromAPI(); }, 120);
   }
 
-  ui.window.addEventListener('input', function(){ setWindowSecFromUI(true); });
-  ui.window.addEventListener('change', function(){ setWindowSecFromUI(true); });
   if(ui.autoW) ui.autoW.addEventListener('change', function(){ setWindowSecFromUI(false); });
+  // Bar size radios (footer).
+  (function bindBarPresetRadios(){
+    try{
+      var els = document.querySelectorAll('input[type="radio"][name="windowPreset"]');
+      for(var i=0;i<els.length;i++){
+        (function(el){
+          if(!el) return;
+          el.addEventListener('change', function(){
+            try{
+              if(!el.checked) return;
+              if(ui.window) ui.window.value = String(el.value);
+              setWindowSecFromUI(true);
+            } catch(_e){}
+          });
+        })(els[i]);
+      }
+      syncBarPresetUi();
+    } catch(_e){}
+  })();
   // Scale preset radios (footer).
   (function bindSpanPresetRadios(){
     try{
@@ -4291,8 +4342,8 @@
     // API mode: allow 30s; backend will clamp to 60s for symbols that only have 1-minute data.
     try{
       if(!STATIC_MODE && ui.window){
-        ui.window.min = '30';
         if(Number(ui.window.value) < 30) ui.window.value = '30';
+        syncBarPresetUi();
       }
       if(ui.regen) ui.regen.textContent = regenButtonLabel();
     } catch(_e){}
@@ -4388,6 +4439,7 @@
       state.windowSec = ww;
       ui.window.value = String(ww);
       ui.windowVal.textContent = formatWindow(state.windowSec);
+      syncBarPresetUi();
 
       // Scale preset from URL (?span=1d/5d/1m/3m), else keep config/default.
       var spanQ = getQueryParam('span', '');
@@ -4551,6 +4603,7 @@
         state.windowSec = snapToPreset(clamp(bs, 30, 86400));
         if(ui.window) ui.window.value = String(state.windowSec);
         if(ui.windowVal) ui.windowVal.textContent = formatWindow(state.windowSec);
+        syncBarPresetUi();
         scheduleSaveUiConfig();
         loadFromAPI();
       } catch(e){
