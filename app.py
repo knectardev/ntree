@@ -644,17 +644,6 @@ def ticker_detail(ticker):
     """Detail view for a specific ticker."""
     # Alternate chart view: /ticker/SPY?band
     # (keeps existing detail view intact unless explicitly requested).
-    # Legacy override: /ticker/SPY?legacy (forces the original Chart.js template).
-    if "legacy" in request.args:
-        interval = request.args.get('interval', '1Min')
-        return render_template(
-            'detail.html',
-            ticker=ticker,
-            interval=interval,
-            is_synthetic=False,
-            scenario=None,
-            timeframe=_timeframe_from_interval(interval),
-        )
     if "band" in request.args:
         return render_template("ticker_band.html", ticker=ticker)
     interval = request.args.get('interval', '1Min')
