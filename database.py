@@ -261,8 +261,7 @@ def list_chart_tickers() -> List[str]:
     """
     Return distinct tickers that are chartable in this app.
 
-    The band chart (`/window`) supports 30-second bars when present, otherwise falls back to 1-minute.
-    We therefore include tickers with either `interval='30Sec'` or `interval='1Min'`.
+    In Alpaca-only mode, the band chart uses 1-minute (`interval='1Min'`) as the base resolution.
     """
     conn = get_db_connection()
     try:
@@ -271,7 +270,7 @@ def list_chart_tickers() -> List[str]:
             """
             SELECT DISTINCT ticker
             FROM stock_data
-            WHERE interval IN ('30Sec', '1Min')
+            WHERE interval = '1Min'
             ORDER BY ticker ASC
             """
         )

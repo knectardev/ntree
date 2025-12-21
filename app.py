@@ -174,9 +174,8 @@ def _fetch_stock_data_ohlcv(
     Fetch OHLCV rows from `stock_data` as:
       (timestamp_iso, close, open, high, low, volume)
 
-    Important fallback:
-    - If interval='1Min' is requested but not stored (because we keep only 30Sec to save space),
-      we will derive 1-minute bars by aggregating from 30-second rows.
+    Note:
+    - In the current Alpaca-only setup, we expect 1-minute data to be stored as `interval='1Min'`.
     """
     cursor.execute(
         """
@@ -188,62 +187,19 @@ def _fetch_stock_data_ohlcv(
         (ticker, interval),
     )
     results = cursor.fetchall()
-    if results or interval != "1Min":
-        out: List[Tuple[str, float, float, float, float, float]] = []
-        for (ts, c, o, h, l, v) in results:
-            out.append(
-                (
-                    ts,
-                    float(c),
-                    float(o) if o is not None else float(c),
-                    float(h) if h is not None else float(c),
-                    float(l) if l is not None else float(c),
-                    float(v) if v is not None else 0.0,
-                )
-            )
-        return out
-
-    # Fallback: derive 1Min from stored 30Sec.
-    cursor.execute(
-        """
-        SELECT timestamp,
-               COALESCE(open_price, price) AS o,
-               COALESCE(high_price, price) AS h,
-               COALESCE(low_price, price)  AS l,
-               price                       AS c,
-               COALESCE(volume, 0)         AS v
-        FROM stock_data
-        WHERE ticker = ? AND interval = '30Sec'
-        ORDER BY timestamp ASC
-        """,
-        (ticker,),
-    )
-    base_rows = cursor.fetchall()
-    if not base_rows:
-        return []
-
-    parsed: List[Tuple[int, float, float, float, float, float]] = []
-    for (ts, o, h, l, c, v) in base_rows:
-        t_ms = _parse_iso_to_epoch_ms(ts)
-        if t_ms is None:
-            continue
-        parsed.append((t_ms, float(o), float(h), float(l), float(c), float(v or 0.0)))
-
-    agg = _aggregate_ohlcv(parsed, 60)
-    out2: List[Tuple[str, float, float, float, float, float]] = []
-    for i, t_ms in enumerate(agg["t_ms"]):
-        ts = _epoch_ms_to_iso_z(int(t_ms))
-        out2.append(
+    out: List[Tuple[str, float, float, float, float, float]] = []
+    for (ts, c, o, h, l, v) in results:
+        out.append(
             (
                 ts,
-                float(agg["c"][i]),
-                float(agg["o"][i]),
-                float(agg["h"][i]),
-                float(agg["l"][i]),
-                float(agg["v"][i]),
+                float(c),
+                float(o) if o is not None else float(c),
+                float(h) if h is not None else float(c),
+                float(l) if l is not None else float(c),
+                float(v) if v is not None else 0.0,
             )
         )
-    return out2
+    return out
 
 
 @app.route("/window")
@@ -257,16 +213,16 @@ def api_window():
         return _bad_request("missing_params", "symbol is required", fields=["symbol"])
 
     bar_s = request.args.get("bar_s", type=int) or 60
-    # UI supports 30s minimum and expects bar sizes snapped to sensible presets.
-    # Normalize to a multiple of 30 seconds to keep candle boundaries consistent.
+    # Alpaca-only mode: minimum bar size is 60 seconds.
+    # Normalize to a multiple of 60 seconds to keep candle boundaries consistent.
     try:
         bar_s = int(bar_s)
     except Exception:
         bar_s = 60
-    if bar_s < 30:
-        bar_s = 30
-    if bar_s % 30 != 0:
-        bar_s = max(30, (bar_s // 30) * 30)
+    if bar_s < 60:
+        bar_s = 60
+    if bar_s % 60 != 0:
+        bar_s = max(60, (bar_s // 60) * 60)
 
     max_bars = request.args.get("max_bars", type=int)
     limit_legacy = request.args.get("limit", type=int)
@@ -280,23 +236,11 @@ def api_window():
     try:
         cur = conn.cursor()
 
-        # Choose the best available base interval for this symbol.
-        # - Prefer 30-second bars if present (supports sub-minute band chart).
-        # - Fall back to 1-minute otherwise.
-        cur.execute(
-            """
-            SELECT 1
-            FROM stock_data
-            WHERE ticker = ? AND interval = '30Sec'
-            LIMIT 1
-            """,
-            (symbol,),
-        )
-        has_30s = cur.fetchone() is not None
-        base_interval = "30Sec" if has_30s else "1Min"
-        base_bar_s = 30 if has_30s else 60
+        # Alpaca-only mode: base resolution is 1-minute.
+        base_interval = "1Min"
+        base_bar_s = 60
 
-        # Never downsample below the stored base resolution.
+        # Never downsample below the stored base resolution (60s).
         if int(bar_s) < int(base_bar_s):
             bar_s = int(base_bar_s)
 

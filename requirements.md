@@ -38,7 +38,7 @@ Database is initialized on app startup (`init_database()` in `database.py`).
 Used by:
 - Dashboard “Real Symbols”
 - `/api/ticker/<ticker>/<interval>`
-- `/window` (prefers `interval='30Sec'` when present, otherwise falls back to `interval='1Min'`, then aggregates)
+- `/window` (uses `interval='1Min'` as the base, then aggregates)
 - Alpaca ingestion scripts (`ingest_data.py`, `/api/fetch-latest`)
 
 Key columns:
@@ -138,7 +138,7 @@ Persistence helper:
 ### Dashboard
 
 - **GET `/`**
-  - Shows “Real Symbols” (from `stock_data`, interval `1Min` or `30Sec`)
+  - Shows “Real Symbols” (from `stock_data`, interval `1Min`)
   - Shows “Synthetic Data Sets” (from `bars_synth` view)
   - “Fetch Latest Data” triggers `POST /api/fetch-latest`
   - Clicking a real symbol opens **band view**: `/ticker/<SYMBOL>?band`
@@ -173,7 +173,7 @@ Persistence helper:
     - Vertical grid aligns to X-axis time/date ticks (adaptive with zoom/span)
   - **Bar size UX note**:
     - The UI will **auto-pick** a reasonable `bar_s` (Auto W) and will also **enforce** a minimum `bar_s` to stay within `max_bars` (default `5000`).
-    - To use **30s candles**, pick a smaller span (e.g. **1D**) or zoom in so the requested window can fit within the max-bars budget.
+    - Minimum bar size is **1 minute** in the Alpaca-only setup.
 
 ### Backtest configuration page
 
@@ -204,10 +204,7 @@ Query parameters:
 - `max_bars` (optional) or legacy `limit` (optional): truncation cap (clamped to `[1, 200000]`)
 
 Data source:
-- Reads base rows from `stock_data`:
-  - Prefers `interval='30Sec'` if available for the symbol
-  - Otherwise uses `interval='1Min'`
-  Then aggregates to `bar_s`.
+- Reads base rows from `stock_data` interval `1Min`, then aggregates to `bar_s`.
 
 Response shape (arrays aligned 1:1):
 - `t_ms`, `o`, `h`, `l`, `c`, `v`
@@ -218,7 +215,7 @@ Response shape (arrays aligned 1:1):
 ### Symbol discovery
 
 - **GET `/api/symbols`**
-  - Returns chart-ready symbols from `stock_data` interval `1Min` or `30Sec`
+  - Returns chart-ready symbols from `stock_data` interval `1Min`
   - Response items shaped like: `{ "dataset": "<sym>", "symbol": "<sym>" }`
 
 ### Real ticker chart data
@@ -462,7 +459,7 @@ python -m unittest
 
 ## Notes & Constraints
 
-- **Base resolution**: real data is generally stored as 1-minute bars (Alpaca). If 30-second bars exist for a symbol (e.g., Databento-ingested), `/window` can serve sub-minute candles down to 30s.
+- **Base resolution**: real data is stored as 1-minute bars (Alpaca).
 - **Time zones**:
   - DB timestamps are treated as ISO strings, generally UTC
   - VWAP anchoring and “trading day” logic is based on **US/Eastern** market session rules.
