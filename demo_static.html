@@ -3422,7 +3422,9 @@
     var doSmooth = !!ui.smooth.checked;
 
     // 'outer' controls: outer bands in Bands view, and wick visibility in Candles view.
-    var showOuterBands = !!ui.outer.checked && isBands;
+    // Important: band fill should be able to render even when band outlines are hidden.
+    // So outer-band selection must not depend on `isBands` (the outlines toggle).
+    var showOuterBands = !!ui.outer.checked;
     var showWicks = !!ui.outer.checked && isCandles;
 
     var showAvg = !!ui.avgline.checked;
@@ -3579,7 +3581,11 @@
     }
 
     // Band fills
-    if(isBands && useNoCross && doFill){
+    // Fill bands should be independent from drawing band outlines:
+    // - Bands only: outlines only
+    // - Bands + Fill: outlines + fill
+    // - Fill only: fill only (no outlines)
+    if(useNoCross && doFill){
       if(showOuterBands){
         fillBetween(ctx, pts3, pts2, 'rgba(80,220,140,0.18)', doSmooth);
         fillBetween(ctx, pts2, pts1, 'rgba(90,150,255,0.18)', doSmooth);
