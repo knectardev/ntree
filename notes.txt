@@ -1,501 +1,119 @@
-Core design goals
+Perfect — Option A (wall-clock window stepping) is the right choice for your “velocity-controlled practice field,” and it will eliminate the confusing “15 minutes expected, 50 minutes actual” behavior you just saw when there are gaps in the 1-minute series. 
 
-Deterministic replay: every session can be re-run exactly.
+replay_smoke
 
-Two clocks:
+What changes with Option A
 
-Market clock (bars/time)
+A “display step” means:
 
-Execution clock (your “decision cadence” + fills latency)
+Advance the display window by exactly disp_tf_sec in real time (e.g., 5 minutes)
 
-Manual play first: clicks/keys place orders; engine simulates fills + PnL.
+Inside that window, process all exec bars whose timestamps fall within [window_start, window_end)
 
-Logging is the product: every action + every fill + every state snapshot.
+So if there’s a 36-minute gap in the 1-minute feed (as your diagnostics showed), the clock still advances by 5 minutes per step, but you might consume 0 exec bars for that window (and you should log that explicitly). 
 
-Minimal architecture
-A) Data layer
+replay_smoke
 
-Bars table (your existing SQLite approach is perfect)
+Concrete implementation notes for Cursor
+1) Add display-window cursor state
 
-symbol, ts, timeframe_s, open, high, low, close, volume
+In ReplaySessionState keep:
 
-Optional later:
+cursor_disp_start_ts
 
-session_calendar (RTH windows, holidays)
+cursor_disp_end_ts (or compute as start + disp_tf)
 
-“derived” cache (VWAP/EMA/channel values) or compute on the fly
+cursor_exec_ts (last processed exec ts)
 
-B) Engine (headless, pure Python)
+cursor_exec_idx (optional, for debug)
 
-Single authoritative state machine that advances on the market clock and resolves fills on the execution clock.
+2) Implement step as time windows (not bar counts)
 
-Key modules:
+Pseudo-logic:
 
-MarketFeed
+Let disp_start = current_disp_end (or start)
 
-next_bar() yields bar + timestamp
+Let disp_end = disp_start + disp_tf_sec
 
-IndicatorPack
+Consume exec bars where disp_start <= bar.ts < disp_end
 
-computes your channels/VWAP/EMAs for the current window
+For each consumed exec bar:
 
-BrokerSim
+evaluate fills
 
-order book (your orders only), fill rules, slippage, partial fills (optional), OCO handling
+update position/pnl
 
-Portfolio
+append events
 
-positions, avg price, realized/unrealized PnL, margin model (simple first)
+Set cursor_disp_end_ts = disp_end
 
-Rules / Regime (optional)
+Set cursor_exec_ts = last_consumed_exec_ts (or leave unchanged if none)
 
-range-vs-trend flags, “stand down” hints (even if manual)
+3) Handle “no exec bars in window” cleanly
 
-C) Event log (append-only)
+This will happen due to:
 
-This is the secret sauce. Log everything as events so replay is trivial.
+market closed
 
-One table: events
+missing minutes
 
-event_id (increment)
+requested time outside available data
 
-ts_market (bar time)
+In that case:
 
-ts_exec (engine time step)
+Advance display clock anyway
 
-type (BAR, INDICATORS, ORDER_SUBMIT, ORDER_CANCEL, FILL, POSITION, RISK, NOTE)
+Return a display candle as NA/empty or “no-trade candle” (your choice), but do not invent OHLC
 
-payload_json
+Emit an event like WINDOW_EMPTY (helps debug + analytics)
 
-That’s it. With this, you can:
+4) Snap display windows to boundaries (recommended default)
 
-replay sessions
+Your session currently starts at 13:18, but 5-minute bars on charts are aligned to :00/:05/:10.... 
 
-build post-game “coach” views
+replay_smoke
 
-later train RL agents using the same interface
 
-D) UI (web)
+So on session start:
 
-UI talks to engine via a small API:
+snap t_start up to next display boundary (e.g., 13:20 for 5m)
 
-POST /session/start (symbol, timeframe, start/end, seed)
+keep original requested start stored separately for audit
 
-POST /action (place/cancel/modify/flatten)
+5) Update the smoke test expectations
 
-GET /state (latest snapshot)
+Right now replay_smoke.py assumes continuous 1-minute bars to predict cursor advance. 
 
-GET /events?since=… (stream updates)
+replay_smoke
 
-The “gym” interface contract
 
-Whether it’s a human or a bot, everything goes through the same actions:
+With Option A, that expectation becomes true again:
 
-Observations (state snapshot)
+disp_steps=3, disp_tf_sec=300 ⇒ clock advances exactly 900 seconds, always.
 
-Return a structured JSON blob (not pixels initially):
+So after the change, the smoke output should show:
 
-current bar OHLCV
+cursor display time advances 15m
 
-channel params (high/low/mid, slope, width/ATR)
+exec bars consumed may be 0..15 depending on gaps
 
-VWAP + EMAs + distances
+6) One more improvement to the smoke test
 
-position + avg price + unrealized
+Your comment says the placed limit isn’t guaranteed to fill. 
 
-active orders (price, qty, side, type)
+replay_smoke
 
-session time remaining / market phase
 
-Actions (discrete, human-friendly)
+For a more definitive v1 test, add an optional “guaranteed fill mode”:
 
-Start with a small set:
+buy limit at bars[0].high (or just a very high price) so low <= limit is always true and you can validate fill + logging deterministically.
 
-PLACE_LIMIT(side, price, qty, tag)
+How you’ll know you’re “green”
 
-PLACE_MARKET(side, qty, tag)
+After Option A is implemented, rerun the smoke test and you should see:
 
-CANCEL(order_id)
+Expected advance = actual advance (15m for 3×5m)
 
-REPLACE(order_id, new_price)
+Exec bars consumed may be less than 15 if the window hits gaps
 
-FLATTEN()
-
-SET_BRACKET(tp_price, sl_price) (optional)
-
-PAUSE/RESUME (execution clock)
-
-This is enough to “play” channel trading.
-
-Rewards (later)
-
-For now, just compute:
-
-Δ equity
-
-drawdown
-
-trade count / churn
-
-time-in-trade
-When you’re ready for RL, reward becomes a function of those.
-
-Fill model: pick one and lock it
-
-To avoid endless debates, choose a simple default that you can later swap:
-
-v1 Fill rules (honest and stable):
-
-Market orders fill at next_bar.open + slippage
-
-Limit orders fill if bar.low <= limit <= bar.high
-
-fill price = limit (or worse by 1 tick if you want pessimism)
-
-Optional: add latency as “fills are evaluated one bar later” (execution clock delay)
-
-The key is consistency + replay, not perfect realism on day 1.
-
-Milestone sequence (the build order that won’t explode)
-Milestone 1: Replayable session runner (no UI)
-
-load bars
-
-step bars
-
-print PnL for a scripted sequence of actions
-
-write events log
-
-Milestone 2: Manual actions via API
-
-minimal FastAPI endpoints
-
-simple front-end buttons (buy/sell limit up/down ticks)
-
-chart consumes /state + /events
-
-Milestone 3: “Practice gym” features
-
-session presets (RTH only, last N days)
-
-hotkeys (place at lower band, upper band, mid)
-
-journaling notes
-
-automatic “coach metrics” panel:
-
-entries vs band distance histogram
-
-avg MAE/MFE
-
-win rate by regime flag
-
-“stood down” rate
-
-Milestone 4: Bot plug-in (optional)
-
-implement AgentPolicy.act(obs)->action
-
-run headless episodes
-
-compare to human logs apples-to-apples
-
-What I’d build next if I were you
-
-If you already have the SQLite + chart working, your next best step is:
-
-Create the events table and start writing it.
-
-Implement BrokerSim with the v1 fill rules.
-
-Add one endpoint: POST /action to inject orders.
-
-Make the UI show: active orders + fills + position changes from events.
-
-If you want, paste:
-
-your current DB schema (bars table)
-
-and the set of manual actions you want in the UI
-
-…and I’ll turn this into a tight “v1 spec” (endpoints + exact event types + payload shapes) that you can hand to Cursor/dev without ambiguity. 
-
-
-ntree v1: Manual Market Replay “Practice Field” With Velocity + Logging
-Goal
-
-Build a minimalist, manually played “market replay” environment for multi-hour / 5–15m decision-making, with:
-
-velocity-controlled replay
-
-manual order placement (no algo execution)
-
-perfect-fill v1 (deterministic, no slippage/queue)
-
-high-signal logging (session + actions + fills + trade outcomes)
-
-This is a practice field / film room for discretionary “liquidity bracketing” (weighted ladders outside ATR/channels).
-
-Key decision: Two-clock model (must-have)
-
-Display clock (what user sees + decides on):
-
-5m / 10m / 15m / 30m / 1h (configurable)
-
-Indicators/channels computed here (ATR, channel bounds, VWAP/EMA overlays per your stack)
-
-Execution clock (what fills against):
-
-1-minute bars from Alpaca (canonical storage)
-
-Used only for deterministic order touch/fill sequencing to avoid 5–10m OHLC ambiguity
-
-Avoid 1-second DataBento (too many pathological wicks; pollutes higher aggregation)
-
-Invariant (recommended for “slow pace” training):
-
-User can only place/modify orders at display-bar boundaries (toggleable), while fills occur during execution steps inside that display bar.
-
-Architecture Additions (minimal, fits existing stack)
-A) Replay Engine (server-side module)
-
-A small state machine that iterates time forward and returns updates.
-
-ReplaySession state
-
-session_id
-
-symbol
-
-exec_tf = 1m
-
-disp_tf = 5m|10m|15m|...
-
-t_start, t_end, t_cursor_exec
-
-speed (expressed as display bars per minute or exec bars per second)
-
-paused
-
-orders[], position, pnl
-
-Replay step
-
-Step by one display bar (or N), implemented as:
-
-compute next display bar window [T, T+disp_tf)
-
-loop through constituent 1m bars inside the window:
-
-apply fill evaluation
-
-update position + PnL
-
-emit events
-
-return: latest display candle + overlays + order/position state + events since last call
-
-Note: Keep sessions in-memory for v1; persist only logs to SQLite. Add TTL cleanup.
-
-B) Minimal “PaperBroker” (perfect-fill, deterministic)
-
-Support multiple simultaneous working limit orders on both sides (ladders), but with a deterministic rule to prevent confusing intrabar flips.
-
-Order types (v1)
-
-LIMIT
-
-(optional) MARKET (fills at next exec bar open)
-
-(optional) STOP_MARKET (fills at stop price when touched)
-
-Perfect fill rules (per 1m bar OHLC)
-
-For each open order:
-
-Limit Buy fills if bar.low <= limit_price
-
-Limit Sell fills if bar.high >= limit_price
-
-Stop Buy triggers if bar.high >= stop_price (fill at stop)
-
-Stop Sell triggers if bar.low <= stop_price (fill at stop)
-
-Market fills at bar.open of the next exec bar
-
-“Both sides touched” policy (important)
-
-We chose:
-
-Fill all eligible orders
-
-Direction-locked per execution bar
-
-First fill wins within that 1m bar, then fill all other eligible orders of the same direction; ignore opposite-direction entries for that exec bar.
-
-Implementation detail:
-
-Evaluate eligible fills, then select the “first” by a deterministic sorting rule (e.g., price nearest bar.open first, then FIFO by order id). That decides lock direction.
-
-Position model (v1 recommendation)
-
-One net position at a time (long/short/flat), with scaling in/out supported.
-
-If position is long, ignore short entry fills in that exec bar due to direction lock (and vice versa).
-
-Data & Aggregation (Alpaca-first)
-Canonical storage
-
-Store 1-minute OHLCV in SQLite (from Alpaca).
-
-Aggregation
-
-Generate display bars by aggregating 1m → 5m/10m/15m/30m/1h:
-
-open = first open
-
-high = max high
-
-low = min low
-
-close = last close
-
-volume = sum volume
-
-Compute overlays (EMA/VWAP/ATR/channels) on the display series (or on exec series if you already have code; but align UI to display timeframe).
-
-Technical note: ensure aggregation uses strict time bucket boundaries in exchange timezone; avoid drift.
-
-API Endpoints (suggested minimal set)
-
-Assuming your existing API serves bars to the chart; add a replay namespace.
-
-POST /replay/start
-
-body: {symbol, t_start, t_end, disp_tf, speed, constraints:{edit_on_disp_boundary:true}}
-
-returns: {session_id, initial_state}
-
-POST /replay/step
-
-body: {session_id, disp_steps:1} (or {exec_steps:n} if needed)
-
-returns: {disp_bar, overlays, orders, position, pnl, events_since_last}
-
-POST /replay/set_speed
-
-body: {session_id, speed}
-
-POST /replay/pause / POST /replay/play
-
-Order ops:
-
-POST /replay/order/place
-
-POST /replay/order/cancel
-
-POST /replay/order/modify
-
-POST /replay/end
-
-finalize session + flush summary metrics
-
-If the UI is already polling/streaming, /replay/step can be called on an interval; “velocity” is how many exec/disp steps to advance per UI tick.
-
-Logging (SQLite; “film room”)
-
-Keep it lightweight but high value.
-
-Tables
-replay_sessions
-
-session_id (pk)
-
-symbol, exec_tf, disp_tf
-
-t_start, t_end, created_at
-
-result_pnl, max_dd, num_trades, win_rate, avg_r
-
-notes (optional)
-
-replay_events (append-only)
-
-id (pk)
-
-session_id (fk)
-
-ts_exec (timestamp aligned to 1m bars)
-
-event_type enum: ORDER_PLACED|ORDER_CANCELED|ORDER_MODIFIED|FILL|STOP_TRIGGERED|TARGET_FILLED|FLATTEN|SPEED_CHANGE|PAUSE|PLAY
-
-payload_json (order id, price, qty, side, reason code, etc.)
-
-replay_trades (derived at close or maintained live)
-
-trade_id, session_id
-
-side, entry_ts, entry_px, exit_ts, exit_px, qty
-
-pnl, r_multiple
-
-reason_code (dropdown later)
-
-mods_count (order modifications during trade)
-
-Notes
-
-You do not need to store every 1m bar in events; only store discrete actions + fills + state transitions.
-
-Add “snapshot per display bar” later only if needed for debug.
-
-UI Changes (minimal)
-
-Add a “Replay Mode” toolbar around the existing chart:
-
-Play / Pause
-
-Step 1 display bar / Step N
-
-Speed slider (display bars per minute)
-
-Timestamp readout (current display bar end)
-
-Order panel:
-
-place limit buy/sell (price, qty)
-
-cancel/modify
-
-show working orders plotted on chart
-
-Position/PnL widget (net pos, avg price, uPnL/rPnL)
-
-Optional v1.1:
-
-“Ladder Builder” button (ATR/channel-based weighted levels) that simply places multiple limit orders at once (still human-triggered).
-
-Non-goals for v1 (explicitly out)
-
-slippage, spread, queue position
-
-partial fills
-
-tick/1-second data cleaning
-
-automated strategy execution / signals
-
-ML / optimization
-
-Implementation Order (Cursor-friendly)
-
-Implement ReplaySession + /replay/start + /replay/step that advances time and returns display candles from DB aggregation.
-
-Implement order list + fill rules (perfect fill, direction lock per 1m bar).
-
-Hook UI controls to replay endpoints; render orders/fills.
-
-Add SQLite logging tables + event writes.
-
-Add session summary metrics at /replay/end.
+No more giant wall-clock jumps caused by missing minutes

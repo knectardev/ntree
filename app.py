@@ -3,6 +3,7 @@ from database import get_db_connection, init_database, get_synthetic_datasets, l
 from datetime import datetime, timedelta, timezone
 import alpaca_trade_api as tradeapi
 import time
+import os
 import pandas as pd
 import json
 from typing import Optional
@@ -16,6 +17,7 @@ from utils import calculate_vwap_per_trading_day, get_market_hours_info, get_mar
 from strategies import compute_vwap_ema_crossover_signals, compute_fools_paradise_signals, STRATEGY_REGISTRY, build_regular_mask
 from backtesting import run_backtest, RiskRewardExecutionModel
 from candlestick_analysis import compute_candlestick_bias, count_pattern_instances
+from replay.session import ReplaySession, ReplaySessionConfig
 
 # Optional imports for predictive analytics - won't break app if not installed
 try:
@@ -47,6 +49,16 @@ init_database()
 VALID_SYNTH_TIMEFRAMES = {"1m", "5m", "15m"}
 SYNTH_DEFAULT_LIMIT = 1000
 SYNTH_MAX_LIMIT = 5000
+
+# In-memory replay sessions (v1). Persist logs to SQLite; sessions are ephemeral.
+_REPLAY_SESSIONS: Dict[str, ReplaySession] = {}
+
+
+def _get_replay_session(session_id: str) -> Optional[ReplaySession]:
+    sid = (session_id or "").strip()
+    if not sid:
+        return None
+    return _REPLAY_SESSIONS.get(sid)
 
 
 def _bad_request(code: str, message: str, **extra):
@@ -645,7 +657,12 @@ def ticker_detail(ticker):
     # Alternate chart view: /ticker/SPY?band
     # (keeps existing detail view intact unless explicitly requested).
     if "band" in request.args:
-        return render_template("ticker_band.html", ticker=ticker)
+        # Cache-buster for the iframe so Chrome always requests the newest demo file.
+        try:
+            cache_bust = int(os.path.getmtime("demo_static.html"))
+        except Exception:
+            cache_bust = int(time.time())
+        return render_template("ticker_band.html", ticker=ticker, cache_bust=cache_bust)
     interval = request.args.get('interval', '1Min')
     return render_template(
         'detail.html',
@@ -660,7 +677,12 @@ def ticker_detail(ticker):
 @app.route("/demo_static.html")
 def demo_static_page():
     """Serve the standalone band/candle canvas demo (also used by /ticker/<sym>?band)."""
-    return send_file("demo_static.html", mimetype="text/html")
+    resp = send_file("demo_static.html", mimetype="text/html", max_age=0)
+    # Avoid sticky caching in Chrome during rapid iteration.
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @app.route('/backtest-config')
@@ -1449,6 +1471,151 @@ def package_poc():
                              numpy_available=False,
                              scipy_available=False,
                              statsmodels_available=False)
+
+
+# ---------------------------
+# Replay (practice-field) API
+# ---------------------------
+
+@app.route("/replay/start", methods=["POST"])
+def replay_start():
+    payload = request.get_json(silent=True) or {}
+    symbol = (payload.get("symbol") or payload.get("ticker") or "").strip().upper()
+    t_start = (payload.get("t_start") or payload.get("start") or "").strip()
+    t_end = (payload.get("t_end") or payload.get("end") or "").strip()
+    disp_tf_sec = int(payload.get("disp_tf_sec") or payload.get("disp_tf") or 300)
+    exec_tf_sec = int(payload.get("exec_tf_sec") or 60)
+    seed = payload.get("seed")
+    try:
+        seed_int = int(seed) if seed is not None else None
+    except Exception:
+        seed_int = None
+
+    if not symbol or not t_start or not t_end:
+        return _bad_request("missing_params", "symbol, t_start, and t_end are required")
+
+    try:
+        cfg = ReplaySessionConfig(
+            symbol=symbol,
+            t_start=t_start,
+            t_end=t_end,
+            exec_tf_sec=exec_tf_sec,
+            disp_tf_sec=disp_tf_sec,
+            seed=seed_int,
+        )
+        sess = ReplaySession.create(cfg)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+    _REPLAY_SESSIONS[sess.session_id] = sess
+    st = sess.get_state()
+    return jsonify(
+        {
+            "session_id": st.session_id,
+            "symbol": st.symbol,
+            "exec_tf_sec": st.exec_tf_sec,
+            "disp_tf_sec": st.disp_tf_sec,
+            "cursor_exec_ts": st.cursor_exec_ts.isoformat(),
+            "paused": st.paused,
+            "position": {"qty": st.position.qty, "avg_price": st.position.avg_price, "realized_pnl": st.position.realized_pnl},
+            "orders": [o.__dict__ for o in st.orders],
+            "last_event_id": st.last_event_id,
+        }
+    )
+
+
+@app.route("/replay/step", methods=["POST"])
+def replay_step():
+    payload = request.get_json(silent=True) or {}
+    session_id = (payload.get("session_id") or "").strip()
+    disp_steps = int(payload.get("disp_steps") or 1)
+    sess = _get_replay_session(session_id)
+    if not sess:
+        return jsonify({"error": "session not found"}), 404
+
+    st = sess.step(disp_steps=disp_steps)
+    return jsonify(
+        {
+            "session_id": st.session_id,
+            "cursor_exec_ts": st.cursor_exec_ts.isoformat(),
+            "paused": st.paused,
+            "position": {"qty": st.position.qty, "avg_price": st.position.avg_price, "realized_pnl": st.position.realized_pnl},
+            "orders": [o.__dict__ for o in st.orders],
+            "last_event_id": st.last_event_id,
+        }
+    )
+
+
+@app.route("/replay/order/place", methods=["POST"])
+def replay_order_place():
+    payload = request.get_json(silent=True) or {}
+    session_id = (payload.get("session_id") or "").strip()
+    side = (payload.get("side") or "").strip().lower()
+    qty = float(payload.get("qty") or 0)
+    price = payload.get("price")
+    tag = payload.get("tag")
+
+    sess = _get_replay_session(session_id)
+    if not sess:
+        return jsonify({"error": "session not found"}), 404
+    if side not in ("buy", "sell"):
+        return _bad_request("invalid_side", "side must be buy or sell")
+    if qty <= 0:
+        return _bad_request("invalid_qty", "qty must be > 0")
+    if price is None:
+        return _bad_request("missing_price", "price is required for limit orders in v1")
+
+    try:
+        o = sess.place_limit(side=side, price=float(price), qty=float(qty), tag=tag)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+    return jsonify({"order": o.__dict__, "last_event_id": sess.get_state().last_event_id})
+
+
+@app.route("/replay/order/cancel", methods=["POST"])
+def replay_order_cancel():
+    payload = request.get_json(silent=True) or {}
+    session_id = (payload.get("session_id") or "").strip()
+    order_id = (payload.get("order_id") or "").strip()
+    sess = _get_replay_session(session_id)
+    if not sess:
+        return jsonify({"error": "session not found"}), 404
+    if not order_id:
+        return _bad_request("missing_order_id", "order_id is required")
+    ok = sess.cancel(order_id=order_id)
+    if not ok:
+        return jsonify({"error": "order not found or not cancelable"}), 404
+    return jsonify({"canceled": order_id, "last_event_id": sess.get_state().last_event_id})
+
+
+@app.route("/replay/order/modify", methods=["POST"])
+def replay_order_modify():
+    payload = request.get_json(silent=True) or {}
+    session_id = (payload.get("session_id") or "").strip()
+    order_id = (payload.get("order_id") or "").strip()
+    new_price = payload.get("new_price")
+    sess = _get_replay_session(session_id)
+    if not sess:
+        return jsonify({"error": "session not found"}), 404
+    if not order_id or new_price is None:
+        return _bad_request("missing_params", "order_id and new_price are required")
+    ok = sess.modify(order_id=order_id, new_price=float(new_price))
+    if not ok:
+        return jsonify({"error": "order not found or not modifiable"}), 404
+    return jsonify({"modified": order_id, "new_price": float(new_price), "last_event_id": sess.get_state().last_event_id})
+
+
+@app.route("/replay/end", methods=["POST"])
+def replay_end():
+    payload = request.get_json(silent=True) or {}
+    session_id = (payload.get("session_id") or "").strip()
+    sess = _get_replay_session(session_id)
+    if not sess:
+        return jsonify({"error": "session not found"}), 404
+    # v1: step-to-end behavior is handled by stepping; end here just removes from memory.
+    _REPLAY_SESSIONS.pop(session_id, None)
+    return jsonify({"ended": session_id})
 
 @app.errorhandler(404)
 def not_found(error):

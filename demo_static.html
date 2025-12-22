@@ -291,13 +291,16 @@
         </div>
       </div>
 
-      <div class="sideCard" aria-label="Candlestick overlays">
-        <label class="chkRow">
-          <input id="indCandleBias" type="checkbox" />
-          <span class="chkLbl">
-            <span class="chkName">Candlestick Bias Overlay</span>
-          </span>
-        </label>
+      <!-- Candlestick bias overlay is intentionally hidden/disabled for now. -->
+      <div class="sideCard" aria-label="Practice mode">
+        <div class="sideCardTitle">Practice</div>
+        <p class="hint" style="margin: 0 0 10px 0;">
+          Start a replay “practice field” session (manual play).
+        </p>
+        <button class="btnPrimary" type="button" id="practiceBtn" title="Coming soon: replay/game mode">
+          Play (Practice Mode)
+        </button>
+        <div class="hint" id="practiceStatus" style="margin-top: 10px;"></div>
       </div>
 
       <div class="sideCard" aria-label="Strategy controls">
@@ -440,13 +443,14 @@
     return STATIC_MODE ? 'Load snapshot' : 'Fetch Latest Data';
   }
 
-  function getOverlaySettings(){
+    function getOverlaySettings(){
     return {
       ema9: !!(ui.indEma9 && ui.indEma9.checked),
       ema21: !!(ui.indEma21 && ui.indEma21.checked),
       ema50: !!(ui.indEma50 && ui.indEma50.checked),
       vwap: !!(ui.indVwap && ui.indVwap.checked),
-      candleBias: !!(ui.indCandleBias && ui.indCandleBias.checked)
+        // candlestick bias intentionally disabled/hidden
+        candleBias: false
     };
   }
 
@@ -1467,12 +1471,12 @@
       if(ui.sessPreMarket && cfg.sess_pre_market !== undefined) ui.sessPreMarket.checked = coerceBool(cfg.sess_pre_market, ui.sessPreMarket.checked);
       if(ui.sessAfterHours && cfg.sess_after_hours !== undefined) ui.sessAfterHours.checked = coerceBool(cfg.sess_after_hours, ui.sessAfterHours.checked);
       if(ui.sessClosed && cfg.sess_closed !== undefined) ui.sessClosed.checked = coerceBool(cfg.sess_closed, ui.sessClosed.checked);
-      // Overlays (EMA/VWAP) + candle bias placeholder
+      // Overlays (EMA/VWAP)
       if(ui.indEma9 && cfg.ind_ema9 !== undefined) ui.indEma9.checked = coerceBool(cfg.ind_ema9, ui.indEma9.checked);
       if(ui.indEma21 && cfg.ind_ema21 !== undefined) ui.indEma21.checked = coerceBool(cfg.ind_ema21, ui.indEma21.checked);
       if(ui.indEma50 && cfg.ind_ema50 !== undefined) ui.indEma50.checked = coerceBool(cfg.ind_ema50, ui.indEma50.checked);
       if(ui.indVwap && cfg.ind_vwap !== undefined) ui.indVwap.checked = coerceBool(cfg.ind_vwap, ui.indVwap.checked);
-      if(ui.indCandleBias && cfg.ind_candle_bias !== undefined) ui.indCandleBias.checked = coerceBool(cfg.ind_candle_bias, ui.indCandleBias.checked);
+      // Candle bias UI is intentionally removed.
 
       if(cfg.bar_s !== undefined){
         var ww = clamp(coerceInt(cfg.bar_s, 60), 60, 86400);
@@ -1531,7 +1535,7 @@
       ind_ema21: !!(ui.indEma21 && ui.indEma21.checked),
       ind_ema50: !!(ui.indEma50 && ui.indEma50.checked),
       ind_vwap: !!(ui.indVwap && ui.indVwap.checked),
-      ind_candle_bias: !!(ui.indCandleBias && ui.indCandleBias.checked)
+      ind_candle_bias: false
     };
   }
 
@@ -1792,7 +1796,9 @@
     indEma21: document.getElementById('indEma21'),
     indEma50: document.getElementById('indEma50'),
     indVwap: document.getElementById('indVwap'),
-    indCandleBias: document.getElementById('indCandleBias'),
+    indCandleBias: null,
+    practiceBtn: document.getElementById('practiceBtn'),
+    practiceStatus: document.getElementById('practiceStatus'),
     window: document.getElementById('window'),
     // Some checkboxes may be removed from the UI; we keep "virtual" controls so existing
     // logic can continue to read ui.*.checked.
@@ -3417,7 +3423,11 @@
     var isBands = showBands;
     var isCandles = showCandles;
 
-    var useNoCross = !!ui.nocross.checked;
+    // No-cross mode is the supported/primary band rendering mode for this demo.
+    // The control exists for backwards compatibility but is hidden in the UI; keep it forced on
+    // so band lines (including High/Low bands) remain stable and continuous.
+    if(ui.nocross) ui.nocross.checked = true;
+    var useNoCross = true;
     var doFill = !!ui.fills.checked;
     var doSmooth = !!ui.smooth.checked;
 
@@ -3425,6 +3435,9 @@
     // Important: band fill should be able to render even when band outlines are hidden.
     // So outer-band selection must not depend on `isBands` (the outlines toggle).
     var showOuterBands = !!ui.outer.checked;
+    // The "High/Low bands (or wicks)" toggle:
+    // - In Bands mode: controls whether we draw the outer high/low envelope.
+    // - In Candles mode: controls whether we draw candle wicks.
     var showWicks = !!ui.outer.checked && isCandles;
 
     var showAvg = !!ui.avgline.checked;
@@ -4234,7 +4247,7 @@
   if(ui.indEma21) ui.indEma21.addEventListener('change', onOverlayToggleChanged);
   if(ui.indEma50) ui.indEma50.addEventListener('change', onOverlayToggleChanged);
   if(ui.indVwap) ui.indVwap.addEventListener('change', onOverlayToggleChanged);
-  if(ui.indCandleBias) ui.indCandleBias.addEventListener('change', onOverlayToggleChanged);
+  // Candle bias removed.
   if(ui.showBands) ui.showBands.addEventListener('change', onToggleDraw);
   if(ui.showVolume) ui.showVolume.addEventListener('change', onToggleDraw);
   if(ui.sessPreMarket) ui.sessPreMarket.addEventListener('change', onSessionFilterChanged);
@@ -4244,6 +4257,16 @@
     syncCandleStyleEnabled();
     onToggleDraw();
   });
+
+  // Practice / Play Mode button (replay/game mode).
+  // v1: UI only (safe). We'll wire to /replay/start once the chart integration contract is defined.
+  if(ui.practiceBtn){
+    ui.practiceBtn.addEventListener('click', function(){
+      try{
+        if(ui.practiceStatus) ui.practiceStatus.textContent = 'Play mode coming soon…';
+      } catch(_e){}
+    });
+  }
   async function fetchLatestAndReload(){
     // In API mode, this triggers the server-side fetch for *all* tickers, then reloads the window.
     if(STATIC_MODE){

@@ -94,6 +94,49 @@ def init_database():
         CREATE INDEX IF NOT EXISTS idx_backtests_created ON backtests(created_at DESC)
     ''')
 
+    # Replay sessions + event log (append-only)
+    # This supports deterministic "practice field" replay sessions.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS replay_sessions (
+            session_id TEXT PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            exec_tf_sec INTEGER NOT NULL,         -- execution clock resolution (v1: 60)
+            disp_tf_sec INTEGER NOT NULL,         -- display clock resolution (e.g. 300/900/1800/3600)
+            t_start TEXT NOT NULL,                -- ISO-8601 UTC
+            t_end TEXT NOT NULL,                  -- ISO-8601 UTC
+            seed INTEGER,                         -- optional RNG seed for deterministic scenarios
+            status TEXT NOT NULL DEFAULT 'active',-- active|ended|error
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            summary_json TEXT                     -- optional summary metrics at end
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_replay_sessions_symbol_created
+        ON replay_sessions(symbol, created_at DESC)
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS replay_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            ts_exec TEXT NOT NULL,                -- execution timestamp (ISO-8601 UTC)
+            ts_market TEXT,                       -- optional market/display timestamp (ISO-8601 UTC)
+            event_type TEXT NOT NULL,             -- ORDER_PLACED|ORDER_CANCELED|ORDER_MODIFIED|FILL|PAUSE|PLAY|...
+            payload_json TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(session_id) REFERENCES replay_sessions(session_id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_replay_events_session_id
+        ON replay_events(session_id, id)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_replay_events_session_time
+        ON replay_events(session_id, ts_exec)
+    ''')
+
     # New canonical bars table (supports real and synthetic sources)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS bars (
