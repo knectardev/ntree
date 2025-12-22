@@ -1,14 +1,21 @@
-# Stock Ticker Dashboard
+# ntree (local Flask app)
 
-A Python-based web application for displaying real-time stock ticker data for SPY and QQQ using the Alpaca API.
+`ntree` is a **local Flask web app** for viewing real OHLCV bars stored in SQLite, browsing synthetic datasets (bars + L2-derived features), rendering interactive charts, and running simple strategy backtests.
 
 ## Features
 
-- SQLite database for storing stock data
-- Data ingestion script that fetches 1-minute and 5-minute interval data for SPY and QQQ (last 3 days)
-- Web dashboard with a grid view showing latest prices and timestamps
-- Interactive detail view with customizable charts for 1-minute and 5-minute intervals
-- Clickable rows to navigate to detailed ticker views
+- SQLite database for storing market data (`stock_data.db`)
+- Alpaca ingestion
+  - Initial backfill via `ingest_data.py`
+  - Incremental refresh + optional per-ticker range fetch from the dashboard (`POST /api/fetch-latest`)
+- Dashboard
+  - Real symbols table (click-through to band view)
+  - Synthetic datasets table (click-through to synthetic detail view)
+- Interactive chart pages (Chart.js candlesticks + zoom)
+- Backtest utilities
+  - Strategy signals rendered in the UI
+  - Simple risk/reward backtest engine with explicit execution assumptions
+  - Saved backtest configs + saved backtests APIs/pages
 
 ## Setup
 
@@ -17,18 +24,12 @@ A Python-based web application for displaying real-time stock ticker data for SP
 pip install -r requirements.txt
 ```
 
-2. Configure Alpaca API credentials:
-   - Copy `.env.example` to `.env`:
-     ```bash
-     copy .env.example .env
-     ```
-   - Edit `.env` and add your Alpaca API credentials:
-     ```
-     ALPACA_API_KEY=your_api_key_here
-     ALPACA_API_SECRET=your_api_secret_here
-     ALPACA_BASE_URL=https://paper-api.alpaca.markets/v2
-     ```
-   - The `.env` file is already in `.gitignore` and will not be committed to the repository.
+2. Configure Alpaca API credentials (**current implementation**):
+   - Alpaca credentials are currently **hard-coded** in:
+     - `app.py` (used by `POST /api/fetch-latest`)
+     - `ingest_data.py` (used by the initial ingest script)
+   - Before running ingestion or using “Fetch Latest Data”, replace the `API_KEY` / `API_SECRET` values in those files with your own.
+   - Note: `python-dotenv` exists in `requirements.txt` and `test_env.py` can load a `.env`, but the main Flask app does **not** call `load_dotenv()` today (and there is no `.env.example` committed).
 
 3. Initialize the database:
 ```bash
@@ -59,25 +60,43 @@ http://localhost:5000
 - `templates/detail.html` - Detail view page with interactive charts
 - `stock_data.db` - SQLite database file (created automatically)
 
+### Database path override
+
+By default the DB is stored at `stock_data.db` in the repo directory. You can override the location via:
+
+```bash
+setx NTREE_DB_PATH "C:\path\to\your\stock_data.db"
+```
+
 ## Usage
 
-1. **Data Ingestion**: Run `ingest_data.py` to fetch the latest 3 days of stock data for SPY and QQQ at 1-minute and 5-minute intervals.
+1. **Data Ingestion**: Run `ingest_data.py` to fetch the latest ~5 days of stock data for SPY and QQQ at 1-minute and 5-minute intervals.
 
-2. **View Dashboard**: Access the main page to see a grid of all tickers with their latest prices and timestamps.
+2. **View Dashboard**: Access the main page to see the real tickers list and synthetic datasets list. Use:
+   - **Fetch Latest Data** for an incremental update
+   - **Add + Fetch Range** to add/backfill a specific ticker over a date range
 
-3. **View Details**: Click on any ticker row to see a detailed chart view. Use the links at the top to switch between 1-minute and 5-minute interval views.
+3. **View Details**:
+   - Real symbol band view: click a ticker row on the dashboard → `/ticker/<TICKER>?band` (iframe demo uses `/window`)
+   - Synthetic detail view: click a dataset row → `/synthetic/<SYMBOL>?scenario=<...>&timeframe=<...>`
 
 ## API Endpoints
 
 - `GET /` - Main dashboard page
 - `GET /ticker/<ticker>` - Detail view for a specific ticker
 - `GET /api/ticker/<ticker>/<interval>` - JSON API endpoint for chart data
+- `GET /window` - Bandchart-style window endpoint (aggregates 1Min bars to `bar_s`)
+- `POST /api/fetch-latest` - Alpaca refresh/backfill into `stock_data`
+- `GET /api/synthetic_datasets` - List synthetic dataset groups
+- `GET /api/synthetic_bars` - Fetch synthetic OHLCV bars
+- `GET /api/synthetic_l2` - Fetch synthetic L2 series aligned to bars
+- `GET /backtest-config` - Backtest config UI
+- `GET /api/backtest-configs` / `POST /api/backtest-configs` / `DELETE /api/backtest-configs/<id>`
+- `GET /api/backtests` / `POST /api/backtests` / `GET /api/backtests/<id>` / `POST /api/backtests/<id>/run` / `DELETE /api/backtests/<id>`
 
 ## Notes
 
-- The Alpaca API credentials are stored in the `.env` file (not committed to git)
-- Data is stored in SQLite database `stock_data.db`
-- The application uses Chart.js for interactive chart visualization
-- The web interface is responsive and modern with a gradient design
-- Environment variables are loaded using `python-dotenv` package
+- Credentials: currently hard-coded in `app.py` and `ingest_data.py` (see Setup).
+- Data is stored in SQLite database `stock_data.db` (or `NTREE_DB_PATH` override).
+- The application uses Chart.js (candlesticks + zoom) for interactive visualization.
 
