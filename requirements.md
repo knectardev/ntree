@@ -24,7 +24,7 @@ This document describes the **current** functionality and technical specificatio
 
 - **Python**: **3.10+** (uses PEP-604 unions like `sqlite3.Connection | None`)
 - **Web server**: Flask dev server (`python app.py`)
-- **Database**: SQLite (`stock_data.db`)
+- **Database**: SQLite (`stock_data.db`; path can be overridden via `NTREE_DB_PATH`)
 - **Frontend**: server-rendered HTML templates + CDN JS (Chart.js + financial/zoom plugins)
 
 ---
@@ -78,6 +78,7 @@ Key columns:
 - `ts_start` (ISO string, bar open timestamp)
 - `duration_sec` (e.g. 60)
 - OHLCV: `open`, `high`, `low`, `close`, `volume`
+- Optional/extra: `trades`, `vwap`
 - `data_source` (e.g. `synthetic`, `alpaca_hist`, `alpaca_live`)
 - `scenario` (nullable; used for synthetic)
 
@@ -109,10 +110,11 @@ There are two ways real data enters `stock_data`:
   - Uses the Alpaca IEX feed (`feed='iex'`)
   - Sleeps `0.5s` between requests (rate limiting)
 
-- **Incremental update via UI**: `POST /api/fetch-latest`
-  - Finds the max timestamp in `stock_data`, then fetches bars from `last+1min` to now
+- **Incremental update (and optional backfill) via UI**: `POST /api/fetch-latest`
+  - Default (no payload): finds the max timestamp in `stock_data`, then fetches bars from `last+1min` to now
+  - Optional payload allows adding/backfilling a symbol over a date range (used by the dashboard “Add + Fetch Range” form)
   - Uses `list_all_tickers()` if the DB already contains symbols; otherwise defaults to `['SPY','QQQ']`
-  - Inserts OHLCV into `stock_data`
+  - Inserts OHLCV into `stock_data` (upsert via `INSERT OR REPLACE`)
 
 **Credential handling (current implementation)**:
 - `ingest_data.py` and `app.py` currently contain **hard-coded Alpaca credentials**.
@@ -140,7 +142,8 @@ Persistence helper:
 - **GET `/`**
   - Shows “Real Symbols” (from `stock_data`, interval `1Min`)
   - Shows “Synthetic Data Sets” (from `bars_synth` view)
-  - “Fetch Latest Data” triggers `POST /api/fetch-latest`
+  - “Fetch Latest Data” triggers `POST /api/fetch-latest` (incremental)
+  - “Add + Fetch Range” triggers `POST /api/fetch-latest` with a JSON payload (symbol + date range backfill)
   - Clicking a real symbol opens **band view**: `/ticker/<SYMBOL>?band`
   - Clicking a synthetic dataset opens: `/synthetic/<SYMBOL>?scenario=<...>&timeframe=<...>`
 
@@ -183,8 +186,8 @@ Persistence helper:
 ### Package proof-of-concept
 
 - **GET `/package-proof-of-concept`**
-  - Displays versions and sample calculations for optional analytics packages:
-    - numpy/scipy/statsmodels (if installed)
+  - Displays versions and sample calculations for analytics packages (the route is resilient if some packages are missing):
+    - numpy/scipy/statsmodels
 
 ---
 
@@ -199,7 +202,9 @@ Purpose:
 
 Query parameters:
 - `symbol` (required): symbol/ticker (uppercased)
-- `bar_s` (optional, default `60`): aggregation size in seconds; values `<30` are forced to `30`. If the symbol only has 1-minute data, `<60` will effectively serve as `60`.
+- `bar_s` (optional, default `60`): aggregation size in seconds.
+  - Enforced minimum is **60s** (Alpaca-only base resolution)
+  - Values not divisible by 60 are rounded down to the nearest 60s multiple (and clamped to >= 60)
 - `start`, `end` (optional ISO timestamps): window selection; if both omitted, defaults to **last 1 hour**
 - `max_bars` (optional) or legacy `limit` (optional): truncation cap (clamped to `[1, 200000]`)
 
@@ -292,7 +297,13 @@ Response:
 ### Real data refresh
 
 - **POST `/api/fetch-latest`**
-  - Fetches latest bars from Alpaca and upserts into `stock_data`
+  - Fetches bars from Alpaca and upserts into `stock_data`
+  - Default behavior (no payload): incremental “from latest timestamp to now”
+  - Optional JSON body fields (used by the dashboard form):
+    - `ticker` or `symbol` (optional): fetch only this symbol (lets you add new symbols)
+    - `interval` (optional, default `1Min`)
+    - `start_date` / `end_date` (optional): accepts `YYYY-MM-DD` or full ISO timestamps; enables range backfill
+  - Response: `{ success: bool, records_added: int, last_timestamp: string | null }`
 
 ---
 
@@ -396,8 +407,9 @@ Core:
 - `numpy>=1.24.0` (used by candlestick analysis + general numeric ops)
 - `pandas-ta==0.4.71b0` (used when available; code has fallbacks but dependency is included)
 - `python-dotenv>=1.0.0` (used by scripts; app does not auto-load `.env` today)
+- `zstandard>=0.22.0` (installed; currently not required for the core Flask app paths)
 
-Optional (only used by `/package-proof-of-concept` when installed):
+Installed by default in `requirements.txt` but only used by `/package-proof-of-concept` (the Flask app won’t crash if they’re missing):
 - `scipy>=1.10.0`
 - `statsmodels>=0.14.0`
 
