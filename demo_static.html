@@ -3533,6 +3533,21 @@
       ptsAsk.push([NaN, NaN]);
     }
 
+    // Band fills (render behind candles for proper layering)
+    // Fill bands should be independent from drawing band outlines:
+    // - Bands only: outlines only
+    // - Bands + Fill: outlines + fill
+    // - Fill only: fill only (no outlines)
+    if(useNoCross && doFill){
+      if(showOuterBands){
+        fillBetween(ctx, pts3, pts2, 'rgba(80,220,140,0.18)', doSmooth);
+        fillBetween(ctx, pts2, pts1, 'rgba(90,150,255,0.18)', doSmooth);
+        fillBetween(ctx, pts1, pts0, 'rgba(255,110,110,0.18)', doSmooth);
+      } else {
+        fillBetween(ctx, pts2, pts1, 'rgba(90,150,255,0.18)', doSmooth);
+      }
+    }
+
     // Candles
     if(isCandles){
       var cdata = (state.candleStyle === 'ha') ? state.ha : state.data;
@@ -3569,6 +3584,8 @@
         var by = top;
 
         ctx.save();
+        // Ensure candles are fully opaque regardless of any prior drawing.
+        ctx.globalAlpha = 1;
         ctx.fillStyle = bodyColor;
         ctx.strokeStyle = bodyColor;
         ctx.lineWidth = 1;
@@ -3577,21 +3594,6 @@
         ctx.fill();
         ctx.stroke();
         ctx.restore();
-      }
-    }
-
-    // Band fills
-    // Fill bands should be independent from drawing band outlines:
-    // - Bands only: outlines only
-    // - Bands + Fill: outlines + fill
-    // - Fill only: fill only (no outlines)
-    if(useNoCross && doFill){
-      if(showOuterBands){
-        fillBetween(ctx, pts3, pts2, 'rgba(80,220,140,0.18)', doSmooth);
-        fillBetween(ctx, pts2, pts1, 'rgba(90,150,255,0.18)', doSmooth);
-        fillBetween(ctx, pts1, pts0, 'rgba(255,110,110,0.18)', doSmooth);
-      } else {
-        fillBetween(ctx, pts2, pts1, 'rgba(90,150,255,0.18)', doSmooth);
       }
     }
 
