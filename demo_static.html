@@ -2209,6 +2209,13 @@
     ctx.strokeStyle = 'rgba(255,255,255,0.06)';
     ctx.lineWidth = 1;
 
+    // Canvas stroke crispness:
+    // A 1px vertical line looks "thicker" if it lands between pixels (antialiasing).
+    // Snap X to half-pixel so all vertical grid lines render with a consistent thin weight.
+    function _crispX(px){
+      return Math.round(px) + 0.5;
+    }
+
     var haveOpts = !!(opts && Number.isFinite(opts.yMin) && Number.isFinite(opts.yMax));
     if(!haveOpts){
       var rows = 6;
@@ -2221,7 +2228,7 @@
       }
       var cols = 10;
       for(var j=0;j<=cols;j++){
-        var xx0 = x + (w/cols)*j;
+        var xx0 = _crispX(x + (w/cols)*j);
         ctx.beginPath();
         ctx.moveTo(xx0, y);
         ctx.lineTo(xx0, y+h);
@@ -2249,6 +2256,10 @@
     var start = opts.start, end = opts.end, barsVisible = opts.barsVisible, plot = opts.plot;
     var data = (state && Array.isArray(state.data)) ? state.data : null;
     if(data && Number.isFinite(start) && Number.isFinite(end) && Number.isFinite(barsVisible) && plot && plot.w > 4){
+      // Extend vertical grid lines to the full plot height (including volume pane) so they reach
+      // the bottom edge of the container. Stay inside the clip inset (see clipInset=1).
+      var vTop = plot.y + 1;
+      var vBottom = plot.y + plot.h - 1;
       var t0 = Number(data[start] && data[start].t);
       var t1 = Number(data[end] && data[end].t);
       var tInfo = computeTimeTicksBySpan(t0, t1, plot.w, 140);
@@ -2257,12 +2268,12 @@
           var idx = findIndexByTimeMs(data, tm);
           if(idx < start) idx = start;
           if(idx > end) idx = end;
-          var xx = xForIndex(idx + 0.5, plot, barsVisible);
+          var xx = _crispX(xForIndex(idx + 0.5, plot, barsVisible));
           if(!Number.isFinite(xx)) continue;
           if(xx < x - 2 || xx > x + w + 2) continue;
           ctx.beginPath();
-          ctx.moveTo(xx, y);
-          ctx.lineTo(xx, y+h);
+          ctx.moveTo(xx, vTop);
+          ctx.lineTo(xx, vBottom);
           ctx.stroke();
         }
       }
@@ -3199,12 +3210,14 @@
     ctx.restore();
 
     var pad = 14;
+    // Reserve space for the Y-axis price labels. We render the price axis on the RIGHT side.
+    var yAxisW = 50;
     // Reserve space for X-axis tick labels so they don't get clipped at the bottom.
     // Slightly taller to support 2-line day labels (month + day) when zoomed out.
     var xAxisH = 40;
-    var plotW = Math.max(1, Wpx - (pad*2 + 50));
+    var plotW = Math.max(1, Wpx - (pad*2 + yAxisW));
     var plotH = Math.max(1, Hpx - pad*2 - xAxisH);
-    var plot = { x: pad + 50, y: pad, w: plotW, h: plotH }; // full plot region (price+volume)
+    var plot = { x: pad, y: pad, w: plotW, h: plotH }; // full plot region (price+volume)
     var showVolume = ui.showVolume ? !!ui.showVolume.checked : false;
     var volSep = showVolume ? 8 : 0;
     var volH = 0;
@@ -3255,7 +3268,7 @@
     ctx.save();
     ctx.fillStyle = 'rgba(215,224,234,0.85)';
     ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-    ctx.textAlign = 'right';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     var yTicksInfo = computePriceTicks(yMin, yMax, pricePlot.h, 58);
     var yTicks = (yTicksInfo && yTicksInfo.ticks && yTicksInfo.ticks.length) ? yTicksInfo.ticks : null;
@@ -3266,7 +3279,7 @@
         var tt = i/rows;
         var price = lerp(yMax, yMin, tt);
         var yy = pricePlot.y + pricePlot.h * tt;
-        ctx.fillText(price.toFixed(2), pricePlot.x - 8, yy);
+        ctx.fillText(price.toFixed(2), pricePlot.x + pricePlot.w + 8, yy);
       }
     } else {
       var dec = decimalsForStep(yTicksInfo.step);
@@ -3274,7 +3287,7 @@
         var p = yTicks[yi];
         var yy = yForPrice(p, pricePlot, yMin, yMax);
         if(!Number.isFinite(yy)) continue;
-        ctx.fillText(Number(p).toFixed(dec), pricePlot.x - 8, yy);
+        ctx.fillText(Number(p).toFixed(dec), pricePlot.x + pricePlot.w + 8, yy);
       }
     }
     ctx.restore();
@@ -3702,7 +3715,15 @@
       var ph = 20;
       var pPadX = 10;
       var pBoxW = Math.max(44, pw + pPadX*2);
-      var pBoxX = (plot.x + plot.w) - pBoxW - 4; // inside plot edge
+      // Place the price pill in the RIGHT axis gutter (Webull-style overlap).
+      // If the pill is wider than the gutter, allow it to overlap slightly into the plot.
+      var axisLeft = (plot.x + plot.w);
+      var axisRight = axisLeft + yAxisW;
+      var pInset = 4;
+      var targetX = axisLeft + Math.floor((yAxisW - pBoxW) / 2);
+      var minX = axisLeft - Math.max(0, (pBoxW - (yAxisW - pInset*2)));
+      var maxX = axisRight - pBoxW - pInset;
+      var pBoxX = clamp(targetX, minX, maxX);
       var pBoxY = clamp(hy2 - ph/2, pricePlot.y + 3, pricePlot.y + pricePlot.h - ph - 3);
       ctx.fillStyle = axisBg;
       ctx.strokeStyle = axisBorder;
@@ -3756,9 +3777,10 @@
   function updateHover(e){
     var r = canvas.getBoundingClientRect();
     var pad = 14;
+    var yAxisW = 50;
     var xAxisH = 40;
-    var plotW = Math.max(1, r.width - (pad*2 + 50));
-    var plotX = pad + 50;
+    var plotW = Math.max(1, r.width - (pad*2 + yAxisW));
+    var plotX = pad;
     var plotY = pad;
     var plotH = Math.max(1, r.height - pad*2 - xAxisH);
 
@@ -3800,7 +3822,9 @@
       var dyPx = (e.clientY - r.top) - state.dragY0;
       var n = state.data.length;
       var barsVisible = Math.min(n, Math.max(8, Math.floor(n / state.xZoom)));
-      var plotW = Math.max(1, r.width - (14*2 + 50));
+      // Keep in sync with draw(): reserve 50px for the right-side Y-axis gutter.
+      var yAxisW = 50;
+      var plotW = Math.max(1, r.width - (14*2 + yAxisW));
       var barsPerPx = barsVisible / plotW;
       state.xOffset = state.xOffset0 - dxPx * barsPerPx;
       state.lastDragDx = dxPx;
@@ -3829,15 +3853,16 @@
   canvas.addEventListener('mousedown', function(e){
     var r = canvas.getBoundingClientRect();
     var pad = 14;
-    var plotX = pad + 50;
+    var yAxisW = 50;
+    var plotRight = r.width - pad - yAxisW; // plot.x(=pad) + plot.w
     var x = (e.clientX - r.left);
     var y = (e.clientY - r.top);
 
     // Any mouse interaction implies manual exploration; stop snapping back to latest.
     state.followLatest = false;
 
-    // If user clicks in the Y-axis area (left of plot), start Y-zoom drag.
-    if(x < plotX){
+    // If user clicks in the Y-axis area (right of plot), start Y-zoom drag.
+    if(x > plotRight){
       state.yDragging = true;
       state.dragY0 = y;
       state.yScale0 = state.yScaleFactor;
@@ -3855,10 +3880,11 @@
   canvas.addEventListener('dblclick', function(e){
     var r = canvas.getBoundingClientRect();
     var pad = 14;
-    var plotX = pad + 50; // left edge of plot area; Y-axis region is x < plotX
+    var yAxisW = 50;
+    var plotRight = r.width - pad - yAxisW; // right edge of plot area; Y-axis region is x > plotRight
     var x = (e.clientX - r.left);
 
-    if(x < plotX){
+    if(x > plotRight){
       e.preventDefault();
       e.stopPropagation();
       yAxisAutoFit();
@@ -3932,8 +3958,9 @@
 
     var r = canvas.getBoundingClientRect();
     var pad = 14;
-    var plotX = pad + 50;
-    var plotW = Math.max(1, r.width - (pad*2 + 50));
+    var yAxisW = 50;
+    var plotX = pad;
+    var plotW = Math.max(1, r.width - (pad*2 + yAxisW));
     var mouseX = (e.clientX - r.left);
     var tt = clamp((mouseX - plotX) / plotW, 0, 1);
 
