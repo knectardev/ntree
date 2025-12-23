@@ -1507,9 +1507,9 @@ def replay_start():
     except Exception:
         min_future_disp_bars_int = 3
     try:
-        min_anchor_age_days_int = int(min_anchor_age_days) if min_anchor_age_days is not None else 28
+        min_anchor_age_days_int = int(min_anchor_age_days) if min_anchor_age_days is not None else 30
     except Exception:
-        min_anchor_age_days_int = 28
+        min_anchor_age_days_int = 30
     min_anchor_age_days_int = max(0, min(3650, min_anchor_age_days_int))
 
     if not symbol:
@@ -1548,11 +1548,14 @@ def replay_start():
         hist_span = timedelta(seconds=disp_s * max(1, initial_history_bars_int))
         fut_span = timedelta(seconds=disp_s * max(1, min_future_disp_bars_int))
 
-        # Enforce that the anchor is at least N days before the dataset end *only if possible*.
-        # If the dataset doesn't have that much history, don't force anchor to the very start.
-        latest_anchor = end_dt - timedelta(days=min_anchor_age_days_int)
+        # Enforce that the anchor is at least N days before the dataset end (when possible),
+        # but never at the cost of pushing the start all the way back to the dataset beginning.
+        latest_anchor_by_age = end_dt - timedelta(days=min_anchor_age_days_int)
+        latest_anchor_by_future = end_dt - fut_span
+        latest_anchor = min(latest_anchor_by_age, latest_anchor_by_future)
         if latest_anchor <= start_dt:
-            latest_anchor = end_dt
+            # Can't satisfy age constraint; fall back to "as late as we can while still having future".
+            latest_anchor = max(start_dt, latest_anchor_by_future)
 
         low = start_dt + hist_span
         high = min(latest_anchor, end_dt - fut_span)
@@ -1561,7 +1564,8 @@ def replay_start():
             # near the end of available data (still future-blind for the UI).
             anchor_dt = max(start_dt, end_dt - fut_span)
         else:
-            rnd = random.Random(seed_int if seed_int is not None else 1)
+            # If seed isn't provided, randomize per-session.
+            rnd = random.Random(seed_int) if seed_int is not None else random.SystemRandom()
             span_sec = int((high - low).total_seconds())
             pick = rnd.randint(0, max(0, span_sec))
             anchor_dt = low + timedelta(seconds=pick)

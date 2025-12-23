@@ -970,6 +970,28 @@
     return out;
   }
 
+  function replayOverlaysAvailable(overlaysObj){
+    // Replay backend may return `overlays: {}` (empty) even though UI supports local EMA/VWAP.
+    // Only treat replay overlays as usable if they contain actual series points.
+    try{
+      if(!overlaysObj || typeof overlaysObj !== 'object') return false;
+      if(Array.isArray(overlaysObj.vwap) && overlaysObj.vwap.length) return true;
+      var ema = overlaysObj.ema;
+      if(ema && typeof ema === 'object'){
+        // Any EMA period with points counts.
+        var keys = Object.keys(ema);
+        for(var i=0;i<keys.length;i++){
+          var k = keys[i];
+          var arr = ema[k];
+          if(Array.isArray(arr) && arr.length) return true;
+        }
+      }
+      return false;
+    } catch(_e){
+      return false;
+    }
+  }
+
   function captureViewAnchor(){
     // Snapshot a time anchor near the center of the current view so filtering doesn't "jump" wildly.
     try{
@@ -1026,12 +1048,16 @@
     state.ha = computeHeikinAshi(filtered);
 
     // Overlays:
-    // - In replay mode, prefer server-provided overlays (authoritative state contract), filtered to visible bars.
+    // - In replay mode, prefer server-provided overlays only if they actually contain data.
+    //   (Backend may emit `overlays: {}`; in that case we compute locally so EMA/VWAP stays visible.)
     // - Otherwise, compute locally from the loaded payload.
     try{
       var os = getOverlaySettings();
       if(os && anyOverlayEnabled(os) && filtered.length){
-        if(state && state.replay && state.replay.active && state.replay.lastState && state.replay.lastState.overlays){
+        if(
+          state && state.replay && state.replay.active &&
+          state.replay.lastState && replayOverlaysAvailable(state.replay.lastState.overlays)
+        ){
           var allowed = new Set();
           for(var ii=0; ii<filtered.length; ii++){
             var d2 = filtered[ii];
@@ -4677,17 +4703,24 @@
     }
   }
 
-  function onOverlayToggleChanged(){
-    // EMA toggles can recompute locally; VWAP prefers a refetch so we can preload to session start.
+  async function onOverlayToggleChanged(){
+    // EMA toggles can recompute locally; VWAP prefers a refetch (non-replay) so we can preload to session start.
     scheduleSaveUiConfig();
-    try{
+    async function apply(){
       var s = getOverlaySettings();
       if(s && s.vwap && !STATIC_MODE && !(state && state.replay && state.replay.active)){
-        loadFromAPI();
+        await loadFromAPI();
         return;
       }
       recomputeOverlaysFromState();
       draw();
+    }
+    try{
+      // During gameplay, briefly pause stepping while we recompute overlays to avoid mid-frame clobbering.
+      if(state && state.replay && state.replay.active){
+        return await withReplayPaused(apply);
+      }
+      return await apply();
     } catch(_e){
       draw();
     }
@@ -5488,13 +5521,28 @@
     state._sessionType = computeSessionTypesForData(out);
     state.ha = computeHeikinAshi(out);
 
-    // Server overlays are authoritative; store for filtering pipeline.
+    // Overlays:
+    // - If backend provides overlays with data, use them.
+    // - Otherwise compute locally so EMA/VWAP stays visible during replay gameplay.
     try{
       var os = getOverlaySettings();
-      var allowed = new Set();
-      for(var i2=0;i2<out.length;i2++) allowed.add(Number(out[i2].t));
-      state.overlaysFull = overlaysFromReplayState(st.overlays, os, allowed);
-      state.overlays = state.overlaysFull;
+      if(os && anyOverlayEnabled(os) && Array.isArray(out) && out.length){
+        if(replayOverlaysAvailable(st.overlays)){
+          var allowed = new Set();
+          for(var i2=0;i2<out.length;i2++) allowed.add(Number(out[i2].t));
+          state.overlaysFull = overlaysFromReplayState(st.overlays, os, allowed);
+        } else {
+          state.overlaysFull = computeOverlays(
+            barsToArrays(out),
+            os,
+            { symbol: String(getSymbol() || ''), bar_s: Math.floor(Number(state.windowSec) || 60) }
+          );
+        }
+        state.overlays = state.overlaysFull;
+      } else {
+        state.overlaysFull = [];
+        state.overlays = [];
+      }
     } catch(_e2){
       state.overlaysFull = [];
       state.overlays = [];
@@ -5549,7 +5597,8 @@
       symbol: symbol,
       exec_tf_sec: 60,
       disp_tf_sec: dispTf,
-      seed: 1,
+      // Randomize scenario/anchor each time replay starts.
+      seed: Math.floor(Math.random() * 1000000000),
       snap_to_disp_boundary: true
     };
     // Display history: one month of display buckets (plus small slack).
@@ -5561,7 +5610,8 @@
     payload.initial_history_bars = clamp(wantBars, 50, MAX_HISTORY_BARS);
     payload.min_future_disp_bars = 3;
     // Use full DB history; enforce that the random start point is at least 4 weeks back.
-    payload.min_anchor_age_days = 28;
+    // Requirement: start at least ~1 month in the past (when possible).
+    payload.min_anchor_age_days = 30;
 
     _setPracticeStatus('Starting replay…');
     try{
