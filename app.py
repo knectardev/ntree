@@ -1485,14 +1485,89 @@ def replay_start():
     t_end = (payload.get("t_end") or payload.get("end") or "").strip()
     disp_tf_sec = int(payload.get("disp_tf_sec") or payload.get("disp_tf") or 300)
     exec_tf_sec = int(payload.get("exec_tf_sec") or 60)
+    snap_to_disp_boundary = payload.get("snap_to_disp_boundary")
+    if snap_to_disp_boundary is None:
+        snap_to_disp_boundary = True
+    snap_to_disp_boundary = bool(snap_to_disp_boundary)
     seed = payload.get("seed")
     try:
         seed_int = int(seed) if seed is not None else None
     except Exception:
         seed_int = None
+    initial_history_bars = payload.get("initial_history_bars")
+    min_future_disp_bars = payload.get("min_future_disp_bars")
+    min_anchor_age_days = payload.get("min_anchor_age_days")
 
-    if not symbol or not t_start or not t_end:
-        return _bad_request("missing_params", "symbol, t_start, and t_end are required")
+    try:
+        initial_history_bars_int = int(initial_history_bars) if initial_history_bars is not None else 200
+    except Exception:
+        initial_history_bars_int = 200
+    try:
+        min_future_disp_bars_int = int(min_future_disp_bars) if min_future_disp_bars is not None else 3
+    except Exception:
+        min_future_disp_bars_int = 3
+    try:
+        min_anchor_age_days_int = int(min_anchor_age_days) if min_anchor_age_days is not None else 28
+    except Exception:
+        min_anchor_age_days_int = 28
+    min_anchor_age_days_int = max(0, min(3650, min_anchor_age_days_int))
+
+    if not symbol:
+        return _bad_request("missing_params", "symbol is required", fields=["symbol"])
+
+    # UI contract (demo_static.html): allow omitting t_start/t_end; derive from DB.
+    if not t_start or not t_end:
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT MIN(timestamp), MAX(timestamp)
+                FROM stock_data
+                WHERE ticker = ? AND interval = '1Min'
+                """,
+                (symbol,),
+            )
+            lo, hi = cur.fetchone()
+        finally:
+            conn.close()
+        if not lo or not hi:
+            return _bad_request("no_data", f"no 1Min data found for {symbol}")
+        t_start = str(lo)
+        t_end = str(hi)
+
+    # Choose a deterministic anchor time so replay starts with history + some future.
+    try:
+        from datetime import timedelta
+        import random
+
+        start_dt = datetime.fromisoformat(t_start.replace("Z", "+00:00")).astimezone(timezone.utc)
+        end_dt = datetime.fromisoformat(t_end.replace("Z", "+00:00")).astimezone(timezone.utc)
+        disp_s = max(60, int(disp_tf_sec))
+        # Require enough history and future around anchor.
+        hist_span = timedelta(seconds=disp_s * max(1, initial_history_bars_int))
+        fut_span = timedelta(seconds=disp_s * max(1, min_future_disp_bars_int))
+
+        # Enforce that the anchor is at least N days before the dataset end *only if possible*.
+        # If the dataset doesn't have that much history, don't force anchor to the very start.
+        latest_anchor = end_dt - timedelta(days=min_anchor_age_days_int)
+        if latest_anchor <= start_dt:
+            latest_anchor = end_dt
+
+        low = start_dt + hist_span
+        high = min(latest_anchor, end_dt - fut_span)
+        if high <= low:
+            # If we can't satisfy both "history" + "future" windows, bias toward a useful start
+            # near the end of available data (still future-blind for the UI).
+            anchor_dt = max(start_dt, end_dt - fut_span)
+        else:
+            rnd = random.Random(seed_int if seed_int is not None else 1)
+            span_sec = int((high - low).total_seconds())
+            pick = rnd.randint(0, max(0, span_sec))
+            anchor_dt = low + timedelta(seconds=pick)
+        t_anchor = anchor_dt.isoformat().replace("+00:00", "Z")
+    except Exception:
+        t_anchor = None
 
     try:
         cfg = ReplaySessionConfig(
@@ -1502,26 +1577,18 @@ def replay_start():
             exec_tf_sec=exec_tf_sec,
             disp_tf_sec=disp_tf_sec,
             seed=seed_int,
+            snap_to_disp_boundary=snap_to_disp_boundary,
+            t_anchor=t_anchor,
+            initial_history_bars=initial_history_bars_int,
+            min_future_disp_bars=min_future_disp_bars_int,
         )
         sess = ReplaySession.create(cfg)
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
     _REPLAY_SESSIONS[sess.session_id] = sess
-    st = sess.get_state()
-    return jsonify(
-        {
-            "session_id": st.session_id,
-            "symbol": st.symbol,
-            "exec_tf_sec": st.exec_tf_sec,
-            "disp_tf_sec": st.disp_tf_sec,
-            "cursor_exec_ts": st.cursor_exec_ts.isoformat(),
-            "paused": st.paused,
-            "position": {"qty": st.position.qty, "avg_price": st.position.avg_price, "realized_pnl": st.position.realized_pnl},
-            "orders": [o.__dict__ for o in st.orders],
-            "last_event_id": st.last_event_id,
-        }
-    )
+    state_payload = sess.get_state_payload()
+    return jsonify({"session_id": sess.session_id, "state": state_payload})
 
 
 @app.route("/replay/step", methods=["POST"])
@@ -1533,23 +1600,15 @@ def replay_step():
     if not sess:
         return jsonify({"error": "session not found"}), 404
 
-    st = sess.step(disp_steps=disp_steps)
-    return jsonify(
-        {
-            "session_id": st.session_id,
-            "cursor_exec_ts": st.cursor_exec_ts.isoformat(),
-            "paused": st.paused,
-            "position": {"qty": st.position.qty, "avg_price": st.position.avg_price, "realized_pnl": st.position.realized_pnl},
-            "orders": [o.__dict__ for o in st.orders],
-            "last_event_id": st.last_event_id,
-        }
-    )
+    sess.step(disp_steps=disp_steps)
+    return jsonify({"state": sess.get_state_payload(), "delta": {}})
 
 
 @app.route("/replay/order/place", methods=["POST"])
 def replay_order_place():
     payload = request.get_json(silent=True) or {}
     session_id = (payload.get("session_id") or "").strip()
+    otype = (payload.get("type") or "limit").strip().lower()
     side = (payload.get("side") or "").strip().lower()
     qty = float(payload.get("qty") or 0)
     price = payload.get("price")
@@ -1562,15 +1621,34 @@ def replay_order_place():
         return _bad_request("invalid_side", "side must be buy or sell")
     if qty <= 0:
         return _bad_request("invalid_qty", "qty must be > 0")
-    if price is None:
+    if otype not in ("limit", "market"):
+        return _bad_request("invalid_type", "type must be limit or market")
+    if otype == "limit" and price is None:
         return _bad_request("missing_price", "price is required for limit orders in v1")
 
     try:
-        o = sess.place_limit(side=side, price=float(price), qty=float(qty), tag=tag)
+        if otype == "market":
+            sess.place_market(side=side, qty=float(qty), tag=tag)
+        else:
+            sess.place_limit(side=side, price=float(price), qty=float(qty), tag=tag)
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-    return jsonify({"order": o.__dict__, "last_event_id": sess.get_state().last_event_id})
+    return jsonify({"state": sess.get_state_payload(), "delta": {}})
+
+
+@app.route("/replay/flatten", methods=["POST"])
+def replay_flatten():
+    payload = request.get_json(silent=True) or {}
+    session_id = (payload.get("session_id") or "").strip()
+    sess = _get_replay_session(session_id)
+    if not sess:
+        return jsonify({"error": "session not found"}), 404
+    try:
+        sess.flatten_now(tag="ui")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"state": sess.get_state_payload(), "delta": {}})
 
 
 @app.route("/replay/order/cancel", methods=["POST"])
@@ -1613,9 +1691,413 @@ def replay_end():
     sess = _get_replay_session(session_id)
     if not sess:
         return jsonify({"error": "session not found"}), 404
-    # v1: step-to-end behavior is handled by stepping; end here just removes from memory.
+    # Persist an explicit end so the session is visible in history.
+    try:
+        sess.end()
+    except Exception:
+        pass
+    # Remove from in-memory sessions (events remain in SQLite).
     _REPLAY_SESSIONS.pop(session_id, None)
     return jsonify({"ended": session_id})
+
+
+# ---------------------------
+# Replay history (UI endpoints)
+# ---------------------------
+
+
+@app.route("/replay/session_summaries", methods=["GET"])
+def replay_session_summaries():
+    """
+    Returns recent replay sessions from SQLite for the demo_static.html History modal.
+    Query params:
+      - limit_sessions (default 8)
+      - only_with_fills (default 1)
+    """
+    limit_sessions = request.args.get("limit_sessions", default="8")
+    only_with_fills = request.args.get("only_with_fills", default="1")
+    try:
+        limit_int = max(1, min(100, int(limit_sessions)))
+    except Exception:
+        limit_int = 8
+    try:
+        only_fills = bool(int(only_with_fills))
+    except Exception:
+        only_fills = True
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM replay_sessions")
+        total_sessions = int(cur.fetchone()[0] or 0)
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM replay_sessions s
+            WHERE EXISTS (
+              SELECT 1 FROM replay_events e
+              WHERE e.session_id = s.session_id AND e.event_type = 'FILL'
+            )
+            """
+        )
+        total_with_fills = int(cur.fetchone()[0] or 0)
+
+        where = ""
+        if only_fills:
+            where = "WHERE EXISTS (SELECT 1 FROM replay_events e WHERE e.session_id = s.session_id AND e.event_type = 'FILL')"
+
+        cur.execute(
+            f"""
+            SELECT s.session_id, s.symbol, s.exec_tf_sec, s.disp_tf_sec, s.t_start, s.t_end, s.seed, s.status,
+                   s.created_at, s.updated_at, s.summary_json
+            FROM replay_sessions s
+            {where}
+            ORDER BY s.updated_at DESC
+            LIMIT ?
+            """,
+            (limit_int,),
+        )
+        rows = cur.fetchall()
+
+        def _safe_float(x, default=0.0):
+            try:
+                return float(x)
+            except Exception:
+                return float(default)
+
+        def _safe_int(x, default=0):
+            try:
+                return int(x)
+            except Exception:
+                return int(default)
+
+        sessions = []
+        for idx, r in enumerate(rows):
+            (
+                sid,
+                sym,
+                exec_tf,
+                disp_tf,
+                t_start,
+                t_end,
+                seed,
+                status,
+                created_at,
+                updated_at,
+                summary_json,
+            ) = r
+
+            # Activity: count fills + some basic stats derived from fill payloads.
+            cur.execute(
+                """
+                SELECT id, ts_exec, event_type, payload_json
+                FROM replay_events
+                WHERE session_id = ? AND event_type = 'FILL'
+                ORDER BY id ASC
+                """,
+                (sid,),
+            )
+            fill_rows = cur.fetchall()
+            fills = len(fill_rows)
+            max_abs_pos = 0.0
+            last_realized = None
+            # Build "strip segments" (colored pills) by grouping fills into round-trips (pos -> flat).
+            segs = []
+            trip_idx = 0
+            cur_dir = None  # 'long'|'short'
+            seg_qty_peak = 0.0
+            seg_adds = 0
+            seg_realized_start = 0.0
+            prev_pos = 0.0
+            prev_realized_val = 0.0
+
+            for (_eid, _ts, _et, payload_json) in fill_rows:
+                try:
+                    p = json.loads(payload_json) if payload_json else {}
+                except Exception:
+                    p = {}
+                try:
+                    q = float(p.get("position_qty") or 0.0)
+                    max_abs_pos = max(max_abs_pos, abs(q))
+                except Exception:
+                    pass
+                try:
+                    last_realized = float(p.get("realized_pnl"))
+                except Exception:
+                    pass
+
+                # Segment/trip logic
+                pos = _safe_float(p.get("position_qty"), 0.0)
+                realized_val = _safe_float(p.get("realized_pnl"), prev_realized_val)
+                side = str(p.get("side") or "").lower()
+                fill_qty = abs(_safe_float(p.get("qty"), 0.0))
+
+                # If we were flat and now entered a position, start a new trip.
+                if prev_pos == 0.0 and pos != 0.0:
+                    trip_idx += 1
+                    cur_dir = "long" if pos > 0 else "short"
+                    seg_qty_peak = abs(pos)
+                    seg_adds = 0
+                    seg_realized_start = realized_val
+                # If we stayed in a position, track peak and count "adds" when abs(pos) increases.
+                if prev_pos != 0.0 and pos != 0.0:
+                    seg_qty_peak = max(seg_qty_peak, abs(pos))
+                    if abs(pos) > abs(prev_pos) + 1e-9:
+                        seg_adds += 1
+                # If we returned to flat, finalize trip segment.
+                if prev_pos != 0.0 and pos == 0.0 and cur_dir is not None:
+                    realized_trip = realized_val - seg_realized_start
+                    segs.append(
+                        {
+                            "trip_index": trip_idx,
+                            "dir": cur_dir,
+                            "realized": realized_trip,
+                            "qty_peak": seg_qty_peak,
+                            "adds": seg_adds,
+                        }
+                    )
+                    cur_dir = None
+                    seg_qty_peak = 0.0
+                    seg_adds = 0
+                    seg_realized_start = realized_val
+
+                prev_pos = pos
+                prev_realized_val = realized_val
+
+            realized = None
+            if summary_json:
+                try:
+                    sj = json.loads(summary_json)
+                    realized = sj.get("realized_pnl")
+                except Exception:
+                    realized = None
+            if realized is None and last_realized is not None:
+                realized = last_realized
+
+            realized_f = None
+            try:
+                if realized is not None:
+                    realized_f = float(realized)
+            except Exception:
+                realized_f = None
+
+            # Win rate / headline
+            wins = 0
+            for sg in segs:
+                try:
+                    if float(sg.get("realized") or 0.0) > 0:
+                        wins += 1
+                except Exception:
+                    pass
+            n_trips = len(segs)
+            win_rate = (wins / n_trips) if n_trips > 0 else None
+            headline = None
+            if realized_f is not None:
+                headline = f"{'+' if realized_f >= 0 else ''}{realized_f:.2f}"
+
+            # Duration: best-effort from timestamps; UI tolerates blank.
+            duration_sec = None
+            try:
+                t0 = datetime.fromisoformat(str(t_start).replace("Z", "+00:00"))
+                t1 = datetime.fromisoformat(str(t_end).replace("Z", "+00:00"))
+                duration_sec = max(0, int((t1 - t0).total_seconds()))
+            except Exception:
+                duration_sec = None
+
+            sessions.append(
+                {
+                    "session_id": str(sid),
+                    "symbol": str(sym),
+                    "label": f"S{idx+1}",
+                    "exec_tf_sec": int(exec_tf),
+                    "disp_tf_sec": int(disp_tf),
+                    "t_start": str(t_start),
+                    "t_end": str(t_end),
+                    "created_at": str(created_at),
+                    "updated_at": str(updated_at),
+                    "status": str(status),
+                    "duration_sec": duration_sec,
+                    "realized": realized_f,
+                    "pnl": {"realized": realized_f, "win_rate": win_rate},
+                    "activity": {
+                        "fills": fills,
+                        "round_trips": n_trips,
+                        "adds": _safe_int(sum([_safe_int(sg.get("adds"), 0) for sg in segs]), 0),
+                        "max_abs_position_qty": max_abs_pos,
+                    },
+                    # Optional UI fields; we keep them minimal.
+                    "strip": {"segments": segs},
+                    "outcome": {
+                        "headline": headline,
+                        "confidence_hint": "History derived from FILL events",
+                    },
+                }
+            )
+
+        return jsonify(
+            {
+                "sessions": sessions,
+                "total_sessions": total_sessions,
+                "total_sessions_with_fills": total_with_fills,
+            }
+        )
+    finally:
+        conn.close()
+
+
+@app.route("/replay/trade_ledger", methods=["GET"])
+def replay_trade_ledger():
+    """
+    Ledger view for History modal. Derived from replay_events (FILL events).
+    Query params:
+      - limit_sessions (default 8)
+    """
+    limit_sessions = request.args.get("limit_sessions", default="8")
+    try:
+        limit_int = max(1, min(100, int(limit_sessions)))
+    except Exception:
+        limit_int = 8
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM replay_sessions")
+        total_sessions = int(cur.fetchone()[0] or 0)
+
+        cur.execute(
+            """
+            SELECT session_id, symbol, created_at, updated_at
+            FROM replay_sessions
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit_int,),
+        )
+        sess_rows = cur.fetchall()
+
+        sessions = []
+        for i, (sid, sym, created_at, updated_at) in enumerate(sess_rows):
+            cur.execute(
+                """
+                SELECT id, ts_exec, payload_json
+                FROM replay_events
+                WHERE session_id = ? AND event_type = 'FILL'
+                ORDER BY id ASC
+                """,
+                (sid,),
+            )
+            fill_rows = cur.fetchall()
+
+            prev_realized = 0.0
+            rows = []
+            for j, (eid, ts_exec, payload_json) in enumerate(fill_rows):
+                try:
+                    p = json.loads(payload_json) if payload_json else {}
+                except Exception:
+                    p = {}
+                side = str(p.get("side") or "")
+                qty = float(p.get("qty") or 0.0)
+                price = float(p.get("price") or 0.0)
+                signed_qty = qty if side == "buy" else -qty
+                value = signed_qty * price
+                realized = float(p.get("realized_pnl") or 0.0)
+                realized_delta = realized - prev_realized
+                prev_realized = realized
+
+                rows.append(
+                    {
+                        "exec_ts": ts_exec,
+                        "fill_id": int(eid),
+                        "row_in_fill": 1,
+                        "trade_id": j + 1,
+                        "entry_type": "FILL",
+                        "open_close": "",
+                        "reference": str(p.get("order_id") or ""),
+                        "qty": qty,
+                        "signed_qty": signed_qty,
+                        "price": price,
+                        "value": value,
+                        "realized_pnl_delta": realized_delta,
+                    }
+                )
+
+            sessions.append(
+                {
+                    "session_id": str(sid),
+                    "label": f"S{i+1}",
+                    "symbol": str(sym),
+                    "created_at": str(created_at),
+                    "updated_at": str(updated_at),
+                    "rows": rows,
+                }
+            )
+
+        return jsonify({"sessions": sessions, "total_sessions": total_sessions})
+    finally:
+        conn.close()
+
+
+@app.route("/replay/trade_matrix", methods=["GET"])
+def replay_trade_matrix():
+    """
+    Minimal matrix endpoint for History modal.
+    For now, returns sessions with empty trades (UI will render '—').
+    """
+    limit_sessions = request.args.get("limit_sessions", default="8")
+    try:
+        limit_int = max(1, min(20, int(limit_sessions)))
+    except Exception:
+        limit_int = 8
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT session_id, symbol, created_at
+            FROM replay_sessions
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit_int,),
+        )
+        rows = cur.fetchall()
+        sessions = []
+        for i, (sid, sym, created_at) in enumerate(rows):
+            sessions.append(
+                {
+                    "session_id": str(sid),
+                    "label": f"S{i+1}",
+                    "symbol": str(sym),
+                    "created_at": str(created_at),
+                    "trades": [],
+                }
+            )
+        return jsonify({"sessions": sessions, "max_trades": 1})
+    finally:
+        conn.close()
+
+
+@app.route("/replay/session/delete", methods=["POST"])
+def replay_session_delete():
+    payload = request.get_json(silent=True) or {}
+    session_id = (payload.get("session_id") or "").strip()
+    if not session_id:
+        return _bad_request("missing_session_id", "session_id is required")
+
+    # Remove from in-memory sessions if present.
+    _REPLAY_SESSIONS.pop(session_id, None)
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        # Deleting the session cascades to replay_events via FK.
+        cur.execute("DELETE FROM replay_sessions WHERE session_id = ?", (session_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify({"deleted": session_id})
 
 @app.errorhandler(404)
 def not_found(error):

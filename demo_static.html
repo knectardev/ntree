@@ -116,6 +116,190 @@
     .pill.pill--nocross{display:none}
     .btn{cursor:pointer;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);color:var(--text);border-radius:12px;padding:8px 10px;font-size:12px}
     .btn:hover{background:rgba(255,255,255,.09)}
+    
+    /* Practice controls (Play / Pause / Reset) */
+    .practiceCtrls{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .practiceCtl{
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      flex:1 1 auto;
+      min-width:120px;
+      border-radius:999px;
+      padding:10px 14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.06);
+      color:rgba(235,245,255,.98);
+      font-weight:720;
+      font-size:13px;
+      user-select:none;
+    }
+    .practiceCtl:hover{background:rgba(255,255,255,.09)}
+    .practiceCtl--play{
+      width:100%;
+      flex:1 1 100%;
+      border-color:rgba(90,150,255,.35);
+      background:rgba(90,150,255,.18);
+    }
+    .practiceCtl--play:hover{background:rgba(90,150,255,.24)}
+    .practiceCtl__label{display:inline-flex;align-items:center}
+    .practiceCtl__icon{display:inline-block}
+    .practiceCtl__icon--play{
+      width:0;height:0;
+      border-left:12px solid rgba(34,197,94,.95);
+      border-top:7px solid transparent;
+      border-bottom:7px solid transparent;
+      transform: translateY(1px);
+    }
+    .practiceCtl__icon--pause{
+      width:18px;height:14px;
+      display:inline-flex;
+      gap:4px;
+      align-items:stretch;
+    }
+    .practiceCtl__icon--pause::before,
+    .practiceCtl__icon--pause::after{
+      content:'';
+      display:block;
+      width:5px;
+      border-radius:2px;
+      background:rgba(250,204,21,.95);
+    }
+    .practiceCtl__icon--reset{
+      width:12px;height:12px;
+      border-radius:999px;
+      background:rgba(239,68,68,.95);
+      box-shadow:0 0 0 3px rgba(239,68,68,.20);
+    }
+    .practiceSpeedWrap input[type="range"]{
+      appearance:none;
+      height:4px;
+      border-radius:999px;
+      background:rgba(255,255,255,.16);
+      outline:none;
+    }
+    .practiceSpeedWrap input[type="range"]::-webkit-slider-thumb{
+      -webkit-appearance:none;
+      appearance:none;
+      width:14px;height:14px;
+      border-radius:999px;
+      background:rgba(236,72,153,.95);
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow:0 6px 16px rgba(0,0,0,.35);
+    }
+    .practiceSpeedWrap input[type="range"]::-moz-range-thumb{
+      width:14px;height:14px;
+      border-radius:999px;
+      background:rgba(236,72,153,.95);
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow:0 6px 16px rgba(0,0,0,.35);
+    }
+
+    /* Modal (history) */
+    .modalOverlay{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.62);
+      backdrop-filter: blur(8px);
+      z-index:5000;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+    }
+    .modal{
+      width:min(1100px, calc(100vw - 24px));
+      max-height: min(720px, calc(100vh - 24px));
+      background:rgba(10,14,20,.96);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:16px;
+      box-shadow:0 22px 70px rgba(0,0,0,.55);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    .modalHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:12px 14px;
+      background:rgba(15,22,32,.70);
+      border-bottom:1px solid rgba(255,255,255,.07);
+    }
+    .modalTitle{font-size:14px;font-weight:750;color:rgba(235,245,255,.98)}
+    .modalHeaderLeft{display:flex;align-items:center;gap:10px;min-width:0}
+    .historyToggles{display:flex;gap:8px;align-items:center}
+    .btnToggleOn{background:rgba(90,150,255,.22); border-color:rgba(90,150,255,.45)}
+    .cardList{display:flex;flex-direction:column;gap:12px}
+    .sessCard{
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(8,12,18,.55);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+      overflow:hidden;
+    }
+    .sessCardHd{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      padding:12px 12px 10px 12px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .sessTitle{font-weight:850;color:rgba(235,245,255,.98)}
+    .sessSub{margin-top:4px;color:rgba(215,224,234,.70);font-size:12px}
+    .pnlBig{font-weight:900;font-size:16px;white-space:nowrap}
+    .pnlPos{color:rgba(80,220,140,.95)}
+    .pnlNeg{color:rgba(255,110,110,.95)}
+    .pnlFlat{color:rgba(215,224,234,.78)}
+    .sessBd{padding:10px 12px 12px 12px}
+    .miniRow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;color:rgba(215,224,234,.80);font-size:12px}
+    .miniK{color:rgba(215,224,234,.60)}
+    .badgePill{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:3px 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:750;
+      border:1px solid rgba(255,255,255,.14);
+      color:rgba(215,224,234,.88);
+      background:rgba(255,255,255,.05);
+      white-space:nowrap;
+    }
+    .badgeGood{border-color:rgba(80,220,140,.40); color:rgba(80,220,140,.92); background:rgba(80,220,140,.10)}
+    .badgeWarn{border-color:rgba(255,200,90,.45); color:rgba(255,200,90,.95); background:rgba(255,200,90,.10)}
+    .badgeBad{border-color:rgba(255,110,110,.45); color:rgba(255,110,110,.95); background:rgba(255,110,110,.10)}
+    .badgeNeutral{border-color:rgba(215,224,234,.22); color:rgba(215,224,234,.78); background:rgba(215,224,234,.06)}
+    .strip{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    .segPill{
+      height:10px;
+      width:34px;
+      border-radius:999px;
+      background:rgba(215,224,234,.22);
+      border:1px solid rgba(255,255,255,.10);
+    }
+    .segPos{background:rgba(80,220,140,.30); border-color:rgba(80,220,140,.35)}
+    .segNeg{background:rgba(255,110,110,.30); border-color:rgba(255,110,110,.35)}
+    .segNeu{background:rgba(215,224,234,.10); border-color:rgba(215,224,234,.14)}
+    .sessFt{padding:10px 12px;border-top:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;gap:10px;align-items:center}
+    .sessHint{color:rgba(215,224,234,.60);font-size:12px}
+    .modalBody{padding:12px 14px; overflow:auto}
+    .tableWrap{overflow:auto; border:1px solid rgba(255,255,255,.08); border-radius:14px; background:rgba(0,0,0,.18)}
+    table.histTable{border-collapse:separate;border-spacing:0; width:100%; min-width:780px; font-size:12px; color:rgba(215,224,234,.92)}
+    table.histTable th, table.histTable td{padding:10px 10px; border-bottom:1px solid rgba(255,255,255,.06); border-right:1px solid rgba(255,255,255,.06); vertical-align:top}
+    table.histTable th{position:sticky; top:0; background:rgba(12,18,26,.96); z-index:2; font-weight:750}
+    table.histTable th:first-child, table.histTable td:first-child{position:sticky; left:0; background:rgba(12,18,26,.96); z-index:3; font-weight:700}
+    table.histTable tr:last-child td{border-bottom:none}
+    table.histTable th:last-child, table.histTable td:last-child{border-right:none}
+    .tradeCell{display:flex;flex-direction:column;gap:4px}
+    .tradePnlUp{color:rgba(80,220,140,.95); font-weight:750}
+    .tradePnlDn{color:rgba(255,110,110,.95); font-weight:750}
+    .tradeMeta{color:rgba(215,224,234,.70)}
     canvas{display:block;width:100%;height:560px}
     .footer{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid rgba(255,255,255,.07);color:var(--muted);font-size:12px;min-height:40px}
     .k{color:var(--text)}
@@ -246,6 +430,29 @@
     <span class="statusDot" id="updateDot"></span>
     <span id="updateText" class="statusMono">Last update: —</span>
   </div>
+  <!-- History modal -->
+  <div class="modalOverlay" id="historyModal" role="dialog" aria-modal="true" aria-label="Session history" style="display:none;">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="modalHeaderLeft">
+          <div class="modalTitle">Session History</div>
+          <div class="historyToggles" aria-label="History view">
+            <button class="btn" type="button" id="historyViewCardsBtn" title="Session cards (glance view)">Cards</button>
+            <button class="btn" type="button" id="historyViewLedgerBtn" title="Ledger view (FIFO lots)">Ledger</button>
+            <button class="btn" type="button" id="historyViewMatrixBtn" title="Matrix summary view">Matrix</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn" type="button" id="historyRefreshBtn">Refresh</button>
+          <button class="btn" type="button" id="historyCloseBtn">Close</button>
+        </div>
+      </div>
+      <div class="modalBody">
+        <div class="hint" id="historyModalStatus" style="margin-bottom:10px;"></div>
+        <div class="tableWrap" id="historyTableWrap"></div>
+      </div>
+    </div>
+  </div>
   <div class="layout">
     <div class="pageTop top">
       <h1>.</h1>
@@ -297,10 +504,74 @@
         <p class="hint" style="margin: 0 0 10px 0;">
           Start a replay “practice field” session (manual play).
         </p>
-        <button class="btnPrimary" type="button" id="practiceBtn" title="Coming soon: replay/game mode">
-          Play (Practice Mode)
-        </button>
+        <div class="practiceCtrls">
+          <!-- Idle state: show only Play -->
+          <button class="practiceCtl practiceCtl--play" type="button" id="practiceBtn" title="Play replay">
+            <span class="practiceCtl__label">Play</span>
+            <span class="practiceCtl__icon practiceCtl__icon--play" aria-hidden="true"></span>
+          </button>
+          <!-- Active state: show Pause + Reset -->
+          <button class="practiceCtl practiceCtl--pause" type="button" id="practicePauseBtn" title="Pause replay" style="display:none;">
+            <span class="practiceCtl__label">Pause</span>
+            <span class="practiceCtl__icon practiceCtl__icon--pause" aria-hidden="true"></span>
+          </button>
+          <button class="practiceCtl practiceCtl--reset" type="button" id="practiceResetBtn" title="Reset replay" style="display:none;">
+            <span class="practiceCtl__label">Reset</span>
+            <span class="practiceCtl__icon practiceCtl__icon--reset" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="hint practiceSpeedWrap" style="margin-top: 12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+            <span>Speed</span>
+            <span class="mono" id="practiceSpeedLabel">50</span>
+          </div>
+          <input id="practiceSpeed" type="range" min="1" max="60" step="1" value="50" style="width:100%;margin-top:8px;" />
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+            <span>Slow (1)</span>
+            <span>Fast (60)</span>
+          </div>
+        </div>
+        <div class="sideDivider"></div>
+        <div class="formGroup" aria-label="Trade controls">
+          <label class="fieldLabel" for="practiceQty">Order size</label>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <input id="practiceQty" type="range" min="0" max="5" step="1" value="0"
+                   list="practiceQtyMarks"
+                   style="width:100%; accent-color: rgba(90,150,255,.92);" />
+            <datalist id="practiceQtyMarks">
+              <option value="0" label="1"></option>
+              <option value="1" label="5"></option>
+              <option value="2" label="10"></option>
+              <option value="3" label="25"></option>
+              <option value="4" label="50"></option>
+              <option value="5" label="100"></option>
+            </datalist>
+            <div style="display:flex;justify-content:space-between;color:rgba(215,224,234,.60);font-size:11px;">
+              <span>1</span><span>5</span><span>10</span><span>25</span><span>50</span><span>100</span>
+            </div>
+            <div class="hint" id="practiceQtyLabel" style="margin-top:-2px;"></div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;">
+            <button class="btn" type="button" id="practiceLongBtn" title="Enter long (market)">
+              Long
+            </button>
+            <button class="btn" type="button" id="practiceShortBtn" title="Enter short (market)">
+              Short
+            </button>
+            <button class="btn" type="button" id="practiceFlattenBtn" title="Exit / flatten (market)">
+              Flatten
+            </button>
+          </div>
+        </div>
+        <div class="hint" id="practiceScore" style="margin-top: 10px; white-space: pre-line;"></div>
         <div class="hint" id="practiceStatus" style="margin-top: 10px;"></div>
+        <div class="sideDivider"></div>
+        <div class="formGroup" aria-label="Session history">
+          <button class="btn" type="button" id="practiceHistoryBtn" title="View session history">
+            History
+          </button>
+          <div class="hint" id="practiceHistoryStatus" style="margin-top: 6px;"></div>
+        </div>
       </div>
 
       <div class="sideCard" aria-label="Strategy controls">
@@ -654,6 +925,51 @@
     return { t_ms: t_ms, o: o, h: h, l: l, c: c, v: v };
   }
 
+  function overlaysFromReplayState(overlaysObj, settings, allowedTms){
+    // Convert server-provided replay overlays to the local overlay-series format:
+    // [{t_ms:[], y:[], key,label,color,width}]
+    var out = [];
+    if(!overlaysObj || !settings || !allowedTms) return out;
+
+    function buildSeries(points, key, label, color, width){
+      if(!Array.isArray(points) || !points.length) return null;
+      var t_ms = [];
+      var y = [];
+      for(var i=0;i<points.length;i++){
+        var p = points[i];
+        if(!p) continue;
+        var tm = parseIsoToMs(p.ts);
+        if(!Number.isFinite(tm)) continue;
+        if(!allowedTms.has(tm)) continue;
+        t_ms.push(tm);
+        var v = (p.v === null || p.v === undefined) ? NaN : Number(p.v);
+        y.push(Number.isFinite(v) ? v : NaN);
+      }
+      return { t_ms: t_ms, y: y, key: key, label: label, color: color, width: width };
+    }
+
+    try{
+      var ema = overlaysObj.ema || {};
+      if(settings.ema9){
+        var s9 = buildSeries(ema["9"], "ema_9", "EMA 9", "rgba(215,224,234,0.92)", 1.25);
+        if(s9) out.push(s9);
+      }
+      if(settings.ema21){
+        var s21 = buildSeries(ema["21"], "ema_21", "EMA 21", "rgba(215,224,234,0.72)", 1.25);
+        if(s21) out.push(s21);
+      }
+      if(settings.ema50){
+        var s50 = buildSeries(ema["50"], "ema_50", "EMA 50", "rgba(215,224,234,0.52)", 1.25);
+        if(s50) out.push(s50);
+      }
+      if(settings.vwap){
+        var vw = buildSeries(overlaysObj.vwap, "vwap_session", "VWAP", "rgb(255, 215, 0)", 1.55);
+        if(vw) out.push(vw);
+      }
+    } catch(_e){}
+    return out;
+  }
+
   function captureViewAnchor(){
     // Snapshot a time anchor near the center of the current view so filtering doesn't "jump" wildly.
     try{
@@ -709,16 +1025,27 @@
     state._sessionType = computeSessionTypesForData(filtered);
     state.ha = computeHeikinAshi(filtered);
 
-    // Recompute overlays against the filtered bars so EMA/VWAP match visible data.
+    // Overlays:
+    // - In replay mode, prefer server-provided overlays (authoritative state contract), filtered to visible bars.
+    // - Otherwise, compute locally from the loaded payload.
     try{
       var os = getOverlaySettings();
       if(os && anyOverlayEnabled(os) && filtered.length){
-        var arrs = barsToArrays(filtered);
-        state.overlays = computeOverlays(
-          arrs,
-          os,
-          { symbol: String(getSymbol() || ''), bar_s: Math.floor(Number(state.windowSec) || 60) }
-        );
+        if(state && state.replay && state.replay.active && state.replay.lastState && state.replay.lastState.overlays){
+          var allowed = new Set();
+          for(var ii=0; ii<filtered.length; ii++){
+            var d2 = filtered[ii];
+            if(d2 && Number.isFinite(Number(d2.t))) allowed.add(Number(d2.t));
+          }
+          state.overlays = overlaysFromReplayState(state.replay.lastState.overlays, os, allowed);
+        } else {
+          var arrs = barsToArrays(filtered);
+          state.overlays = computeOverlays(
+            arrs,
+            os,
+            { symbol: String(getSymbol() || ''), bar_s: Math.floor(Number(state.windowSec) || 60) }
+          );
+        }
       } else {
         state.overlays = [];
       }
@@ -1798,7 +2125,27 @@
     indVwap: document.getElementById('indVwap'),
     indCandleBias: null,
     practiceBtn: document.getElementById('practiceBtn'),
+    practicePauseBtn: document.getElementById('practicePauseBtn'),
+    practiceResetBtn: document.getElementById('practiceResetBtn'),
+    practiceSpeed: document.getElementById('practiceSpeed'),
+    practiceSpeedLabel: document.getElementById('practiceSpeedLabel'),
     practiceStatus: document.getElementById('practiceStatus'),
+    practiceScore: document.getElementById('practiceScore'),
+    practiceQty: document.getElementById('practiceQty'),
+    practiceQtyLabel: document.getElementById('practiceQtyLabel'),
+    practiceLongBtn: document.getElementById('practiceLongBtn'),
+    practiceShortBtn: document.getElementById('practiceShortBtn'),
+    practiceFlattenBtn: document.getElementById('practiceFlattenBtn'),
+    practiceHistoryBtn: document.getElementById('practiceHistoryBtn'),
+    practiceHistoryStatus: document.getElementById('practiceHistoryStatus'),
+    historyModal: document.getElementById('historyModal'),
+    historyCloseBtn: document.getElementById('historyCloseBtn'),
+    historyRefreshBtn: document.getElementById('historyRefreshBtn'),
+    historyModalStatus: document.getElementById('historyModalStatus'),
+    historyTableWrap: document.getElementById('historyTableWrap'),
+    historyViewCardsBtn: document.getElementById('historyViewCardsBtn'),
+    historyViewLedgerBtn: document.getElementById('historyViewLedgerBtn'),
+    historyViewMatrixBtn: document.getElementById('historyViewMatrixBtn'),
     window: document.getElementById('window'),
     // Some checkboxes may be removed from the UI; we keep "virtual" controls so existing
     // logic can continue to read ui.*.checked.
@@ -1897,16 +2244,24 @@
     try{
       var ds0 = Number(state && state.datasetStartMs);
       var de0 = Number(state && state.datasetEndMs);
-      if(!Number.isFinite(ds0) || !Number.isFinite(de0) || de0 <= ds0) return;
-      var datasetSpan = de0 - ds0;
+      var deMax = Number(state && state.datasetMaxEndMs);
+      // In replay mode, datasetEndMs is intentionally clamped to the current cursor to keep the chart future-blind.
+      // Use datasetMaxEndMs (full history end) for availability so clicking Play doesn't force a smaller span preset.
+      var endForHistory = (Number.isFinite(deMax) && Number.isFinite(ds0) && deMax > ds0) ? deMax : de0;
+      if(!Number.isFinite(ds0) || !Number.isFinite(endForHistory) || endForHistory <= ds0) return;
+      var datasetSpan = endForHistory - ds0;
       // Tolerance for "almost exactly N days" datasets (weekends, partial sessions, etc.)
       var slack = 6 * 60 * 60 * 1000; // 6h
       var keys = SPAN_PRESET_ORDER.slice();
       var enabled = {};
+      var isReplay = !!(state && state.replay && state.replay.active);
       for(var i=0;i<keys.length;i++){
         var k = keys[i];
         var need = Number(SPAN_PRESETS[k]) || 0;
         var ok = (need <= 0) ? true : ((datasetSpan + slack) >= need);
+        // Replay requirement: simulator is locked to a 1M training window.
+        // Hide/disable other presets to avoid misleading UI.
+        if(isReplay) ok = (String(k) === '1m');
         enabled[k] = !!ok;
         // Update DOM controls if present.
         var input = document.querySelector('input[type="radio"][name="spanPreset"][value="' + k + '"]');
@@ -2021,6 +2376,19 @@
   function setSpanPreset(v, opts){
     var o = opts || {};
     var key = normalizeSpanPreset(v);
+    // Replay requirement: simulator is locked to 1M. Ignore other presets while replay is active.
+    try{
+      if(state && state.replay && state.replay.active){
+        key = '1m';
+        state.spanPreset = '1m';
+        state.viewSpanMs = Number(SPAN_PRESETS['1m']) || DEFAULT_INIT_SPAN_MS;
+        syncSpanPresetUi();
+        updateSpanPresetAvailability();
+        if(!o.skipUrl) updateUrlBarSize();
+        if(!o.skipSave) scheduleSaveUiConfig();
+        return;
+      }
+    } catch(_eReplayLock){}
     // If dataset bounds are known and this preset is not available, fall back to the largest available.
     try{
       updateSpanPresetAvailability();
@@ -2082,11 +2450,26 @@
     followLatest: true,
     datasetStartMs: NaN,
     datasetEndMs: NaN,
+    // Full dataset end (used for span preset availability). In replay mode we keep datasetEndMs future-blind.
+    datasetMaxEndMs: NaN,
     _bootstrappedInitialWindow: false,
     _lastYSpan: NaN,
     _lastPlotH: NaN,
     _loadedBarS: NaN,
-    _vwapTrimStartMs: NaN
+    _vwapTrimStartMs: NaN,
+
+    // Replay (practice-field) mode state
+    replay: {
+      active: false,
+      sessionId: '',
+      playing: false,
+      timer: null,
+      lastState: null,
+      // Replay loop internals (avoid overlapping async steps).
+      _loopToken: 0,
+      _inFlight: false,
+      _stepFailCount: 0
+    }
   };
 
   // Live mode is disabled in this app integration (use "Fetch Latest Data" instead).
@@ -2507,6 +2890,11 @@
   async function loadFromAPI(force){
     if(STATIC_MODE){
       return await loadFromStatic(force);
+    }
+    // When practicing (replay mode), the authoritative data source is /replay/*.
+    // Avoid background /window fetches overwriting replay state.
+    if(state && state.replay && state.replay.active){
+      return;
     }
     // Prevent overlapping requests from live polling / repeated UI events.
     // We still allow internal "one-hop" recursion (Auto W refinement) via force=true.
@@ -3785,6 +4173,74 @@
       ctx.restore();
     }
 
+    // Position marker pill (replay): show avg entry price + qty on the right axis.
+    (function drawPositionAxisPill(){
+      try{
+        if(!(state && state.replay && state.replay.active && state.replay.lastState)) return;
+        var st = state.replay.lastState;
+        if(!st || !st.position) return;
+        var q = Number(st.position.qty);
+        var px = Number(st.position.avg_price);
+        if(!Number.isFinite(q) || q === 0) return;
+        if(!Number.isFinite(px)) return;
+
+        var sideTag = (q < 0) ? 'S' : 'L';
+        var qAbs = Math.abs(q);
+        // Shares are integers in the UI; but we keep it robust for floats.
+        var qTxt = (Math.abs(qAbs - Math.round(qAbs)) < 1e-9) ? String(Math.round(qAbs)) : qAbs.toFixed(2);
+        var txt = sideTag + ' ' + px.toFixed(2) + ' × ' + qTxt;
+
+        // Compute Y position from price scale.
+        var yy = yForPrice(px, pricePlot, yMin, yMax);
+        if(!Number.isFinite(yy)) return;
+
+        // If hover price pill is near this y, offset to avoid overlap.
+        if(hoverData){
+          var hy2 = Number(hoverData.hy);
+          if(Number.isFinite(hy2) && Math.abs(hy2 - yy) < 24){
+            yy = yy - 26;
+          }
+        }
+
+        ctx.save();
+        ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+
+        var ph2 = 20;
+        var padX2 = 10;
+        var tw2 = ctx.measureText(txt).width;
+        var boxW = Math.max(64, tw2 + padX2 * 2);
+
+        var axisLeft2 = (plot.x + plot.w);
+        var axisRight2 = axisLeft2 + yAxisW;
+        var inset2 = 4;
+        var targetX2 = axisLeft2 + Math.floor((yAxisW - boxW) / 2);
+        var minX2 = axisLeft2 - Math.max(0, (boxW - (yAxisW - inset2 * 2)));
+        var maxX2 = axisRight2 - boxW - inset2;
+        var boxX = clamp(targetX2, minX2, maxX2);
+        var boxY = clamp(yy - ph2 / 2, pricePlot.y + 3, pricePlot.y + pricePlot.h - ph2 - 3);
+
+        // Blue pill
+        ctx.shadowColor = 'rgba(0,0,0,0.35)';
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 3;
+        ctx.fillStyle = 'rgba(59,130,246,0.92)'; // blue-500-ish
+        ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+        ctx.lineWidth = 1;
+        roundRect(ctx, boxX, boxY, boxW, ph2, 10);
+        ctx.fill();
+        ctx.shadowColor = 'rgba(0,0,0,0)';
+        ctx.shadowBlur = 0;
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.96)';
+        ctx.fillText(txt, boxX + boxW / 2, boxY + ph2 / 2);
+        ctx.restore();
+      } catch(_e){}
+    })();
+
     // Plot border
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
@@ -4226,7 +4682,7 @@
     scheduleSaveUiConfig();
     try{
       var s = getOverlaySettings();
-      if(s && s.vwap && !STATIC_MODE){
+      if(s && s.vwap && !STATIC_MODE && !(state && state.replay && state.replay.active)){
         loadFromAPI();
         return;
       }
@@ -4258,15 +4714,1043 @@
     onToggleDraw();
   });
 
-  // Practice / Play Mode button (replay/game mode).
-  // v1: UI only (safe). We'll wire to /replay/start once the chart integration contract is defined.
-  if(ui.practiceBtn){
-    ui.practiceBtn.addEventListener('click', function(){
+  // Practice / Play Mode (replay / practice-field).
+  // Contract: see notes.txt (server returns {state, delta} and state is authoritative).
+  function _setPracticeStatus(txt){
+    try{
+      if(ui.practiceStatus) ui.practiceStatus.textContent = String(txt || '');
+    } catch(_e){}
+  }
+  function _practiceSpeedBpm(){
+    try{
+      var v = ui.practiceSpeed ? Number(ui.practiceSpeed.value) : NaN;
+      if(!Number.isFinite(v) || v <= 0) v = 50;
+      return clamp(Math.floor(v), 1, 60);
+    } catch(_e){
+      return 50;
+    }
+  }
+
+  function _syncPracticeSpeedLabel(){
+    try{
+      if(!ui.practiceSpeedLabel) return;
+      ui.practiceSpeedLabel.textContent = String(_practiceSpeedBpm());
+    } catch(_e){}
+  }
+
+  function _setPracticeUiStateActive(active){
+    // Two UI states:
+    // - idle: show Play only
+    // - active: show Pause + Reset only
+    try{
+      if(ui.practiceBtn) ui.practiceBtn.style.display = active ? 'none' : '';
+      if(ui.practicePauseBtn) ui.practicePauseBtn.style.display = active ? '' : 'none';
+      if(ui.practiceResetBtn) ui.practiceResetBtn.style.display = active ? '' : 'none';
+    } catch(_e){}
+    // While replay is active, lock time-scale UI to 1M to match simulator requirements.
+    try{
+      updateSpanPresetAvailability();
+      syncSpanPresetUi();
+    } catch(_e2){}
+  }
+
+  function _syncPracticePauseBtn(){
+    // When a session is active:
+    // - if playing: show "Pause"
+    // - if paused:  show "Resume"
+    try{
+      if(!ui.practicePauseBtn) return;
+      var playing = !!(state && state.replay && state.replay.playing);
+      var lbl = ui.practicePauseBtn.querySelector('.practiceCtl__label');
+      if(lbl) lbl.textContent = playing ? 'Pause' : 'Resume';
+      ui.practicePauseBtn.title = playing ? 'Pause replay' : 'Resume replay';
+      // Swap icon between pause and play for clarity.
+      var icon = ui.practicePauseBtn.querySelector('.practiceCtl__icon');
+      if(icon){
+        icon.classList.toggle('practiceCtl__icon--pause', playing);
+        icon.classList.toggle('practiceCtl__icon--play', !playing);
+      }
+    } catch(_e){}
+  }
+
+  function _stopReplayTimer(){
+    // Pause stepping without ending the server session.
+    try{
+      if(state && state.replay){
+        // Cancel any scheduled tick (supports both interval + timeout handles).
+        try{ if(state.replay.timer) clearInterval(state.replay.timer); } catch(_e0){}
+        try{ if(state.replay.timer) clearTimeout(state.replay.timer); } catch(_e1){}
+        state.replay.timer = null;
+        state.replay.playing = false;
+        // Cancel any in-progress loop scheduling; in-flight network calls will finish naturally.
+        state.replay._loopToken = (Number(state.replay._loopToken) || 0) + 1;
+      }
+    } catch(_e){}
+    _syncPracticePauseBtn();
+  }
+
+  function _startReplayLoop(intervalMs){
+    // Awaited loop: schedule the next tick only after the current step completes.
+    if(!state || !state.replay) return;
+    if(!state.replay.active || !state.replay.sessionId) return;
+    var ms = Math.max(25, Math.floor(Number(intervalMs) || 250));
+
+    // Cancel any previous loop/timer.
+    _stopReplayTimer();
+
+    state.replay.playing = true;
+    state.replay._stepFailCount = 0;
+    // New token uniquely identifies this loop instance.
+    state.replay._loopToken = (Number(state.replay._loopToken) || 0) + 1;
+    var token = state.replay._loopToken;
+    _syncPracticePauseBtn();
+
+    var tick = async function(){
       try{
-        if(ui.practiceStatus) ui.practiceStatus.textContent = 'Play mode coming soon…';
+        if(!state || !state.replay) return;
+        if(!state.replay.playing) return;
+        if(token !== state.replay._loopToken) return;
+
+        // Single-flight: never overlap steps.
+        if(state.replay._inFlight){
+          state.replay.timer = setTimeout(tick, 25);
+          return;
+        }
+
+        state.replay._inFlight = true;
+        try{
+          await replayStepOnce();
+        } finally {
+          state.replay._inFlight = false;
+        }
+
+        if(state.replay.playing && token === state.replay._loopToken){
+          state.replay.timer = setTimeout(tick, ms);
+        }
+      } catch(e){
+        // Last-resort guard: don't kill the session; just pause.
+        console.error(e);
+        _setPracticeStatus('Replay loop error: ' + String(e && e.message ? e.message : e));
+        _stopReplayTimer();
+      }
+    };
+
+    state.replay.timer = setTimeout(tick, ms);
+  }
+
+  async function withReplayPaused(fn){
+    var wasPlaying = !!(state && state.replay && state.replay.playing);
+    if(wasPlaying) _stopReplayTimer();
+    try{
+      return await fn();
+    } finally {
+      if(wasPlaying && state && state.replay && state.replay.active && state.replay.sessionId){
+        var bpm = _practiceSpeedBpm();
+        var intervalMs = Math.max(80, Math.floor(60000 / bpm));
+        _startReplayLoop(intervalMs);
+      }
+    }
+  }
+
+  async function _endReplaySession(){
+    _stopReplayTimer();
+    try{
+      if(state && state.replay && state.replay.sessionId){
+        await _postJson('/replay/end', { session_id: state.replay.sessionId });
+      }
+    } catch(_e0){}
+    if(state && state.replay){
+      state.replay.active = false;
+      state.replay.sessionId = '';
+      state.replay.lastState = null;
+    }
+    _setPracticeUiStateActive(false);
+    // If the history modal is open, refresh it so the just-ended session appears immediately.
+    try{
+      if(ui.historyModal && ui.historyModal.style.display !== 'none'){
+        loadTradeHistory();
+      }
+    } catch(_e2){}
+  }
+
+  function _clearReplayLocal(){
+    // Clear local replay UI state without calling server.
+    _stopReplayTimer();
+    try{
+      if(state && state.replay){
+        state.replay.active = false;
+        state.replay.sessionId = '';
+        state.replay.lastState = null;
+      }
+    } catch(_e){}
+    _setPracticeUiStateActive(false);
+  }
+  async function _postJson(url, payload){
+    var res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload || {}) });
+    if(!res.ok){
+      var t = '';
+      try{ t = await res.text(); } catch(_e){}
+      throw new Error('HTTP ' + res.status + ' ' + url + (t ? (': ' + t) : ''));
+    }
+    return await res.json();
+  }
+
+  async function _getJson(url){
+    var res = await fetch(url, { method:'GET', cache:'no-store' });
+    if(!res.ok){
+      var t = '';
+      try{ t = await res.text(); } catch(_e){}
+      throw new Error('HTTP ' + res.status + ' ' + url + (t ? (': ' + t) : ''));
+    }
+    return await res.json();
+  }
+
+  function _setHistoryStatus(txt){
+    try{
+      if(ui.practiceHistoryStatus) ui.practiceHistoryStatus.textContent = String(txt || '');
+    } catch(_e){}
+  }
+
+  function _setHistoryModalStatus(txt){
+    try{
+      if(ui.historyModalStatus) ui.historyModalStatus.textContent = String(txt || '');
+    } catch(_e){}
+  }
+
+  function _showHistoryModal(show){
+    try{
+      if(!ui.historyModal) return;
+      ui.historyModal.style.display = show ? '' : 'none';
+      if(show){
+        // Avoid background scroll when modal is open.
+        document.body.style.overflow = 'hidden';
+      } else {
+        document.body.style.overflow = '';
+      }
+    } catch(_e){}
+  }
+
+  function _fmtDateShort(iso){
+    var s = String(iso || '');
+    if(!s) return '';
+    // sqlite CURRENT_TIMESTAMP is often "YYYY-MM-DD HH:MM:SS"
+    return s.replace('T',' ').slice(0,16);
+  }
+
+  function _fmtNum2(x){
+    var n = Number(x);
+    return Number.isFinite(n) ? n.toFixed(2) : '';
+  }
+
+  function _setHistoryViewMode(mode){
+    // mode: 'cards' | 'ledger' | 'matrix'
+    try{
+      state.historyViewMode = (mode === 'matrix' || mode === 'ledger' || mode === 'cards') ? mode : 'cards';
+      if(ui.historyViewCardsBtn){
+        ui.historyViewCardsBtn.classList.toggle('btnToggleOn', state.historyViewMode === 'cards');
+      }
+      if(ui.historyViewLedgerBtn){
+        ui.historyViewLedgerBtn.classList.toggle('btnToggleOn', state.historyViewMode === 'ledger');
+      }
+      if(ui.historyViewMatrixBtn){
+        ui.historyViewMatrixBtn.classList.toggle('btnToggleOn', state.historyViewMode === 'matrix');
+      }
+    } catch(_e){}
+  }
+
+  function _fmtDur(sec){
+    var s = Math.floor(Number(sec) || 0);
+    if(!Number.isFinite(s) || s <= 0) return '';
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    if(h > 0) return h + 'h ' + m + 'm';
+    return m + 'm';
+  }
+
+  function _renderSessionCards(j){
+    if(!ui.historyTableWrap) return;
+    ui.historyTableWrap.innerHTML = '';
+    var sessions = (j && Array.isArray(j.sessions)) ? j.sessions : [];
+    // Cards: show most recent sessions first.
+    // We sort by best-available timestamp (updated_at/t_end/created_at/t_start).
+    try{
+      sessions.sort(function(a,b){
+        function key(s){
+          if(!s) return 0;
+          var iso = s.updated_at || s.t_end || s.created_at || s.t_start || '';
+          var ms = parseIsoToMs(iso);
+          return Number.isFinite(ms) ? ms : 0;
+        }
+        return key(b) - key(a);
+      });
+    } catch(_eSort){}
+    if(!sessions.length){
+      ui.historyTableWrap.innerHTML = '<div class="hint" style="padding:10px;">No sessions yet.</div>';
+      return;
+    }
+
+    // Cards should not carry any ledger filter forward.
+    try{ state.historySessionFilter = null; } catch(_e0){}
+
+    var list = document.createElement('div');
+    list.className = 'cardList';
+
+    function pnlClass(v){
+      var n = Number(v);
+      if(!Number.isFinite(n) || n === 0) return 'pnlFlat';
+      return n > 0 ? 'pnlPos' : 'pnlNeg';
+    }
+
+    function segClass(v){
+      var n = Number(v);
+      if(!Number.isFinite(n) || n === 0) return '';
+      return n > 0 ? 'segPos' : 'segNeg';
+    }
+
+    for(var i=0;i<sessions.length;i++){
+      var s = sessions[i] || {};
+      var pnl = (s.pnl && (s.pnl.realized !== undefined)) ? Number(s.pnl.realized) : Number(s.realized);
+      var act = s.activity || {};
+      var strip = s.strip || {};
+      var segs = Array.isArray(strip.segments) ? strip.segments : [];
+
+      var card = document.createElement('div');
+      card.className = 'sessCard';
+
+      var hd = document.createElement('div');
+      hd.className = 'sessCardHd';
+
+      var left = document.createElement('div');
+      var titleRow = document.createElement('div');
+      titleRow.style.display = 'flex';
+      titleRow.style.alignItems = 'center';
+      titleRow.style.gap = '10px';
+      var title = document.createElement('div');
+      title.className = 'sessTitle';
+      title.textContent = String((s.label || '') + ' · ' + (s.symbol || '—')).trim();
+
+      // Badge (label_session) — place next to title per notes.
+      var lab = s.session_label || null;
+      if(lab && typeof lab === 'object'){
+        var pill = document.createElement('div');
+        var sev = String(lab.severity || 'neutral');
+        var cls = (sev === 'good') ? 'badgeGood' : (sev === 'warn' ? 'badgeWarn' : (sev === 'bad' ? 'badgeBad' : 'badgeNeutral'));
+        pill.className = 'badgePill ' + cls;
+        pill.textContent = String(lab.label || '');
+        pill.title = String(lab.reason || '');
+        titleRow.appendChild(title);
+        titleRow.appendChild(pill);
+      } else {
+        titleRow.appendChild(title);
+      }
+      var sub = document.createElement('div');
+      sub.className = 'sessSub';
+      var t0 = _fmtDateShort(s.t_start || s.created_at);
+      var t1 = _fmtDateShort(s.t_end || s.updated_at);
+      var dur = _fmtDur(s.duration_sec);
+      sub.textContent = (t0 && t1) ? (t0 + ' → ' + t1 + (dur ? (' (' + dur + ')') : '')) : (t0 || t1 || '');
+      left.appendChild(titleRow);
+      left.appendChild(sub);
+
+      var rightWrap = document.createElement('div');
+      rightWrap.style.display = 'flex';
+      rightWrap.style.flexDirection = 'column';
+      rightWrap.style.alignItems = 'flex-end';
+      rightWrap.style.gap = '6px';
+
+      var headline = (s.outcome && (s.outcome.headline !== undefined) && (s.outcome.headline !== null)) ? String(s.outcome.headline) : '';
+      var right = document.createElement('div');
+      right.className = 'pnlBig ' + pnlClass(pnl);
+      right.textContent = headline ? headline : (Number.isFinite(pnl) ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) : '—');
+
+      rightWrap.appendChild(right);
+
+      hd.appendChild(left);
+      hd.appendChild(rightWrap);
+
+      var bd = document.createElement('div');
+      bd.className = 'sessBd';
+
+      var mini = document.createElement('div');
+      mini.className = 'miniRow';
+      var roundTrips = (act && Number.isFinite(Number(act.round_trips))) ? Number(act.round_trips) : 0;
+      var scaleIns = (act && Number.isFinite(Number(act.adds))) ? Number(act.adds) : 0;
+      mini.innerHTML =
+        '<span><span class="miniK">Round Trips:</span> ' + String(roundTrips) + '</span>'
+        + '<span><span class="miniK">Hit Rate:</span> ' + (s.pnl && Number.isFinite(Number(s.pnl.win_rate)) ? Math.round(Number(s.pnl.win_rate) * 100) + '%' : '—') + '</span>'
+        + '<span><span class="miniK">MaxPos:</span> ' + String(Number.isFinite(Number(act.max_abs_position_qty)) ? Number(act.max_abs_position_qty) : '—') + '</span>'
+        + '<span><span class="miniK">Scale-ins:</span> ' + String(scaleIns) + '</span>';
+      bd.appendChild(mini);
+
+      var stripEl = document.createElement('div');
+      stripEl.className = 'strip';
+      // Encode quantity (width) + outcome strength (opacity):
+      // - width proportional to qty_peak
+      // - opacity proportional to |realized| (relative within the session)
+      var maxAbsPnl = 0;
+      var maxQtyPeak = 0;
+      for(var kk=0; kk<segs.length; kk++){
+        var gg = segs[kk] || {};
+        var rv = Math.abs(Number(gg.realized) || 0);
+        var qp = Math.abs(Number(gg.qty_peak) || 0);
+        if(Number.isFinite(rv) && rv > maxAbsPnl) maxAbsPnl = rv;
+        if(Number.isFinite(qp) && qp > maxQtyPeak) maxQtyPeak = qp;
+      }
+      if(!Number.isFinite(maxAbsPnl) || maxAbsPnl <= 0) maxAbsPnl = 0;
+      if(!Number.isFinite(maxQtyPeak) || maxQtyPeak <= 0){
+        var sessMaxPos = Math.abs(Number(act.max_abs_position_qty) || 0);
+        maxQtyPeak = (Number.isFinite(sessMaxPos) && sessMaxPos > 0) ? sessMaxPos : 0;
+      }
+
+      // Zero-trade/no-exit case: show a neutral strip instead of "empty".
+      if(!segs.length){
+        var fills = (act && Number.isFinite(Number(act.fills))) ? Number(act.fills) : 0;
+        var pillsN = clamp(Math.max(1, Math.min(6, Math.floor(fills || 1))), 1, 6);
+        for(var q=0; q<pillsN; q++){
+          var p0 = document.createElement('span');
+          p0.className = 'segPill segNeu';
+          // width proportional to session max position (if present)
+          var w0 = maxQtyPeak > 0 ? (24 + 40) : 34;
+          p0.style.width = String(Math.floor(clamp(w0, 20, 76))) + 'px';
+          p0.style.opacity = '0.55';
+          stripEl.appendChild(p0);
+        }
+      } else {
+        for(var k=0;k<segs.length;k++){
+          var g = segs[k] || {};
+          var rv2 = Number(g.realized) || 0;
+          var abs2 = Math.abs(rv2);
+          var qp2 = Math.abs(Number(g.qty_peak) || 0);
+          var relQty = (maxQtyPeak > 0) ? (qp2 / maxQtyPeak) : 0;
+          var relPnl = (maxAbsPnl > 0) ? (abs2 / maxAbsPnl) : 0;
+          // width 22..76 by qty, opacity 0.30..1.0 by pnl
+          var w = 22 + relQty * 54;
+          var op = 0.30 + relPnl * 0.70;
+          if(!Number.isFinite(w)) w = 34;
+          if(!Number.isFinite(op)) op = 0.55;
+          w = clamp(w, 20, 76);
+          op = clamp(op, 0.25, 1.0);
+
+          var pill = document.createElement('span');
+          pill.className = 'segPill ' + (segClass(rv2) || 'segNeu');
+          pill.style.width = String(Math.floor(w)) + 'px';
+          pill.style.opacity = String(op);
+          pill.title = 'Trip ' + String(g.trip_index || (k+1)) + ' · ' + String(g.dir || '') + ' · ' + _fmtNum2(rv2)
+            + (Number.isFinite(Number(g.qty_peak)) ? (' · qty_peak=' + String(g.qty_peak)) : '')
+            + (Number.isFinite(Number(g.adds)) && Number(g.adds) > 0 ? (' · scale-ins=' + String(g.adds)) : '');
+          stripEl.appendChild(pill);
+        }
+      }
+      bd.appendChild(stripEl);
+
+      var ft = document.createElement('div');
+      ft.className = 'sessFt';
+      var hint = document.createElement('div');
+      hint.className = 'sessHint';
+      hint.textContent = (s.outcome && s.outcome.confidence_hint) ? String(s.outcome.confidence_hint) : '';
+      var actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '8px';
+      actions.style.alignItems = 'center';
+      var btnLedger = document.createElement('button');
+      btnLedger.className = 'btn';
+      btnLedger.type = 'button';
+      btnLedger.textContent = 'View Ledger';
+      btnLedger.addEventListener('click', (function(sess){
+        return function(){
+          try{ state.historySessionFilter = String(sess.session_id || ''); } catch(_e){}
+          _setHistoryViewMode('ledger');
+          loadTradeHistory();
+        };
+      })(s));
+      actions.appendChild(btnLedger);
+
+      var btnDel = document.createElement('button');
+      btnDel.className = 'btn';
+      btnDel.type = 'button';
+      btnDel.textContent = 'Delete';
+      btnDel.title = 'Delete this session and all its events';
+      btnDel.addEventListener('click', (function(sess, cardEl){
+        return async function(){
+          var sid = String(sess && sess.session_id ? sess.session_id : '');
+          if(!sid) return;
+          var ok = false;
+          try{
+            var name = String((sess.label || '') + ' · ' + (sess.symbol || '')).trim();
+            var when = String(_fmtDateShort(sess.t_start || sess.created_at) || '');
+            ok = window.confirm('Delete this session and all associated events?\n\n' + (name ? (name + '\n') : '') + (when ? (when + '\n') : '') + '\nThis cannot be undone.');
+          } catch(_e){ ok = false; }
+          if(!ok) return;
+          _setHistoryModalStatus('Deleting…');
+          try{
+            await _postJson('/replay/session/delete', { session_id: sid });
+            // Remove the specific card immediately so the user sees it disappear,
+            // even though S1/S2 labels may shift after refresh.
+            try{ if(cardEl && cardEl.parentNode) cardEl.parentNode.removeChild(cardEl); } catch(_eRm){}
+            // If the deleted session is currently active in practice mode, clear local state.
+            try{
+              if(state && state.replay && String(state.replay.sessionId || '') === sid){
+                _clearReplayLocal();
+              }
+            } catch(_e2){}
+            await loadTradeHistory();
+            _setHistoryModalStatus('Deleted.');
+          } catch(e){
+            console.error(e);
+            _setHistoryModalStatus('Delete failed');
+          }
+        };
+      })(s, card));
+      actions.appendChild(btnDel);
+      ft.appendChild(hint);
+      ft.appendChild(actions);
+
+      card.appendChild(hd);
+      card.appendChild(bd);
+      card.appendChild(ft);
+      list.appendChild(card);
+    }
+
+    ui.historyTableWrap.appendChild(list);
+  }
+
+  function _renderTradeLedger(j){
+    if(!ui.historyTableWrap) return;
+    ui.historyTableWrap.innerHTML = '';
+    var sessionsAll = (j && Array.isArray(j.sessions)) ? j.sessions : [];
+    var sessions = sessionsAll;
+    try{
+      var f = (state && state.historySessionFilter) ? String(state.historySessionFilter) : '';
+      if(f){
+        sessions = [];
+        for(var si=0; si<sessionsAll.length; si++){
+          var ss = sessionsAll[si];
+          if(ss && String(ss.session_id || '') === f) sessions.push(ss);
+        }
+        // show a small filter hint above the table
+        var hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.style.marginBottom = '10px';
+        hint.innerHTML = 'Filtered to one session · <a href="#" style="color:rgba(90,150,255,.92);text-decoration:none;">Clear</a>';
+        hint.querySelector('a').addEventListener('click', function(e){
+          try{ e.preventDefault(); } catch(_e){}
+          try{ state.historySessionFilter = null; } catch(_e2){}
+          loadTradeLedger();
+        });
+        ui.historyTableWrap.appendChild(hint);
+      }
+    } catch(_e0){}
+    if(!sessions.length){
+      ui.historyTableWrap.innerHTML = '<div class="hint" style="padding:10px;">No sessions yet.</div>';
+      return;
+    }
+
+    var table = document.createElement('table');
+    table.className = 'histTable';
+
+    var thead = document.createElement('thead');
+    var hr = document.createElement('tr');
+    var cols = ['Session','Symbol','Exec Time','FillID','Row','TradeID','Type','Open/Close','Ref','Qty','SignedQty','Price','Value','RPnLΔ'];
+    for(var i=0;i<cols.length;i++){
+      var th = document.createElement('th');
+      th.textContent = cols[i];
+      hr.appendChild(th);
+    }
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    for(var s=0;s<sessions.length;s++){
+      var sess = sessions[s] || {};
+      var rows = Array.isArray(sess.rows) ? sess.rows : [];
+      for(var r=0;r<rows.length;r++){
+        var x = rows[r] || {};
+        var tr = document.createElement('tr');
+        function td(v){
+          var t = document.createElement('td');
+          t.textContent = (v === null || v === undefined) ? '' : String(v);
+          return t;
+        }
+        tr.appendChild(td(sess.label || sess.session_id || ''));
+        tr.appendChild(td(sess.symbol || ''));
+        tr.appendChild(td(_fmtDateShort(x.exec_ts)));
+        tr.appendChild(td(x.fill_id));
+        tr.appendChild(td(x.row_in_fill));
+        tr.appendChild(td(x.trade_id));
+        tr.appendChild(td(x.entry_type));
+        tr.appendChild(td(x.open_close));
+        tr.appendChild(td(x.reference));
+        tr.appendChild(td(x.qty));
+        tr.appendChild(td(x.signed_qty));
+        tr.appendChild(td(_fmtNum2(x.price)));
+        tr.appendChild(td(_fmtNum2(x.value)));
+        tr.appendChild(td(_fmtNum2(x.realized_pnl_delta)));
+        tbody.appendChild(tr);
+      }
+    }
+
+    table.appendChild(tbody);
+    var wrap = document.createElement('div');
+    wrap.className = 'tableWrap';
+    wrap.appendChild(table);
+    ui.historyTableWrap.appendChild(wrap);
+  }
+
+  function _renderTradeMatrix(matrix){
+    if(!ui.historyTableWrap) return;
+    var sessions = (matrix && Array.isArray(matrix.sessions)) ? matrix.sessions : [];
+    var maxTrades = (matrix && Number.isFinite(Number(matrix.max_trades))) ? Math.floor(Number(matrix.max_trades)) : 0;
+    ui.historyTableWrap.innerHTML = '';
+    if(!sessions.length){
+      ui.historyTableWrap.innerHTML = '<div class="hint" style="padding:10px;">No sessions yet.</div>';
+      return;
+    }
+    if(maxTrades <= 0) maxTrades = 1;
+
+    var table = document.createElement('table');
+    table.className = 'histTable';
+
+    var thead = document.createElement('thead');
+    var hr = document.createElement('tr');
+    var th0 = document.createElement('th');
+    th0.textContent = 'Trade';
+    hr.appendChild(th0);
+    for(var i=0;i<sessions.length;i++){
+      var s = sessions[i];
+      var th = document.createElement('th');
+      var lbl = (s && s.label) ? String(s.label) : ('S' + (i+1));
+      var sym = s && s.symbol ? String(s.symbol) : '—';
+      var created = _fmtDateShort(s && s.created_at);
+      th.innerHTML = '<div style="display:flex;flex-direction:column;gap:2px;">'
+        + '<div style="font-weight:800;">' + lbl + ' · ' + sym + '</div>'
+        + '<div class="tradeMeta">' + created + '</div>'
+        + '</div>';
+      th.title = (s && s.session_id) ? String(s.session_id) : '';
+      hr.appendChild(th);
+    }
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    for(var r=0;r<maxTrades;r++){
+      var tr = document.createElement('tr');
+      var td0 = document.createElement('td');
+      td0.textContent = 'T' + (r+1);
+      tr.appendChild(td0);
+      for(var c=0;c<sessions.length;c++){
+        var td = document.createElement('td');
+        var trades = sessions[c] && Array.isArray(sessions[c].trades) ? sessions[c].trades : [];
+        var t = trades[r] || null;
+        if(!t){
+          td.innerHTML = '<div class="tradeMeta">—</div>';
+        } else {
+          var side = (t.side === 'short') ? 'S' : 'L';
+          var qty = (t.qty !== undefined && t.qty !== null) ? String(t.qty) : '';
+          var ep = Number(t.entry_price);
+          var xp = Number(t.exit_price);
+          var pnl = Number(t.pnl);
+          var pnlCls = Number.isFinite(pnl) ? (pnl >= 0 ? 'tradePnlUp' : 'tradePnlDn') : 'tradeMeta';
+          td.innerHTML =
+            '<div class="tradeCell">'
+            + '<div><span style="font-weight:800;">' + side + '</span> × ' + qty + '</div>'
+            + '<div class="tradeMeta">' + (Number.isFinite(ep) ? ep.toFixed(2) : '—') + ' → ' + (Number.isFinite(xp) ? xp.toFixed(2) : '—') + '</div>'
+            + '<div class="' + pnlCls + '">PnL ' + (Number.isFinite(pnl) ? pnl.toFixed(2) : '—') + '</div>'
+            + '</div>';
+          td.title = (sessions[c] && sessions[c].session_id) ? ('session=' + sessions[c].session_id) : '';
+        }
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+
+    var wrap = document.createElement('div');
+    wrap.className = 'tableWrap';
+    wrap.appendChild(table);
+    ui.historyTableWrap.appendChild(wrap);
+  }
+
+  async function loadTradeMatrix(){
+    _setHistoryModalStatus('Loading…');
+    try{
+      var j = await _getJson('/replay/trade_matrix?limit_sessions=8');
+      _renderTradeMatrix(j);
+      _setHistoryModalStatus('Loaded ' + ((j && j.sessions && j.sessions.length) ? j.sessions.length : 0) + ' sessions');
+    } catch(e){
+      console.error(e);
+      _setHistoryModalStatus('Failed to load history');
+      if(ui.historyTableWrap) ui.historyTableWrap.innerHTML = '';
+    }
+  }
+
+  async function loadTradeLedger(){
+    _setHistoryModalStatus('Loading…');
+    try{
+      var j = await _getJson('/replay/trade_ledger?limit_sessions=8');
+      _renderTradeLedger(j);
+      var n = (j && j.sessions && j.sessions.length) ? j.sessions.length : 0;
+      var total = (j && Number.isFinite(Number(j.total_sessions))) ? Number(j.total_sessions) : null;
+      _setHistoryModalStatus('Loaded ' + String(n) + (total !== null ? (' of ' + String(total)) : '') + ' sessions');
+    } catch(e){
+      console.error(e);
+      _setHistoryModalStatus('Failed to load history');
+      if(ui.historyTableWrap) ui.historyTableWrap.innerHTML = '';
+    }
+  }
+
+  async function loadSessionCards(){
+    _setHistoryModalStatus('Loading…');
+    try{
+      // Default to meaningful "sessions" (those with fills); backend supports `only_with_fills=0` if needed.
+      var j = await _getJson('/replay/session_summaries?limit_sessions=8&only_with_fills=1');
+      _renderSessionCards(j);
+      var n = (j && j.sessions && j.sessions.length) ? j.sessions.length : 0;
+      var total = (j && Number.isFinite(Number(j.total_sessions))) ? Number(j.total_sessions) : null;
+      var fills = (j && Number.isFinite(Number(j.total_sessions_with_fills))) ? Number(j.total_sessions_with_fills) : null;
+      var extra = '';
+      if(total !== null) extra = ' of ' + String(total);
+      if(fills !== null) extra += ' · ' + String(fills) + ' w/ fills';
+      _setHistoryModalStatus('Loaded ' + String(n) + extra + ' sessions');
+    } catch(e){
+      console.error(e);
+      _setHistoryModalStatus('Failed to load history');
+      if(ui.historyTableWrap) ui.historyTableWrap.innerHTML = '';
+    }
+  }
+
+  async function loadTradeHistory(){
+    var m = (state && state.historyViewMode) ? String(state.historyViewMode) : 'cards';
+    if(m === 'matrix') return await loadTradeMatrix();
+    if(m === 'ledger') return await loadTradeLedger();
+    return await loadSessionCards();
+  }
+  function _barsFromReplayState(st){
+    var bars = (st && st.display_series && Array.isArray(st.display_series.bars)) ? st.display_series.bars : [];
+    var out = new Array(bars.length);
+    for(var i=0;i<bars.length;i++){
+      var b = bars[i];
+      if(!b){ out[i] = null; continue; }
+      var tm = parseIsoToMs(b.ts);
+      out[i] = {
+        t: Number.isFinite(tm) ? tm : NaN,
+        o: Number(b.o),
+        h: Number(b.h),
+        l: Number(b.l),
+        c: Number(b.c),
+        v: Number(b.v),
+        bid: NaN,
+        ask: NaN
+      };
+    }
+    // Filter nulls defensively
+    var clean = [];
+    for(var j=0;j<out.length;j++){
+      var d = out[j];
+      if(d && Number.isFinite(Number(d.t))) clean.push(d);
+    }
+    return clean;
+  }
+  function _renderReplayState(st){
+    if(!st) return;
+    if(!state || !state.replay) return;
+    state.replay.lastState = st;
+
+    // Keep UI bar size aligned to disp_tf_sec (display clock).
+    try{
+      var bs = Math.floor(Number(st.disp_tf_sec) || Math.floor(Number(state.windowSec) || 60));
+      if(Number.isFinite(bs) && bs > 0){
+        state.windowSec = clamp(bs, 60, 86400);
+        state._loadedBarS = state.windowSec;
+        if(ui.window) ui.window.value = String(state.windowSec);
+        if(ui.windowVal) ui.windowVal.textContent = formatWindow(state.windowSec);
+        syncBarPresetUi();
+        updateUrlBarSize();
+      }
+    } catch(_e0){}
+
+    // Clamp navigation bounds so the chart stays future-blind.
+    try{
+      var ds0 = st.actual_range && st.actual_range.start ? parseIsoToMs(st.actual_range.start) : parseIsoToMs(st.requested_range && st.requested_range.start);
+      var de0 = st.clock && st.clock.disp_window && st.clock.disp_window.end ? parseIsoToMs(st.clock.disp_window.end) : NaN;
+      // Full history end (does NOT change future-blind clamp).
+      var deMax0 = st.actual_range && st.actual_range.end ? parseIsoToMs(st.actual_range.end) : parseIsoToMs(st.requested_range && st.requested_range.end);
+      if(Number.isFinite(ds0)) state.datasetStartMs = ds0;
+      if(Number.isFinite(de0)) state.datasetEndMs = de0;
+      if(Number.isFinite(deMax0)) state.datasetMaxEndMs = deMax0;
+      if(Number.isFinite(state.datasetEndMs)) state.viewEndMs = state.datasetEndMs;
+      updateSpanPresetAvailability();
+    } catch(_e1){}
+
+    // Render candles from authoritative display_series.
+    var out = _barsFromReplayState(st);
+    state.dataFull = out;
+    state.data = out;
+    state._sessionType = computeSessionTypesForData(out);
+    state.ha = computeHeikinAshi(out);
+
+    // Server overlays are authoritative; store for filtering pipeline.
+    try{
+      var os = getOverlaySettings();
+      var allowed = new Set();
+      for(var i2=0;i2<out.length;i2++) allowed.add(Number(out[i2].t));
+      state.overlaysFull = overlaysFromReplayState(st.overlays, os, allowed);
+      state.overlays = state.overlaysFull;
+    } catch(_e2){
+      state.overlaysFull = [];
+      state.overlays = [];
+    }
+
+    // Replay UX: keep right-aligned as time advances.
+    state.followLatest = true;
+    applySessionFilter({ skipSave: true, skipDraw: true });
+    rightAlignXView();
+    state.hoverIdx = -1;
+    draw();
+
+    // Status line
+    try{
+      var tEnd = st.clock && st.clock.disp_window ? st.clock.disp_window.end : '';
+      var execTs = st.clock ? st.clock.exec_cursor_ts : '';
+      _setPracticeStatus('Replay · t=' + String(tEnd || '—') + ' · exec=' + String(execTs || '—') + ' · orders=' + (Array.isArray(st.orders) ? st.orders.length : 0));
+    } catch(_e3){}
+
+    // Score panel
+    try{
+      if(ui.practiceScore){
+        var pos = st.position || {};
+        var sc = st.score || {};
+        var lines = [];
+        lines.push('Position: qty=' + String(pos.qty ?? '—') + ' @ ' + String(pos.avg_price ?? '—'));
+        lines.push('PnL: realized=' + String(pos.realized_pnl ?? '—') + ' · unreal=' + String(pos.unrealized_pnl ?? '—'));
+        lines.push('Score: trades=' + String(sc.n_trades ?? 0) + ' · wins=' + String(sc.n_wins ?? 0) + ' · dd=' + String(sc.max_drawdown ?? '—'));
+        ui.practiceScore.textContent = lines.join('\n');
+      }
+    } catch(_e4){}
+  }
+  async function replayStart(opts){
+    var o = opts || {};
+    await _endReplaySession();
+
+    var symbol = String(getSymbol() || '').trim();
+    if(!symbol) symbol = 'SPY';
+
+    // Replay requirement: simulator displays ~1 month of data (training window),
+    // regardless of the chart's normal browsing span presets.
+    try{
+      state.spanPreset = '1m';
+      state.viewSpanMs = Number(SPAN_PRESETS['1m']) || (30*24*60*60*1000);
+      syncSpanPresetUi();
+      // Keep URL in sync so refresh doesn't surprise the user.
+      updateUrlBarSize();
+    } catch(_eForceSpan){}
+
+    var dispTf = clamp(Math.floor(Number(state.windowSec) || 60), 60, 86400);
+    var payload = {
+      symbol: symbol,
+      exec_tf_sec: 60,
+      disp_tf_sec: dispTf,
+      seed: 1,
+      snap_to_disp_boundary: true
+    };
+    // Display history: one month of display buckets (plus small slack).
+    var targetSpanMs = Number(SPAN_PRESETS['1m']) || (30*24*60*60*1000);
+    var dispMs = Math.max(60_000, Math.floor(dispTf) * 1000);
+    var wantBars = Math.ceil(targetSpanMs / dispMs) + 5; // +slack so "6M" isn't borderline
+    // Cap to keep payload sizes reasonable.
+    var MAX_HISTORY_BARS = 800;
+    payload.initial_history_bars = clamp(wantBars, 50, MAX_HISTORY_BARS);
+    payload.min_future_disp_bars = 3;
+    // Use full DB history; enforce that the random start point is at least 4 weeks back.
+    payload.min_anchor_age_days = 28;
+
+    _setPracticeStatus('Starting replay…');
+    try{
+      var j = await _postJson('/replay/start', payload);
+      state.replay.active = true;
+      state.replay.sessionId = String(j.session_id || '');
+      state.replay.playing = false;
+      state.replay.timer = null;
+      _renderReplayState(j.state);
+      _setPracticeUiStateActive(true);
+      _syncPracticePauseBtn();
+      if(o.autoPlay){
+        // Start the timer immediately.
+        replayTogglePlay();
+      }
+    } catch(e){
+      console.error(e);
+      state.replay.active = false;
+      state.replay.sessionId = '';
+      _setPracticeStatus('Replay start failed: ' + String(e && e.message ? e.message : e));
+      _setPracticeUiStateActive(false);
+    }
+  }
+  async function replayStepOnce(){
+    if(!state.replay.active || !state.replay.sessionId){
+      await replayStart();
+      return;
+    }
+    try{
+      var j = await _postJson('/replay/step', { session_id: state.replay.sessionId, disp_steps: 1 });
+      // Always render from authoritative state (delta is optional optimization).
+      _renderReplayState(j.state);
+      try{ state.replay._stepFailCount = 0; } catch(_e0){}
+    } catch(e){
+      console.error(e);
+      var msg = String(e && e.message ? e.message : e);
+      _setPracticeStatus('Replay step failed: ' + msg);
+      try{ state.replay._stepFailCount = (Number(state.replay._stepFailCount) || 0) + 1; } catch(_e1){}
+
+      // If the server session is gone, pause (don't nuke local state; allow Play to restart).
+      if(msg.indexOf('HTTP 404') !== -1 || msg.indexOf('session not found') !== -1){
+        _stopReplayTimer();
+        _setPracticeStatus('Replay paused: session not found (server). Press Play to start a new session.');
+        return;
+      }
+      // Avoid infinite noisy failing; pause after repeated failures.
+      try{
+        if((Number(state.replay._stepFailCount) || 0) >= 3){
+          _stopReplayTimer();
+          _setPracticeStatus('Replay paused after repeated step errors. Press Resume to retry.');
+        }
+      } catch(_e2){}
+    }
+  }
+
+  function _practiceQty(){
+    try{
+      // Discrete presets (shares)
+      var PRESETS = [1, 5, 10, 25, 50, 100];
+      if(ui.practiceQty && String(ui.practiceQty.type || '').toLowerCase() === 'range'){
+        var idx = Math.floor(Number(ui.practiceQty.value));
+        if(!Number.isFinite(idx)) idx = 0;
+        idx = clamp(idx, 0, PRESETS.length - 1);
+        return Number(PRESETS[idx]) || 1;
+      }
+      // Fallback: numeric input (legacy)
+      var v = ui.practiceQty ? Number(ui.practiceQty.value) : NaN;
+      if(!Number.isFinite(v) || v <= 0) v = 1;
+      return Math.max(1, Math.floor(v));
+    } catch(_e){
+      return 1;
+    }
+  }
+
+  function _syncPracticeQtyLabel(){
+    try{
+      if(!ui.practiceQtyLabel) return;
+      var q = _practiceQty();
+      ui.practiceQtyLabel.textContent = String(q) + ' shares';
+    } catch(_e){}
+  }
+
+  async function placeMarket(side){
+    if(!state.replay.active || !state.replay.sessionId){
+      _setPracticeStatus('Start replay first.');
+      return;
+    }
+    var qty = _practiceQty();
+    return withReplayPaused(async function(){
+      try{
+        var j = await _postJson('/replay/order/place', { session_id: state.replay.sessionId, type: 'market', side: side, qty: qty, tag: 'ui' });
+        _renderReplayState(j.state);
+      } catch(e){
+        console.error(e);
+        _setPracticeStatus('Order failed: ' + String(e && e.message ? e.message : e));
+      }
+    });
+  }
+
+  async function flattenNow(){
+    if(!state.replay.active || !state.replay.sessionId){
+      _setPracticeStatus('Start replay first.');
+      return;
+    }
+    return withReplayPaused(async function(){
+      try{
+        var j = await _postJson('/replay/flatten', { session_id: state.replay.sessionId });
+        _renderReplayState(j.state);
+      } catch(e){
+        console.error(e);
+        _setPracticeStatus('Flatten failed: ' + String(e && e.message ? e.message : e));
+      }
+    });
+  }
+  function replayTogglePlay(){
+    // Play/Pause/Resume UX:
+    // - If no active session: start one and begin stepping.
+    // - If active and playing: pause (stop stepping timer, keep session).
+    // - If active and paused: resume (restart stepping timer).
+    if(!state.replay.active || !state.replay.sessionId){
+      replayStart({ autoPlay: true });
+      return;
+    }
+    if(state.replay.playing){
+      _stopReplayTimer();
+      _setPracticeStatus('Paused.');
+      return;
+    }
+    var bpm = _practiceSpeedBpm();
+    var intervalMs = Math.max(80, Math.floor(60000 / bpm));
+    _startReplayLoop(intervalMs);
+  }
+
+  if(ui.practiceBtn) ui.practiceBtn.addEventListener('click', function(){ replayTogglePlay(); });
+  if(ui.practicePauseBtn) ui.practicePauseBtn.addEventListener('click', function(){ replayTogglePlay(); });
+  // Reset should end the current session and return to the idle "Play" state.
+  if(ui.practiceResetBtn) ui.practiceResetBtn.addEventListener('click', function(){ _endReplaySession(); });
+  if(ui.practiceLongBtn) ui.practiceLongBtn.addEventListener('click', function(){ placeMarket('buy'); });
+  if(ui.practiceShortBtn) ui.practiceShortBtn.addEventListener('click', function(){ placeMarket('sell'); });
+  if(ui.practiceFlattenBtn) ui.practiceFlattenBtn.addEventListener('click', function(){ flattenNow(); });
+  if(ui.practiceQty){
+    ui.practiceQty.addEventListener('input', function(){ _syncPracticeQtyLabel(); });
+    ui.practiceQty.addEventListener('change', function(){ _syncPracticeQtyLabel(); });
+  }
+  if(ui.practiceSpeed){
+    ui.practiceSpeed.addEventListener('input', function(){
+      _syncPracticeSpeedLabel();
+      // If playing, restart timer with new speed.
+      if(state && state.replay && state.replay.playing){
+        var bpm = _practiceSpeedBpm();
+        var intervalMs = Math.max(80, Math.floor(60000 / bpm));
+        _startReplayLoop(intervalMs);
+      }
+    });
+    ui.practiceSpeed.addEventListener('change', function(){
+      _syncPracticeSpeedLabel();
+    });
+  }
+  _syncPracticeSpeedLabel();
+  _syncPracticeQtyLabel();
+  _setPracticeUiStateActive(!!(state && state.replay && state.replay.active));
+  // History modal wiring
+  if(ui.practiceHistoryBtn){
+    ui.practiceHistoryBtn.addEventListener('click', function(){
+      _showHistoryModal(true);
+      _setHistoryViewMode('cards');
+      loadTradeHistory();
+    });
+  }
+  if(ui.historyCloseBtn) ui.historyCloseBtn.addEventListener('click', function(){ _showHistoryModal(false); });
+  if(ui.historyRefreshBtn) ui.historyRefreshBtn.addEventListener('click', function(){ loadTradeHistory(); });
+  if(ui.historyViewCardsBtn) ui.historyViewCardsBtn.addEventListener('click', function(){ _setHistoryViewMode('cards'); loadTradeHistory(); });
+  if(ui.historyViewLedgerBtn) ui.historyViewLedgerBtn.addEventListener('click', function(){ _setHistoryViewMode('ledger'); loadTradeHistory(); });
+  if(ui.historyViewMatrixBtn) ui.historyViewMatrixBtn.addEventListener('click', function(){ _setHistoryViewMode('matrix'); loadTradeHistory(); });
+  if(ui.historyModal){
+    ui.historyModal.addEventListener('click', function(e){
+      // Click outside the modal closes
+      try{
+        if(e && e.target === ui.historyModal) _showHistoryModal(false);
       } catch(_e){}
     });
   }
+  document.addEventListener('keydown', function(e){
+    try{
+      if(e && e.key === 'Escape' && ui.historyModal && ui.historyModal.style.display !== 'none'){
+        _showHistoryModal(false);
+      }
+    } catch(_e){}
+  });
   async function fetchLatestAndReload(){
     // In API mode, this triggers the server-side fetch for *all* tickers, then reloads the window.
     if(STATIC_MODE){

@@ -1,7 +1,28 @@
 todos
 
-Simulator practice game 
-https://chatgpt.com/share/6946cd45-e2e0-8008-83dd-97d32d3b6c46
+Cross-hair lines pure white, full opacity. 
+
+
+Game - 
+
+Debug - curves need to stay intact during play 
+
+Color code shorts vs. longs. 
+
+Add up / down arrow to indicate whether trade is in profit or loss, with value in parens. 
+
+Add "empty" future space to allow for user to project as in aid in trade placement. 
+
+Remove small position text "Position: qty=5 @ 552.36
+PnL: realized=3.6250000000001137 · unreal=3.75
+Score: trades=1 · wins=1 · dd=0
+Replay · t=2025-07-08T14:43:00Z · exec=2025-07-08T14:42:00Z · orders=3" 
+
+
+Hide (don't delete) Strategy block 
+
+Delete Matrix tab and associated code. 
+
 
 
 

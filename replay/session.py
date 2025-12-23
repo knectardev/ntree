@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from database import get_db_connection
 from replay.broker import BrokerSim
@@ -31,6 +31,17 @@ def _ceil_time_to_step(dt: datetime, step_sec: int) -> datetime:
     snapped = ((int(t) + step - 1) // step) * step
     return datetime.fromtimestamp(snapped, tz=timezone.utc)
 
+def _floor_time_to_step(dt: datetime, step_sec: int) -> datetime:
+    """
+    Snap dt DOWN to the boundary aligned on `step_sec` (epoch-based).
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    step = max(1, int(step_sec))
+    t = dt.timestamp()
+    snapped = (int(t) // step) * step
+    return datetime.fromtimestamp(snapped, tz=timezone.utc)
+
 
 @dataclass(frozen=True)
 class ReplaySessionConfig:
@@ -40,6 +51,11 @@ class ReplaySessionConfig:
     exec_tf_sec: int = 60
     disp_tf_sec: int = 300
     seed: Optional[int] = None
+    # UI / start behavior
+    snap_to_disp_boundary: bool = True
+    t_anchor: Optional[str] = None  # ISO; if provided, session starts here (after snapping)
+    initial_history_bars: int = 200
+    min_future_disp_bars: int = 3
 
 
 class ReplaySession:
@@ -68,9 +84,14 @@ class ReplaySession:
 
         self._t_start_dt = _parse_iso(cfg.t_start)
         self._t_end_dt = _parse_iso(cfg.t_end)
-        # Snap display start up to a display boundary (recommended default).
-        self._disp_cursor_start_ts = _ceil_time_to_step(self._t_start_dt, int(cfg.disp_tf_sec))
+        # Start at anchor if provided; otherwise at requested t_start.
+        anchor_dt = _parse_iso(cfg.t_anchor) if cfg.t_anchor else self._t_start_dt
+        if cfg.snap_to_disp_boundary:
+            self._disp_cursor_start_ts = _ceil_time_to_step(anchor_dt, int(cfg.disp_tf_sec))
+        else:
+            self._disp_cursor_start_ts = anchor_dt.astimezone(timezone.utc)
         self._last_event_id = 0
+        self._last_bar = None  # last consumed exec bar (for market fills)
 
         # Persist session record
         self._persist_session_row(status="active")
@@ -128,8 +149,114 @@ class ReplaySession:
                 "cursor_disp_start_ts": _iso_z(self._disp_cursor_start_ts),
                 "t_start_requested": self.cfg.t_start,
                 "t_end_requested": self.cfg.t_end,
+                "t_anchor": self.cfg.t_anchor,
             },
         )
+
+    def get_state_payload(self) -> Dict[str, Any]:
+        """
+        Payload used by demo_static.html replay UI.
+        Returns a dict with:
+        - display_series.bars: aggregated OHLCV buckets (disp_tf_sec)
+        - clock.disp_window: start/end for current display window
+        - clock.exec_cursor_ts: last consumed exec timestamp (best-effort)
+        """
+        st = self.get_state()
+        disp_tf = int(self.cfg.disp_tf_sec)
+        exec_tf = int(self.cfg.exec_tf_sec)
+        window_start = self._disp_cursor_start_ts
+        window_end = window_start + timedelta(seconds=disp_tf)
+
+        # How much history to include in the display series.
+        hist = max(10, int(self.cfg.initial_history_bars))
+        series_start = window_end - timedelta(seconds=disp_tf * hist)
+
+        # Aggregate exec bars into display buckets for [series_start, window_end).
+        buckets: Dict[int, Dict[str, Any]] = {}
+        step_sec = max(1, disp_tf)
+
+        def bucket_key(dt: datetime) -> int:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return (int(dt.timestamp()) // step_sec) * step_sec
+
+        for b in self.feed.bars:
+            if b.ts < series_start:
+                continue
+            if b.ts >= window_end:
+                break
+            k = bucket_key(b.ts)
+            cur = buckets.get(k)
+            if cur is None:
+                buckets[k] = {
+                    "ts": datetime.fromtimestamp(k, tz=timezone.utc),
+                    "o": float(b.open),
+                    "h": float(b.high),
+                    "l": float(b.low),
+                    "c": float(b.close),
+                    "v": float(b.volume or 0.0),
+                }
+            else:
+                cur["h"] = max(float(cur["h"]), float(b.high))
+                cur["l"] = min(float(cur["l"]), float(b.low))
+                cur["c"] = float(b.close)
+                cur["v"] = float(cur["v"]) + float(b.volume or 0.0)
+
+        bars_out = []
+        for k in sorted(buckets.keys()):
+            bb = buckets[k]
+            bars_out.append(
+                {
+                    "ts": _iso_z(bb["ts"]),
+                    "o": float(bb["o"]),
+                    "h": float(bb["h"]),
+                    "l": float(bb["l"]),
+                    "c": float(bb["c"]),
+                    "v": float(bb["v"]),
+                }
+            )
+
+        # Basic position payload; unrealized is approximated from last close.
+        last_px = None
+        try:
+            if self._last_bar is not None:
+                last_px = float(self._last_bar.close)
+            elif self._exec_idx > 0 and self.feed.bars:
+                last_px = float(self.feed.bars[max(0, self._exec_idx - 1)].close)
+        except Exception:
+            last_px = None
+        unreal = 0.0
+        try:
+            if last_px is not None and float(self.position.qty) != 0:
+                unreal = (last_px - float(self.position.avg_price)) * float(self.position.qty)
+        except Exception:
+            unreal = 0.0
+
+        return {
+            "session_id": st.session_id,
+            "symbol": st.symbol,
+            "exec_tf_sec": exec_tf,
+            "disp_tf_sec": disp_tf,
+            "requested_range": {"start": self.cfg.t_start, "end": self.cfg.t_end},
+            "actual_range": {
+                "start": _iso_z(self.feed.bars[0].ts) if self.feed.bars else self.cfg.t_start,
+                "end": _iso_z(self.feed.bars[-1].ts) if self.feed.bars else self.cfg.t_end,
+            },
+            "clock": {
+                "exec_cursor_ts": _iso_z(st.cursor_exec_ts),
+                "disp_window": {"start": _iso_z(window_start), "end": _iso_z(window_end)},
+            },
+            "display_series": {"bars": bars_out},
+            "position": {
+                "qty": float(self.position.qty),
+                "avg_price": float(self.position.avg_price),
+                "realized_pnl": float(self.position.realized_pnl),
+                "unrealized_pnl": float(unreal),
+            },
+            "orders": [o.__dict__ for o in st.orders],
+            "overlays": {},  # optional; UI can handle empty
+            "score": {},     # optional
+        }
 
     def place_limit(self, *, side: str, price: float, qty: float, tag: Optional[str] = None) -> Order:
         oid = str(uuid.uuid4())
@@ -150,6 +277,74 @@ class ReplaySession:
             payload={"order_id": oid, "side": side, "type": "limit", "qty": qty, "limit_price": price, "tag": tag},
         )
         return o
+
+    def place_market(self, *, side: str, qty: float, tag: Optional[str] = None) -> Tuple[Order, Optional[float]]:
+        """
+        v1 "market": fill immediately at the last known close (deterministic).
+        Returns (order, fill_price).
+        """
+        # Choose a deterministic fill price based on last consumed bar (or nearest available).
+        fill_px = None
+        try:
+            if self._last_bar is not None:
+                fill_px = float(self._last_bar.close)
+            elif self._exec_idx > 0 and self.feed.bars:
+                fill_px = float(self.feed.bars[max(0, self._exec_idx - 1)].close)
+            elif self.feed.bars:
+                fill_px = float(self.feed.bars[0].close)
+        except Exception:
+            fill_px = None
+
+        oid = str(uuid.uuid4())
+        o = Order(
+            order_id=oid,
+            side=side,  # type: ignore[arg-type]
+            type="market",
+            qty=float(qty),
+            limit_price=None,
+            tag=tag,
+            created_ts=self.cursor_exec_ts,
+            status="filled",
+        )
+        # Store the order (UI expects an order list).
+        self.orders.append(o)
+        self._last_event_id = self.logger.emit(
+            event_type="ORDER_PLACED",
+            ts_exec=self.cursor_exec_ts,
+            ts_market=self.cursor_exec_ts,
+            payload={"order_id": oid, "side": side, "type": "market", "qty": qty, "price": fill_px, "tag": tag},
+        )
+        if fill_px is not None:
+            # Apply fill immediately.
+            self.broker._apply_fill(side=side, qty=float(qty), price=float(fill_px))  # type: ignore[attr-defined]
+            self._last_event_id = self.logger.emit(
+                event_type="FILL",
+                ts_exec=self.cursor_exec_ts,
+                ts_market=self.cursor_exec_ts,
+                payload={
+                    "order_id": oid,
+                    "side": side,
+                    "qty": float(qty),
+                    "price": float(fill_px),
+                    "position_qty": self.position.qty,
+                    "avg_price": self.position.avg_price,
+                    "realized_pnl": self.position.realized_pnl,
+                    "tag": tag,
+                },
+            )
+        return o, fill_px
+
+    def flatten_now(self, *, tag: Optional[str] = None) -> Optional[float]:
+        """
+        Close any open position immediately at last known close.
+        Returns fill price if executed, else None.
+        """
+        q = float(self.position.qty)
+        if q == 0:
+            return None
+        side = "sell" if q > 0 else "buy"
+        _, px = self.place_market(side=side, qty=abs(q), tag=tag or "flatten")
+        return px
 
     def cancel(self, *, order_id: str) -> bool:
         ok = self.broker.cancel(order_id)
@@ -199,6 +394,7 @@ class ReplaySession:
                 if bar.ts >= win_start:
                     consumed += 1
                     last_ts = bar.ts
+                    self._last_bar = bar
                     fills = self.broker.evaluate_bar(bar)
                     for f in fills:
                         self._last_event_id = self.logger.emit(
@@ -265,6 +461,21 @@ class ReplaySession:
             ts_market=self.cursor_exec_ts,
             payload={"realized_pnl": self.position.realized_pnl},
         )
+
+    def end(self) -> None:
+        """
+        Explicitly end the session (e.g., user pressed Reset/End).
+        Idempotent-ish: safe to call multiple times.
+        """
+        try:
+            self._end_session()
+        except Exception:
+            # As a last resort, still mark ended in DB.
+            try:
+                self.paused = True
+                self._persist_session_row(status="ended", summary_json={"realized_pnl": self.position.realized_pnl})
+            except Exception:
+                pass
 
     def _persist_session_row(self, *, status: str, summary_json: Optional[Dict[str, Any]] = None) -> None:
         conn = get_db_connection()
