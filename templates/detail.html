@@ -107,7 +107,7 @@
             width: 100% !important;
             min-width: 100% !important;
             max-width: 100% !important;
-            height: 700px;
+            height: 850px;
             padding-bottom: 30px;
             padding-right: 0;
             padding-left: 0;
@@ -129,9 +129,9 @@
         }
         
         canvas {
-            max-height: 700px;
+            max-height: 850px;
             width: 100% !important; /* Ensure canvas uses full width */
-            height: 700px !important; /* Set explicit height */
+            height: 850px !important; /* Set explicit height */
             cursor: crosshair;
             overflow: visible; /* Ensure canvas doesn't clip */
             display: block; /* Remove inline-block spacing */
@@ -1633,7 +1633,8 @@
                 }
                 
                 // Draw horizontal line (light thin line)
-                ctx.strokeStyle = 'rgba(200, 200, 200, 0.8)'; // light gray @ 80% opacity
+                // Crosshair lines: pure white, full opacity (keep 1px crispness)
+                ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
                 ctx.lineWidth = 1;
                 ctx.setLineDash([]);
                 ctx.beginPath();

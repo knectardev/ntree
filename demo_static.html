@@ -300,7 +300,7 @@
     .tradePnlUp{color:rgba(80,220,140,.95); font-weight:750}
     .tradePnlDn{color:rgba(255,110,110,.95); font-weight:750}
     .tradeMeta{color:rgba(215,224,234,.70)}
-    canvas{display:block;width:100%;height:560px}
+    canvas{display:block;width:100%;height:710px}
     .footer{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid rgba(255,255,255,.07);color:var(--muted);font-size:12px;min-height:40px}
     .k{color:var(--text)}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
@@ -523,12 +523,12 @@
         <div class="hint practiceSpeedWrap" style="margin-top: 12px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
             <span>Speed</span>
-            <span class="mono" id="practiceSpeedLabel">50</span>
+            <span class="mono" id="practiceSpeedLabel">60</span>
           </div>
-          <input id="practiceSpeed" type="range" min="1" max="60" step="1" value="50" style="width:100%;margin-top:8px;" />
+          <input id="practiceSpeed" type="range" min="30" max="150" step="1" value="60" style="width:100%;margin-top:8px;" />
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
-            <span>Slow (1)</span>
-            <span>Fast (60)</span>
+            <span>Slow (30)</span>
+            <span>Fast (150)</span>
           </div>
         </div>
         <div class="sideDivider"></div>
@@ -563,8 +563,9 @@
             </button>
           </div>
         </div>
-        <div class="hint" id="practiceScore" style="margin-top: 10px; white-space: pre-line;"></div>
-        <div class="hint" id="practiceStatus" style="margin-top: 10px;"></div>
+        <!-- Practice debug readouts are intentionally hidden for now (needs design pass). -->
+        <div class="hint" id="practiceScore" style="display:none; margin-top: 10px; white-space: pre-line;"></div>
+        <div class="hint" id="practiceStatus" style="display:none; margin-top: 10px;"></div>
         <div class="sideDivider"></div>
         <div class="formGroup" aria-label="Session history">
           <button class="btn" type="button" id="practiceHistoryBtn" title="View session history">
@@ -839,6 +840,19 @@
     try{
       if(!plot || plot.w <= 1 || plot.h <= 1) return;
       if(!Array.isArray(state.data) || !state.data.length) return;
+
+      // Practice / replay mode: keep the chart background uniform black.
+      // The play controls already communicate the mode; session shading can read like a "gray overlay".
+      try{
+        if(state && state.replay && state.replay.active){
+          ctx.save();
+          ctx.fillStyle = MARKET_HOURS_COLORS.regular || 'rgba(0, 0, 0, 0.9)';
+          ctx.fillRect(plot.x, plot.y, plot.w, plot.h);
+          ctx.restore();
+          return;
+        }
+      } catch(_eReplayBg){}
+
       var types = state._sessionType;
       if(!Array.isArray(types) || types.length !== state.data.length){
         // Lazy repair (should normally be set on load/merge).
@@ -884,6 +898,19 @@
         }
       }
       if(curType !== null) paintSeg(curType, segStart, end);
+
+      // Replay "future padding": extend the last visible session shading into the empty
+      // projection region so the right-side background matches the left/past background.
+      // This does NOT create candles; it only colors the plot background.
+      try{
+        var padBars = Math.max(0, Math.floor(Number(futurePadBars()) || 0));
+        if(padBars > 0){
+          // Always use the "regular" (black) shade for the projection area.
+          // Otherwise, if the last visible bar is a 'closed' session, the padding can look gray,
+          // which reads like a mode indicator. Practice controls already make mode obvious.
+          paintSeg('regular', end + 1, end + padBars);
+        }
+      } catch(_ePad){}
     } catch(_e){
       // Never let shading break the chart.
     }
@@ -1087,7 +1114,7 @@
       } else if(Number.isFinite(anchor && anchor.t) && state.data.length){
         state.xZoom = Number(anchor.zoom) || state.xZoom;
         var n1 = state.data.length;
-        var barsVis1 = Math.min(n1, Math.max(8, Math.floor(n1 / state.xZoom)));
+        var barsVis1 = computeVisibleBars(n1, state.xZoom).barsVisibleData;
         var idx1 = findIndexByTimeMs(state.data, anchor.t);
         state.xOffset = idx1 - barsVis1 * 0.5;
       }
@@ -1098,8 +1125,8 @@
       state.hoverIdx = -1;
       var n2 = state.data.length;
       if(n2){
-        var barsVisible = Math.min(n2, Math.max(8, Math.floor(n2 / state.xZoom)));
-        var maxOff = Math.max(0, n2 - barsVisible);
+        var barsVisibleData = computeVisibleBars(n2, state.xZoom).barsVisibleData;
+        var maxOff = Math.max(0, n2 - barsVisibleData);
         state.xOffset = clamp(Number(state.xOffset) || 0, 0, maxOff);
       } else {
         state.xOffset = 0;
@@ -2909,8 +2936,35 @@
     if(!n) return;
     var z = Number(state.xZoom);
     if(!Number.isFinite(z) || z <= 0) z = 1;
-    var barsVisible = Math.min(n, Math.max(8, Math.floor(n / z)));
-    state.xOffset = Math.max(0, n - barsVisible);
+    // IMPORTANT:
+    // - barsVisibleData determines how many real bars we can pan over (xOffset clamp).
+    // - Rendering may use additional "future" padding bars (replay UX) via barsVisibleScale,
+    //   but we never allow xOffset to scroll into non-existent bars.
+    var barsVisibleData = Math.min(n, Math.max(8, Math.floor(n / z)));
+    state.xOffset = Math.max(0, n - barsVisibleData);
+  }
+
+  function futurePadBars(){
+    // Practice / replay UX: reserve a small empty "future" region to the right so the
+    // user can visually project trade placement without showing future candles.
+    // Measured in "bar widths" (slots), not pixels.
+    try{
+      return (state && state.replay && state.replay.active) ? 5 : 0;
+    } catch(_e){
+      return 0;
+    }
+  }
+
+  function computeVisibleBars(n, zoom){
+    var nn = Math.max(0, Math.floor(Number(n) || 0));
+    var z = Number(zoom);
+    if(!Number.isFinite(z) || z <= 0) z = 1;
+    // "Data bars" controls offsets/bounds.
+    var barsVisibleData = Math.min(nn, Math.max(8, Math.floor(nn / z)));
+    // "Scale bars" controls horizontal mapping (slot count across the plot).
+    var pad = Math.max(0, Math.floor(Number(futurePadBars()) || 0));
+    var barsVisibleScale = Math.max(1, Math.floor(barsVisibleData + pad));
+    return { barsVisibleData: barsVisibleData, barsVisibleScale: barsVisibleScale, padBars: pad };
   }
 
   async function loadFromAPI(force){
@@ -3268,7 +3322,7 @@
       if(!state.followLatest && Array.isArray(state.data) && state.data.length){
         try{
           var n0 = state.data.length;
-          var barsVis0 = Math.min(n0, Math.max(8, Math.floor(n0 / anchorZoom)));
+          var barsVis0 = computeVisibleBars(n0, anchorZoom).barsVisibleData;
           var off0 = Number(state.xOffset);
           if(!Number.isFinite(off0)) off0 = 0;
           var centerIdx = Math.floor(off0 + barsVis0 * 0.5);
@@ -3295,7 +3349,7 @@
       } else if(Number.isFinite(anchorT) && state.data.length){
         state.xZoom = anchorZoom;
         var n1 = state.data.length;
-        var barsVis1 = Math.min(n1, Math.max(8, Math.floor(n1 / state.xZoom)));
+        var barsVis1 = computeVisibleBars(n1, state.xZoom).barsVisibleData;
         var idx1 = findIndexByTimeMs(state.data, anchorT);
         state.xOffset = idx1 - barsVis1 * 0.5;
       }
@@ -3736,15 +3790,17 @@
       return;
     }
 
-    var barsVisible = Math.min(n, Math.max(8, Math.floor(n / state.xZoom)));
-    // If we're at the initial load, keep the view right-aligned.
+    var vb = computeVisibleBars(n, state.xZoom);
+    var barsVisibleData = vb.barsVisibleData;
+    var barsVisible = vb.barsVisibleScale; // used for x mapping (includes replay padding)
+    // If we're at the initial load, keep the view right-aligned (to real data).
     if(!Number.isFinite(state.xOffset) || state.xOffset === 0){
-      state.xOffset = Math.max(0, n - barsVisible);
+      state.xOffset = Math.max(0, n - barsVisibleData);
     }
-    state.xOffset = clamp(state.xOffset, 0, Math.max(0, n - barsVisible));
+    state.xOffset = clamp(state.xOffset, 0, Math.max(0, n - barsVisibleData));
 
     var start = Math.floor(state.xOffset);
-    var end = Math.min(n-1, start + barsVisible + 1);
+    var end = Math.min(n-1, start + barsVisibleData + 1);
 
     // X-axis ticks + labels (adaptive with zoom/span)
     (function drawXAxis(){
@@ -4097,7 +4153,7 @@
 
       ctx.save();
       // Crosshair lines: vertical snapped to bar time, horizontal follows cursor price.
-      ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+      ctx.strokeStyle = 'rgba(255,255,255,1)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(hx, plot.y);
@@ -4211,10 +4267,25 @@
         if(!Number.isFinite(px)) return;
 
         var sideTag = (q < 0) ? 'S' : 'L';
+        // Practice / gameplay UX requirement: color-code side tags.
+        // - Longs: blue
+        // - Shorts: purple
+        var pillFill = (q < 0)
+          ? 'rgba(147,51,234,0.92)'  // purple-600-ish
+          : 'rgba(59,130,246,0.92)'; // blue-500-ish
         var qAbs = Math.abs(q);
         // Shares are integers in the UI; but we keep it robust for floats.
         var qTxt = (Math.abs(qAbs - Math.round(qAbs)) < 1e-9) ? String(Math.round(qAbs)) : qAbs.toFixed(2);
-        var txt = sideTag + ' ' + px.toFixed(2) + ' × ' + qTxt;
+        // PnL indicator: arrow + signed unrealized PnL in parentheses.
+        // Backend provides unrealized_pnl as an approximation from last close; good enough for UI.
+        var unreal = Number(st.position.unrealized_pnl);
+        var pnlPart = '';
+        if(Number.isFinite(unreal)){
+          var arrow = (unreal > 0) ? '↑' : ((unreal < 0) ? '↓' : '→');
+          var s = (unreal >= 0 ? '+' : '') + unreal.toFixed(2);
+          pnlPart = ' ' + arrow + ' (' + s + ')';
+        }
+        var txt = sideTag + ' ' + px.toFixed(2) + ' × ' + qTxt + pnlPart;
 
         // Compute Y position from price scale.
         var yy = yForPrice(px, pricePlot, yMin, yMax);
@@ -4247,12 +4318,12 @@
         var boxX = clamp(targetX2, minX2, maxX2);
         var boxY = clamp(yy - ph2 / 2, pricePlot.y + 3, pricePlot.y + pricePlot.h - ph2 - 3);
 
-        // Blue pill
+        // Side-colored pill
         ctx.shadowColor = 'rgba(0,0,0,0.35)';
         ctx.shadowBlur = 10;
         ctx.shadowOffsetX = 0;
         ctx.shadowOffsetY = 3;
-        ctx.fillStyle = 'rgba(59,130,246,0.92)'; // blue-500-ish
+        ctx.fillStyle = pillFill;
         ctx.strokeStyle = 'rgba(255,255,255,0.14)';
         ctx.lineWidth = 1;
         roundRect(ctx, boxX, boxY, boxW, ph2, 10);
@@ -4290,7 +4361,8 @@
     var n = state.data.length;
     if(!n) return;
 
-    var barsVisible = Math.min(n, Math.max(8, Math.floor(n / state.xZoom)));
+    var vb = computeVisibleBars(n, state.xZoom);
+    var barsVisible = vb.barsVisibleScale;
     var x = e.clientX - r.left;
     var y = e.clientY - r.top;
 
@@ -4324,7 +4396,8 @@
       var dxPx = (e.clientX - r.left) - state.dragX0;
       var dyPx = (e.clientY - r.top) - state.dragY0;
       var n = state.data.length;
-      var barsVisible = Math.min(n, Math.max(8, Math.floor(n / state.xZoom)));
+      var vb = computeVisibleBars(n, state.xZoom);
+      var barsVisible = vb.barsVisibleScale;
       // Keep in sync with draw(): reserve 50px for the right-side Y-axis gutter.
       var yAxisW = 50;
       var plotW = Math.max(1, r.width - (14*2 + yAxisW));
@@ -4403,8 +4476,9 @@
       var dx = Number(state.lastDragDx) || 0;
       var n = state.data.length;
       if(n && Math.abs(dx) > 40){
-        var barsVisible = Math.min(n, Math.max(8, Math.floor(n / state.xZoom)));
-        var maxOff = Math.max(0, n - barsVisible);
+        var vb = computeVisibleBars(n, state.xZoom);
+        var barsVisibleData = vb.barsVisibleData;
+        var maxOff = Math.max(0, n - barsVisibleData);
         var atLeft = (state.xOffset <= 0.0001);
         var atRight = (state.xOffset >= maxOff - 0.0001);
 
@@ -4467,10 +4541,13 @@
     var mouseX = (e.clientX - r.left);
     var tt = clamp((mouseX - plotX) / plotW, 0, 1);
 
-    var oldBarsVisible = Math.min(n, Math.max(8, Math.floor(n / oldZoom)));
-    var newBarsVisible = Math.min(n, Math.max(8, Math.floor(n / newZoom)));
+    var vbOld = computeVisibleBars(n, oldZoom);
+    var vbNew = computeVisibleBars(n, newZoom);
+    var oldBarsVisible = vbOld.barsVisibleScale;
+    var newBarsVisible = vbNew.barsVisibleScale;
 
-    var anchorBar = state.xOffset + tt * oldBarsVisible;
+    // Anchor in data-index space (clamp to real bars to avoid "anchoring" into future padding).
+    var anchorBar = clamp(state.xOffset + tt * oldBarsVisible, 0, Math.max(0, n - 1));
     state.xZoom = newZoom;
     state.xOffset = anchorBar - tt * newBarsVisible;
 
@@ -4751,16 +4828,20 @@
   // Contract: see notes.txt (server returns {state, delta} and state is authoritative).
   function _setPracticeStatus(txt){
     try{
-      if(ui.practiceStatus) ui.practiceStatus.textContent = String(txt || '');
+      if(!ui.practiceStatus) return;
+      var t = String(txt || '');
+      ui.practiceStatus.textContent = t;
+      // Auto-hide when empty; only show errors / important messages.
+      ui.practiceStatus.style.display = t ? '' : 'none';
     } catch(_e){}
   }
   function _practiceSpeedBpm(){
     try{
       var v = ui.practiceSpeed ? Number(ui.practiceSpeed.value) : NaN;
-      if(!Number.isFinite(v) || v <= 0) v = 50;
-      return clamp(Math.floor(v), 1, 60);
+      if(!Number.isFinite(v) || v <= 0) v = 60;
+      return clamp(Math.floor(v), 30, 150);
     } catch(_e){
-      return 50;
+      return 60;
     }
   }
 
@@ -5554,26 +5635,6 @@
     rightAlignXView();
     state.hoverIdx = -1;
     draw();
-
-    // Status line
-    try{
-      var tEnd = st.clock && st.clock.disp_window ? st.clock.disp_window.end : '';
-      var execTs = st.clock ? st.clock.exec_cursor_ts : '';
-      _setPracticeStatus('Replay · t=' + String(tEnd || '—') + ' · exec=' + String(execTs || '—') + ' · orders=' + (Array.isArray(st.orders) ? st.orders.length : 0));
-    } catch(_e3){}
-
-    // Score panel
-    try{
-      if(ui.practiceScore){
-        var pos = st.position || {};
-        var sc = st.score || {};
-        var lines = [];
-        lines.push('Position: qty=' + String(pos.qty ?? '—') + ' @ ' + String(pos.avg_price ?? '—'));
-        lines.push('PnL: realized=' + String(pos.realized_pnl ?? '—') + ' · unreal=' + String(pos.unrealized_pnl ?? '—'));
-        lines.push('Score: trades=' + String(sc.n_trades ?? 0) + ' · wins=' + String(sc.n_wins ?? 0) + ' · dd=' + String(sc.max_drawdown ?? '—'));
-        ui.practiceScore.textContent = lines.join('\n');
-      }
-    } catch(_e4){}
   }
   async function replayStart(opts){
     var o = opts || {};
@@ -5608,7 +5669,9 @@
     // Cap to keep payload sizes reasonable.
     var MAX_HISTORY_BARS = 800;
     payload.initial_history_bars = clamp(wantBars, 50, MAX_HISTORY_BARS);
-    payload.min_future_disp_bars = 3;
+    // Ensure the randomized anchor has enough runway beyond the "now" cursor.
+    // (Frontend also reserves 5 empty display slots for projection.)
+    payload.min_future_disp_bars = 5;
     // Use full DB history; enforce that the random start point is at least 4 weeks back.
     // Requirement: start at least ~1 month in the past (when possible).
     payload.min_anchor_age_days = 30;
@@ -5621,6 +5684,8 @@
       state.replay.playing = false;
       state.replay.timer = null;
       _renderReplayState(j.state);
+      // Hide debug/status readout after successful start (sidebar design TBD).
+      _setPracticeStatus('');
       _setPracticeUiStateActive(true);
       _syncPracticePauseBtn();
       if(o.autoPlay){
@@ -5737,12 +5802,15 @@
     }
     if(state.replay.playing){
       _stopReplayTimer();
-      _setPracticeStatus('Paused.');
+      // Hide status label (design TBD). Errors will still surface via _setPracticeStatus.
+      _setPracticeStatus('');
       return;
     }
     var bpm = _practiceSpeedBpm();
     var intervalMs = Math.max(80, Math.floor(60000 / bpm));
     _startReplayLoop(intervalMs);
+    // Hide any prior "Starting replay…" etc once playback is running.
+    _setPracticeStatus('');
   }
 
   if(ui.practiceBtn) ui.practiceBtn.addEventListener('click', function(){ replayTogglePlay(); });
