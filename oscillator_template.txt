@@ -1,0 +1,101 @@
+Demo page: oscillator_signal_gate_fixed.html 
+
+
+Yes — this is a good stage to integrate with the live-data backend, as long as you treat it as an integration + observability milestone, not “make it tradable” yet.
+
+What you have now is the right kind of stable:
+
+clear state contract (symbol, trading days, display TF, detrend window, scan window, selected period/auto)
+
+deterministic computations on 1-minute series
+
+stability + gate outputs that can be sanity-checked visually
+
+That’s exactly what you want before you wire real feeds in.
+
+The only way this goes wrong
+
+If you jump straight to streaming updates without first locking down:
+
+time alignment (market session boundaries, missing minutes, DST)
+
+incremental recompute strategy (full recompute vs rolling)
+
+caching of 1-minute bars + derived series
+
+So: integrate now, but do it in two tight steps.
+
+Integration plan (minimal + safe)
+Step 1 — Replace the synthetic generator with a “bars provider”
+
+Make one function the only source of 1-minute bars:
+
+getBars1m(symbol, startTs, endTs) -> [{t, o, h, l, c, v}]
+
+For now this can call your SQLite/Alpaca endpoint. Everything else stays unchanged.
+
+Goal: the UI renders identically, just with real 1m candles.
+
+Step 2 — Add a “tail update” mode (no streaming yet)
+
+Add a “Live” toggle that:
+
+polls for “latest bar timestamp”
+
+fetches only the missing minutes
+
+updates caches
+
+recomputes derived outputs over:
+
+last max(detrendWindow, scanWindow) + padding
+
+Goal: it updates smoothly, without reloading the world.
+
+The backend contract I’d use
+
+One endpoint is enough to start:
+
+GET /api/bars_1m?symbol=QQQ&start=...&end=...
+Returns:
+
+UTC timestamps (epoch ms) or ISO Z (pick one and stick to it)
+
+continuous 1-minute bars (with gaps explicitly represented or omitted consistently)
+
+Optional later:
+
+/api/market_clock for session open/close and “is open”
+
+“Gotchas” to handle up front (worth doing now)
+
+Gaps (missing minutes): your scan/zero-crossing logic must either:
+
+forward-fill close, or
+
+break segments and scan only continuous runs
+(I recommend forward-fill for now, with a “gap count” debug stat.)
+
+Warmup: detrend needs lookback before the visible window. Always fetch:
+
+visible range + detrendWindow + small buffer
+
+Session stitching: your “continuous sessions” view needs a consistent rule:
+
+either keep overnight gaps (but skip non-trading minutes),
+
+or strictly RTH only.
+
+Quick “green-light” checklist
+
+If you can answer “yes” to these, integrate now:
+
+You’re okay with polling (e.g., every 5–10s) before true streaming
+
+Your 1-minute backend data is reliable enough to serve contiguous windows
+
+You’ll add a tiny debug readout: last bar time, gaps, bars fetched
+
+If any of those are “no,” you can still integrate, but we should do a small “data hygiene” pass first.
+
+If you want, paste (or upload) your current backend endpoint(s) and I’ll give you the exact frontend wiring points (what to replace, what to cache, and the minimal incremental recompute boundaries).

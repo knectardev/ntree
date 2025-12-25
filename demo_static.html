@@ -116,6 +116,31 @@
     .pill.pill--nocross{display:none}
     .btn{cursor:pointer;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);color:var(--text);border-radius:12px;padding:8px 10px;font-size:12px}
     .btn:hover{background:rgba(255,255,255,.09)}
+
+    /* App nav (shown when hosted via Flask). */
+    .appNav{
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 6000;
+      display: none; /* enabled by JS only for http(s) */
+    }
+    .appNav a{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(8,12,18,.78);
+      backdrop-filter: blur(10px);
+      color: rgba(215,224,234,.92);
+      text-decoration:none;
+      font-size:12px;
+      font-weight:650;
+      box-shadow:0 12px 34px rgba(0,0,0,.45);
+    }
+    .appNav a:hover{background:rgba(255,255,255,.08)}
     
     /* Practice controls (Play / Pause / Reset) */
     .practiceCtrls{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
@@ -426,6 +451,9 @@
   </style>
 </head>
 <body>
+  <div class="appNav" id="appNav">
+    <a href="/" title="Back to Dashboard">Dashboard</a>
+  </div>
   <div class="statusChip" id="updateChip" aria-live="polite">
     <span class="statusDot" id="updateDot"></span>
     <span id="updateText" class="statusMono">Last update: —</span>
@@ -708,6 +736,16 @@
     var m = re.exec(qs);
     if(!m) return fallback;
     return decodeURIComponent(m[1].replace(/\+/g, ' '));
+  }
+
+  function truthyQueryParam(key){
+    try{
+      var v = String(getQueryParam(key, '') || '').trim().toLowerCase();
+      if(!v) return false;
+      return (v === '1' || v === 'true' || v === 'yes' || v === 'y' || v === 'on');
+    } catch(_e){
+      return false;
+    }
   }
 
   function regenButtonLabel(){
@@ -1072,7 +1110,14 @@
 
     state.data = filtered;
     state._sessionType = computeSessionTypesForData(filtered);
-    state.ha = computeHeikinAshi(filtered);
+    // Heikin-Ashi is only needed when Candles are shown AND HA mode is selected.
+    // Avoid recomputing HA every time replay advances if we're not rendering HA candles.
+    try{
+      var needHa = !!(ui && ui.showCandles && ui.showCandles.checked && state && state.candleStyle === 'ha');
+      state.ha = needHa ? computeHeikinAshi(filtered) : [];
+    } catch(_eHa){
+      state.ha = [];
+    }
 
     // Overlays:
     // - In replay mode, prefer server-provided overlays only if they actually contain data.
@@ -1259,9 +1304,13 @@
   }
 
   // Mode selection:
-  // - static (default): load from ./static/*.json or file:// pickers
+  // - static: load from ./static/*.json or file:// pickers
   // - api: fetch from same-origin (or ?api_base=...) /window endpoint
-  var MODE = getQueryParam('mode', 'static');
+  //
+  // UX: when hosted over http(s) by the Flask app, default to API mode.
+  // When opened via file://, default to static mode.
+  var _defaultMode = (String(window.location && window.location.protocol || '') === 'file:') ? 'static' : 'api';
+  var MODE = getQueryParam('mode', _defaultMode);
   // Static-only mode: no server calls.
   var STATIC_MODE = (String(MODE || '').toLowerCase() !== 'api');
   // When in api mode, the chart calls: buildUrl(API_BASE, '/window', ...)
@@ -1275,6 +1324,16 @@
       document.body.classList.add(STATIC_MODE ? 'static' : 'api');
     }
   } catch(_e){}
+
+  // Show app navigation only when hosted via Flask/http(s).
+  try{
+    var nav = document.getElementById('appNav');
+    if(nav){
+      var proto = String(window.location && window.location.protocol || '');
+      // NOTE: CSS default is display:none; so we must explicitly set a visible display value here.
+      nav.style.display = (proto === 'http:' || proto === 'https:') ? 'block' : 'none';
+    }
+  } catch(_eNav){}
 
   function buildUrl(base, path, params){
     var b = String(base || '').replace(/\/+$/,'');
@@ -2510,6 +2569,16 @@
     _lastPlotH: NaN,
     _loadedBarS: NaN,
     _vwapTrimStartMs: NaN,
+    // Render cache: we keep a cached "base layer" bitmap so hover/crosshair updates don't
+    // need to recompute/redraw the entire chart.
+    _render: {
+      baseCanvas: null,      // offscreen canvas holding base layer
+      baseKey: '',
+      baseW: 0,
+      baseH: 0,
+      pendingReason: '',
+      rafDrawId: null
+    },
 
     // Replay (practice-field) mode state
     replay: {
@@ -2521,9 +2590,109 @@
       // Replay loop internals (avoid overlapping async steps).
       _loopToken: 0,
       _inFlight: false,
-      _stepFailCount: 0
+      // Buffered playback (frontend clock): we prefetch batches from the server and
+      // consume them locally at an even cadence to avoid network jitter.
+      _queue: [],
+      _prefetchInFlight: false,
+      _rafId: null,
+      _rafLastTs: 0,
+      _rafAcc: 0,
+      _needsDraw: false,
+      _lastUiUpdateAt: 0,
+      // Replay render fast-path stats (debugging stutter):
+      // - hits: append-only path used
+      // - misses: full rebuild path used
+      // - lastMode: 'fast' | 'full'
+      _fastStats: { hits: 0, misses: 0, lastMode: '' },
+      _stepFailCount: 0,
+      // Optional perf/debug overlay (enabled via ?replay_debug=1)
+      _debug: {
+        enabled: false,
+        targetMs: NaN,
+        behindMs: NaN,
+        lastStepMs: NaN,
+        lastFetchMs: NaN,
+        lastRenderMs: NaN,
+        lastDrawMs: NaN,
+        lastTickAt: NaN,
+        // rolling stats (last N samples)
+        _N: 60,
+        _fetch: [],
+        _render: [],
+        _draw: [],
+        _step: [],
+        _behind: [],
+        _gap: [], // time between step starts (wall clock)
+        maxFetchMs: NaN,
+        maxRenderMs: NaN,
+        maxDrawMs: NaN,
+        maxStepMs: NaN,
+        maxBehindMs: NaN,
+        maxGapMs: NaN,
+        // replay clock tracking
+        lastDispEnd: '',
+        lastDispEndAt: NaN,
+        // Per-step samples (for variability inspection / export)
+        // Each: {seq, started_at_ms, finished_at_ms, bpm, target_ms, behind_ms, fetch_ms, render_ms, draw_ms, step_ms, disp_end}
+        seq: 0,
+        maxSamples: 400,
+        samples: [],
+        _lastStepStartAtMs: NaN
+      }
     }
   };
+
+  // Enable replay debug overlay via URL param (kept off by default).
+  try{
+    if(state && state.replay && state.replay._debug){
+      state.replay._debug.enabled = truthyQueryParam('replay_debug');
+    }
+  } catch(_eDbgInit){}
+
+  // Debug export helpers (available in devtools console when ?replay_debug=1):
+  // - window.replayDebugSamples(): returns array of sample objects
+  // - window.dumpReplayDebugCsv(): prints CSV to console (copy/paste into spreadsheet)
+  try{
+    window.replayDebugSamples = function(){
+      try{
+        var d = state && state.replay && state.replay._debug ? state.replay._debug : null;
+        if(!d || !Array.isArray(d.samples)) return [];
+        return d.samples.slice();
+      } catch(_e){
+        return [];
+      }
+    };
+    window.dumpReplayDebugCsv = function(){
+      try{
+        var rows = window.replayDebugSamples();
+        var header = [
+          'seq','started_at_ms','finished_at_ms','bpm','target_ms','behind_ms','gap_ms',
+          'fetch_ms','render_ms','draw_ms','step_ms','data_len','last_bar_t_ms','disp_end'
+        ];
+        var out = [header.join(',')];
+        for(var i=0;i<rows.length;i++){
+          var r = rows[i] || {};
+          function esc(s){
+            var x = String(s ?? '');
+            if(x.indexOf('"') !== -1) x = x.replace(/"/g,'""');
+            if(/[",\n]/.test(x)) x = '"' + x + '"';
+            return x;
+          }
+          var line = [
+            r.seq, r.started_at_ms, r.finished_at_ms, r.bpm, r.target_ms, r.behind_ms, r.gap_ms,
+            r.fetch_ms, r.render_ms, r.draw_ms, r.step_ms, r.data_len, r.last_bar_t_ms, esc(r.disp_end || '')
+          ].map(function(v){ return (v === undefined || v === null) ? '' : String(v); }).join(',');
+          out.push(line);
+        }
+        var csv = out.join('\n');
+        console.log(csv);
+        return csv;
+      } catch(e){
+        console.error(e);
+        return '';
+      }
+    };
+  } catch(_eDbgFns){}
 
   // Live mode is disabled in this app integration (use "Fetch Latest Data" instead).
   var LIVE_POLL_MS = 10_000;
@@ -2579,6 +2748,25 @@
     canvas.height = Math.floor(r.height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     draw();
+  }
+
+  function requestDraw(reason){
+    // Coalesce multiple draw requests into a single RAF tick.
+    try{
+      if(!state || !state._render) return draw();
+      state._render.pendingReason = String(reason || '');
+      if(state._render.rafDrawId) return;
+      state._render.rafDrawId = requestAnimationFrame(function(){
+        try{
+          state._render.rafDrawId = null;
+          draw();
+        } catch(_e){
+          state._render.rafDrawId = null;
+        }
+      });
+    } catch(_e){
+      draw();
+    }
   }
 
   function computeYBounds(){
@@ -3336,7 +3524,13 @@
       state.overlaysFull = overlaysFull || [];
       state.data = out;
       state._sessionType = computeSessionTypesForData(out);
-      state.ha = computeHeikinAshi(out);
+      // Compute HA only if HA candles are actually selected (avoid heavy work on every refresh).
+      try{
+        var needHa0 = !!(ui && ui.showCandles && ui.showCandles.checked && state && state.candleStyle === 'ha');
+        state.ha = needHa0 ? computeHeikinAshi(out) : [];
+      } catch(_eHa0){
+        state.ha = [];
+      }
       state.overlays = overlaysFull || [];
       applySessionFilter({ anchor: { t: anchorT, zoom: anchorZoom }, skipSave: true, skipDraw: true });
       updateSessionCountsUi();
@@ -3559,7 +3753,13 @@
       state.overlaysFull = overlays || [];
       state.data = out;
       state._sessionType = computeSessionTypesForData(out);
-      state.ha = computeHeikinAshi(out);
+      // Compute HA only if HA candles are actually selected (avoid heavy work on every load).
+      try{
+        var needHa1 = !!(ui && ui.showCandles && ui.showCandles.checked && state && state.candleStyle === 'ha');
+        state.ha = needHa1 ? computeHeikinAshi(out) : [];
+      } catch(_eHa1){
+        state.ha = [];
+      }
       state.overlays = overlays || [];
       applySessionFilter({ skipSave: true, skipDraw: true });
       updateSessionCountsUi();
@@ -3673,9 +3873,12 @@
   }
 
   function draw(){
+    var _drawT0 = (window.performance && performance.now) ? performance.now() : Date.now();
     var rect = canvas.getBoundingClientRect();
     var Wpx = rect.width;
     var Hpx = rect.height;
+    var reason = '';
+    try{ reason = (state && state._render) ? String(state._render.pendingReason || '') : ''; } catch(_e){ reason = ''; }
 
     ctx.clearRect(0, 0, Wpx, Hpx);
     ctx.save();
@@ -3793,14 +3996,179 @@
     var vb = computeVisibleBars(n, state.xZoom);
     var barsVisibleData = vb.barsVisibleData;
     var barsVisible = vb.barsVisibleScale; // used for x mapping (includes replay padding)
-    // If we're at the initial load, keep the view right-aligned (to real data).
-    if(!Number.isFinite(state.xOffset) || state.xOffset === 0){
-      state.xOffset = Math.max(0, n - barsVisibleData);
+    var maxOff = Math.max(0, n - barsVisibleData);
+    // Keep the view right-aligned (to real data) when following latest (replay + normal mode).
+    // This keeps the "now" head fixed, with the projection padding rendered to the right.
+    if(state.followLatest && !state.dragging && !state.yDragging){
+      state.xOffset = maxOff;
+    } else if(!Number.isFinite(state.xOffset) || state.xOffset === 0){
+      // Initial load fallback: right-align once.
+      state.xOffset = maxOff;
     }
-    state.xOffset = clamp(state.xOffset, 0, Math.max(0, n - barsVisibleData));
+    state.xOffset = clamp(state.xOffset, 0, maxOff);
 
     var start = Math.floor(state.xOffset);
     var end = Math.min(n-1, start + barsVisibleData + 1);
+
+    // --- Base-layer cache for hover/crosshair ---
+    // We cache a rendered base canvas without hover overlay, and on mousemove we only blit
+    // that cached base + draw the crosshair + axis labels.
+    var baseKey = '';
+    try{
+      var os0 = getOverlaySettings();
+      baseKey = [
+        Math.floor(Wpx), Math.floor(Hpx),
+        n,
+        Number(state.data[0] && state.data[0].t) || 0,
+        Number(state.data[n-1] && state.data[n-1].t) || 0,
+        start, end,
+        Math.round(Number(state.xZoom) * 1000) / 1000,
+        Math.round(Number(state.xOffset) * 1000) / 1000,
+        Math.round(Number(state.yScaleFactor) * 1000) / 1000,
+        Math.round(Number(state.yPan) * 1000) / 1000,
+        ui.scale && ui.scale.checked ? 1 : 0,
+        ui.grid && ui.grid.checked ? 1 : 0,
+        ui.showBands && ui.showBands.checked ? 1 : 0,
+        ui.showCandles && ui.showCandles.checked ? 1 : 0,
+        String(state.candleStyle || ''),
+        ui.fills && ui.fills.checked ? 1 : 0,
+        ui.smooth && ui.smooth.checked ? 1 : 0,
+        ui.outer && ui.outer.checked ? 1 : 0,
+        ui.avgline && ui.avgline.checked ? 1 : 0,
+        ui.showVolume && ui.showVolume.checked ? 1 : 0,
+        os0 && os0.ema9 ? 1 : 0,
+        os0 && os0.ema21 ? 1 : 0,
+        os0 && os0.ema50 ? 1 : 0,
+        os0 && os0.vwap ? 1 : 0
+      ].join('|');
+    } catch(_eKey){
+      baseKey = '';
+    }
+    try{
+      if(state && state._render){
+        if(!state._render.baseCanvas) state._render.baseCanvas = document.createElement('canvas');
+      }
+    } catch(_eBC){}
+
+    function _drawHoverOnly(){
+      // Re-use the already computed yMin/yMax/plot/start/end/barsVisible above.
+      try{
+        if(!(state.hoverIdx >= 0 && state.hoverIdx < n)) return;
+        var hi2 = state.hoverIdx;
+        var rawHd2 = state.data[hi2];
+        if(!rawHd2) return;
+
+        var hx2 = xForIndex(hi2 + 0.5, plot, barsVisible);
+        var hy2 = Number(state.hoverY);
+        if(!Number.isFinite(hy2)) hy2 = yForPrice(rawHd2.c, pricePlot, yMin, yMax);
+        if(!Number.isFinite(hy2)) return;
+        hy2 = clamp(hy2, pricePlot.y, pricePlot.y + pricePlot.h);
+        var cursorPrice2 = (yMax - ((hy2 - pricePlot.y) / pricePlot.h) * (yMax - yMin));
+
+        // Crosshair inside plot clip (rounded).
+        ctx.save();
+        var clipInset2 = 1;
+        roundRect(ctx, plot.x + clipInset2, plot.y + clipInset2, plot.w - clipInset2*2, plot.h - clipInset2*2, 14 - clipInset2);
+        ctx.clip();
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(hx2, plot.y);
+        ctx.lineTo(hx2, plot.y + plot.h);
+        ctx.moveTo(plot.x, hy2);
+        ctx.lineTo(plot.x + plot.w, hy2);
+        ctx.stroke();
+        ctx.restore();
+        ctx.restore(); // clip
+
+        // Axis callouts (same style as main draw).
+        var stepForAxis = NaN;
+        try{
+          var t0a = Number(state.data[start].t);
+          var t1a = Number(state.data[end].t);
+          if(Number.isFinite(t0a) && Number.isFinite(t1a) && t1a > t0a){
+            stepForAxis = chooseTimeStepMs(t1a - t0a, plot.w, 140);
+          }
+        } catch(_e){}
+        var axisBg = 'rgba(120,130,145,0.70)';
+        var axisBorder = 'rgba(255,255,255,0.12)';
+        var axisText = 'rgba(255,255,255,0.92)';
+
+        ctx.shadowColor = 'rgba(0,0,0,0.35)';
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 3;
+        ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+        ctx.textBaseline = 'middle';
+
+        // Right price axis pill
+        var ptxt = Number.isFinite(cursorPrice2) ? cursorPrice2.toFixed(2) : '';
+        var pw = ctx.measureText(ptxt).width;
+        var ph = 20;
+        var pPadX = 10;
+        var pBoxW = Math.max(44, pw + pPadX*2);
+        var axisLeft = (plot.x + plot.w);
+        var axisRight = axisLeft + yAxisW;
+        var pInset = 4;
+        var targetX = axisLeft + Math.floor((yAxisW - pBoxW) / 2);
+        var minX = axisLeft - Math.max(0, (pBoxW - (yAxisW - pInset*2)));
+        var maxX = axisRight - pBoxW - pInset;
+        var pBoxX = clamp(targetX, minX, maxX);
+        var pBoxY = clamp(hy2 - ph/2, pricePlot.y + 3, pricePlot.y + pricePlot.h - ph - 3);
+        ctx.fillStyle = axisBg;
+        ctx.strokeStyle = axisBorder;
+        ctx.lineWidth = 1;
+        roundRect(ctx, pBoxX, pBoxY, pBoxW, ph, 8);
+        ctx.fill();
+        ctx.shadowColor = 'rgba(0,0,0,0)';
+        ctx.shadowBlur = 0;
+        ctx.stroke();
+        ctx.fillStyle = axisText;
+        ctx.textAlign = 'center';
+        ctx.fillText(ptxt, pBoxX + pBoxW/2, pBoxY + ph/2);
+
+        // Bottom time/date pill
+        var ttxt = formatAxisTimeUtc(rawHd2.t, stepForAxis);
+        ctx.shadowColor = 'rgba(0,0,0,0.35)';
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 3;
+        var tw = ctx.measureText(ttxt).width;
+        var th = 20;
+        var tPadX = 10;
+        var tBoxW = Math.max(54, tw + tPadX*2);
+        var tBoxX = clamp(hx2 - tBoxW/2, plot.x + 3, plot.x + plot.w - tBoxW - 3);
+        var tBoxY = plot.y + plot.h + (xAxisH - th) - 4;
+        ctx.fillStyle = axisBg;
+        ctx.strokeStyle = axisBorder;
+        roundRect(ctx, tBoxX, tBoxY, tBoxW, th, 8);
+        ctx.fill();
+        ctx.shadowColor = 'rgba(0,0,0,0)';
+        ctx.shadowBlur = 0;
+        ctx.stroke();
+        ctx.fillStyle = axisText;
+        ctx.textAlign = 'center';
+        ctx.fillText(ttxt, tBoxX + tBoxW/2, tBoxY + th/2);
+      } catch(_eHover){}
+    }
+
+    try{
+      if(reason === 'hover' && baseKey && state && state._render && state._render.baseCanvas && state._render.baseKey === baseKey){
+        ctx.drawImage(state._render.baseCanvas, 0, 0, Wpx, Hpx);
+        _drawHoverOnly();
+        try{ state._render.pendingReason = ''; } catch(_e0){}
+        return;
+      }
+    } catch(_eFast){}
+
+    // Suppress hover rendering during base draw so we can cache it.
+    var _savedHoverIdx = state.hoverIdx;
+    var _savedHoverX = state.hoverX;
+    var _savedHoverY = state.hoverY;
+    state.hoverIdx = -1;
+    state.hoverX = NaN;
+    state.hoverY = NaN;
 
     // X-axis ticks + labels (adaptive with zoom/span)
     (function drawXAxis(){
@@ -4338,6 +4706,91 @@
       } catch(_e){}
     })();
 
+    // Optional replay perf overlay: enable with ?replay_debug=1
+    (function drawReplayPerfOverlay(){
+      try{
+        if(!(state && state.replay && state.replay.active && state.replay._debug && state.replay._debug.enabled)) return;
+        var d = state.replay._debug;
+        function fms(x){ return Number.isFinite(x) ? (Math.round(x) + 'ms') : '—'; }
+        function fint(x){ return Number.isFinite(x) ? String(Math.round(x)) : '—'; }
+        function lastList(arr, n){
+          try{
+            if(!Array.isArray(arr) || !arr.length) return '—';
+            var m = Math.max(1, Math.floor(Number(n) || 10));
+            var from = Math.max(0, arr.length - m);
+            var xs = [];
+            for(var i=from;i<arr.length;i++){
+              var v = Number(arr[i]);
+              xs.push(Number.isFinite(v) ? String(Math.round(v)) : '—');
+            }
+            return xs.join(',');
+          } catch(_e){
+            return '—';
+          }
+        }
+        var bpm = (ui && ui.practiceSpeed) ? Number(ui.practiceSpeed.value) : NaN;
+        var lines = [];
+        lines.push('replay_debug');
+        lines.push('bpm=' + (Number.isFinite(bpm) ? String(Math.round(bpm)) : '—') + ' target=' + fms(d.targetMs) + ' behind=' + fms(d.behindMs));
+      lines.push('fetch=' + fms(d.lastFetchMs) + ' (max ' + fms(d.maxFetchMs) + ')'
+        + ' render=' + fms(d.lastRenderMs) + ' (max ' + fms(d.maxRenderMs) + ')'
+        + ' draw=' + fms(d.lastDrawMs) + ' (max ' + fms(d.maxDrawMs) + ')'
+        + ' step=' + fms(d.lastStepMs) + ' (max ' + fms(d.maxStepMs) + ')'
+        + ' behindMax=' + fms(d.maxBehindMs)
+        + ' gapMax=' + fms(d.maxGapMs)
+      );
+        // List view: last durations (helps spot variability instantly)
+        lines.push('last_gap_ms=[' + lastList(d._gap, 12) + ']');
+        lines.push('last_step_ms=[' + lastList(d._step, 12) + ']');
+        lines.push('last_fetch_ms=[' + lastList(d._fetch, 12) + ']');
+        try{
+          var qn = (state && state.replay && Array.isArray(state.replay._queue)) ? state.replay._queue.length : 0;
+          var fs = (state && state.replay) ? (state.replay._fastStats || null) : null;
+          var hits = fs ? (Number(fs.hits) || 0) : 0;
+          var misses = fs ? (Number(fs.misses) || 0) : 0;
+          var mode = fs ? String(fs.lastMode || '') : '';
+          lines.push('queue=' + String(qn) + ' fast=' + String(hits) + '/' + String(misses) + ' mode=' + (mode || '—'));
+        } catch(_eFsLine){}
+        lines.push('n=' + String(state.data ? state.data.length : 0) + ' xOff=' + fint(state.xOffset) + ' zoom=' + (Number.isFinite(state.xZoom) ? state.xZoom.toFixed(2) : '—'));
+      try{
+        var st = state.replay.lastState || null;
+        var endIso = (st && st.clock && st.clock.disp_window) ? String(st.clock.disp_window.end || '') : '';
+        if(endIso){
+          lines.push('disp_end=' + endIso);
+          d.lastDispEnd = endIso;
+          d.lastDispEndAt = Date.now();
+        }
+      } catch(_eClock){}
+
+        ctx.save();
+        ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        var pad = 8;
+        var lh = 16;
+        var w = 0;
+        for(var i=0;i<lines.length;i++){
+          var tw = ctx.measureText(lines[i]).width;
+          if(tw > w) w = tw;
+        }
+        w = Math.ceil(w + pad*2);
+        var h = Math.ceil(lines.length * lh + pad*2);
+        var x = plot.x + 10;
+        var y = plot.y + 10;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.lineWidth = 1;
+        roundRect(ctx, x, y, w, h, 10);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(235,245,255,0.92)';
+        for(var j=0;j<lines.length;j++){
+          ctx.fillText(lines[j], x + pad, y + pad + j*lh);
+        }
+        ctx.restore();
+      } catch(_e){}
+    })();
+
     // Plot border
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
@@ -4345,6 +4798,52 @@
     roundRect(ctx, plot.x, plot.y, plot.w, plot.h, 14);
     ctx.stroke();
     ctx.restore();
+
+    // Cache base layer (without hover overlay) for future hover-only draws.
+    try{
+      if(state && state._render && state._render.baseCanvas){
+        var bc = state._render.baseCanvas;
+        if(bc.width !== canvas.width || bc.height !== canvas.height){
+          bc.width = canvas.width;
+          bc.height = canvas.height;
+        }
+        var bctx = bc.getContext('2d');
+        if(bctx){
+          bctx.setTransform(1,0,0,1,0,0);
+          bctx.clearRect(0,0,bc.width,bc.height);
+          bctx.drawImage(canvas, 0, 0);
+          state._render.baseKey = baseKey;
+          state._render.baseW = bc.width;
+          state._render.baseH = bc.height;
+        }
+      }
+    } catch(_eCache){}
+
+    // Restore hover state and draw hover overlay on top.
+    state.hoverIdx = _savedHoverIdx;
+    state.hoverX = _savedHoverX;
+    state.hoverY = _savedHoverY;
+    _drawHoverOnly();
+    try{ if(state && state._render) state._render.pendingReason = ''; } catch(_e1){}
+
+    // Record draw cost (after all rendering).
+    try{
+      if(state && state.replay && state.replay.active && state.replay._debug && state.replay._debug.enabled){
+        var _drawT1 = (window.performance && performance.now) ? performance.now() : Date.now();
+        var dm = Math.max(0, _drawT1 - _drawT0);
+        state.replay._debug.lastDrawMs = dm;
+        try{
+          state.replay._debug._draw.push(dm);
+          while(state.replay._debug._draw.length > (state.replay._debug._N || 60)) state.replay._debug._draw.shift();
+          var md = -Infinity;
+          for(var kk=0; kk<state.replay._debug._draw.length; kk++){
+            var z = Number(state.replay._debug._draw[kk]);
+            if(Number.isFinite(z) && z > md) md = z;
+          }
+          state.replay._debug.maxDrawMs = (md === -Infinity) ? NaN : md;
+        } catch(_eArr3){}
+      }
+    } catch(_eDrawMs){}
   }
 
   // interaction
@@ -4371,7 +4870,7 @@
       state.hoverIdx = -1;
       state.hoverX = NaN;
       state.hoverY = NaN;
-      draw();
+      requestDraw('hover');
       return;
     }
 
@@ -4380,7 +4879,7 @@
     state.hoverIdx = clamp(idx, 0, n-1);
     state.hoverX = x;
     state.hoverY = y;
-    draw();
+    requestDraw('hover');
   }
 
   canvas.addEventListener('mousemove', function(e){
@@ -4390,7 +4889,7 @@
       // dy>0 => zoom out (expand span); dy<0 => zoom in
       var f = state.yScale0 * Math.exp(dyPx * 0.006);
       state.yScaleFactor = clamp(f, 0.2, 6);
-      draw();
+      requestDraw('pan');
     } else if(state.dragging){
       var r = canvas.getBoundingClientRect();
       var dxPx = (e.clientX - r.left) - state.dragX0;
@@ -4411,7 +4910,7 @@
       if(Number.isFinite(span) && span > 0 && Number.isFinite(ph) && ph > 0){
         state.yPan = Number(state.yPan0) + (dyPx / ph) * span;
       }
-      draw();
+      requestDraw('pan');
     } else {
       updateHover(e);
     }
@@ -4423,7 +4922,7 @@
     state.hoverY = NaN;
     state.dragging = false;
     state.yDragging = false;
-    draw();
+    requestDraw('hover');
   });
 
   canvas.addEventListener('mousedown', function(e){
@@ -4643,6 +5142,22 @@
 
     updateUrlBarSize();
     scheduleSaveUiConfig();
+
+    // Replay mode: bar size (W) is governed by the replay display clock (disp_tf_sec) and
+    // the frontend intentionally re-syncs `state.windowSec` from server state every step.
+    // That makes bar-size changes appear "ignored" during an active replay session.
+    // UX improvement: changing bar size while replay is active will restart replay using the new disp_tf_sec.
+    try{
+      if(state && state.replay && state.replay.active){
+        // Preserve whether the user was playing so we can auto-resume.
+        var wasPlaying = !!state.replay.playing;
+        _setPracticeStatus('Restarting replay with new bar size…');
+        // Start a brand-new session using current UI settings (including state.windowSec as disp_tf_sec).
+        // This is the simplest way to "change resolution" in replay without introducing mid-session resampling.
+        replayStart({ autoPlay: wasPlaying });
+        return;
+      }
+    } catch(_eReplayW){}
 
     if(windowTimer) clearTimeout(windowTimer);
     windowTimer = setTimeout(function(){ loadFromAPI(); }, 120);
@@ -4896,6 +5411,21 @@
         try{ if(state.replay.timer) clearTimeout(state.replay.timer); } catch(_e1){}
         state.replay.timer = null;
         state.replay.playing = false;
+        // Stop any RAF-driven playback loop.
+        try{
+          if(state.replay._rafId){
+            cancelAnimationFrame(state.replay._rafId);
+            state.replay._rafId = null;
+          }
+          state.replay._rafLastTs = 0;
+          state.replay._rafAcc = 0;
+        } catch(_eRaf){}
+        // Clear any buffered states and in-flight prefetch flag.
+        try{
+          state.replay._queue = [];
+          state.replay._prefetchInFlight = false;
+          state.replay._needsDraw = false;
+        } catch(_eQ){}
         // Cancel any in-progress loop scheduling; in-flight network calls will finish naturally.
         state.replay._loopToken = (Number(state.replay._loopToken) || 0) + 1;
       }
@@ -4904,52 +5434,157 @@
   }
 
   function _startReplayLoop(intervalMs){
-    // Awaited loop: schedule the next tick only after the current step completes.
+    // Buffered replay loop:
+    // - Prefetch a batch of N future states from the server (single-flight)
+    // - Consume them locally at an even cadence (RAF-driven), so network jitter doesn't change step timing
     if(!state || !state.replay) return;
     if(!state.replay.active || !state.replay.sessionId) return;
-    var ms = Math.max(25, Math.floor(Number(intervalMs) || 250));
 
-    // Cancel any previous loop/timer.
+    // Stop any prior playback.
     _stopReplayTimer();
 
     state.replay.playing = true;
     state.replay._stepFailCount = 0;
-    // New token uniquely identifies this loop instance.
     state.replay._loopToken = (Number(state.replay._loopToken) || 0) + 1;
-    var token = state.replay._loopToken;
+    state.replay._queue = [];
+    state.replay._prefetchInFlight = false;
+    state.replay._rafLastTs = 0;
+    state.replay._rafAcc = 0;
+    state.replay._needsDraw = true;
+    state.replay._lastUiUpdateAt = 0;
     _syncPracticePauseBtn();
 
-    var tick = async function(){
-      try{
-        if(!state || !state.replay) return;
-        if(!state.replay.playing) return;
-        if(token !== state.replay._loopToken) return;
-
-        // Single-flight: never overlap steps.
-        if(state.replay._inFlight){
-          state.replay.timer = setTimeout(tick, 25);
-          return;
-        }
-
-        state.replay._inFlight = true;
-        try{
-          await replayStepOnce();
-        } finally {
-          state.replay._inFlight = false;
-        }
-
-        if(state.replay.playing && token === state.replay._loopToken){
-          state.replay.timer = setTimeout(tick, ms);
-        }
-      } catch(e){
-        // Last-resort guard: don't kill the session; just pause.
-        console.error(e);
-        _setPracticeStatus('Replay loop error: ' + String(e && e.message ? e.message : e));
-        _stopReplayTimer();
+    // Update debug targetMs (best-effort).
+    try{
+      if(state.replay._debug && state.replay._debug.enabled){
+        // Prefer bpm-derived cadence, but keep intervalMs as a fallback.
+        var bpm0 = _practiceSpeedBpm();
+        var ms0 = Math.max(80, Math.floor(60000 / bpm0));
+        var ms1 = Math.max(80, Math.floor(Number(intervalMs) || ms0));
+        state.replay._debug.targetMs = ms1;
       }
-    };
+    } catch(_eDbg0){}
 
-    state.replay.timer = setTimeout(tick, ms);
+    // Kick initial prefetch and start RAF loop.
+    _replayMaybePrefetch(true);
+    _replayStartRafLoop();
+  }
+
+  function _replayMsPerStep(){
+    var bpm = _practiceSpeedBpm();
+    return Math.max(80, Math.floor(60000 / bpm));
+  }
+
+  function _replayQueueLen(){
+    try{ return (state && state.replay && Array.isArray(state.replay._queue)) ? state.replay._queue.length : 0; } catch(_e){ return 0; }
+  }
+
+  function _replayMaybePrefetch(force){
+    try{
+      if(!state || !state.replay) return;
+      if(!state.replay.active || !state.replay.sessionId) return;
+      if(!state.replay.playing) return;
+      if(state.replay._prefetchInFlight) return;
+      // Keep batches small: large `states[]` payloads create JSON parse spikes and can
+      // *cause* the stop/start cadence even if we buffer.
+      var low = 2;
+      var want = 4; // batch size
+      if(!force && _replayQueueLen() >= low) return;
+      state.replay._prefetchInFlight = true;
+      // Fetch a batch of future steps. We don't render immediately; we enqueue.
+      _replayFetchBatch(want, null).then(function(states){
+        try{
+          if(!state || !state.replay) return;
+          if(!Array.isArray(states) || !states.length) return;
+          if(!Array.isArray(state.replay._queue)) state.replay._queue = [];
+          // Append in order.
+          for(var i=0;i<states.length;i++){
+            state.replay._queue.push(states[i]);
+          }
+        } catch(_eQ){}
+      }).catch(function(e){
+        console.error(e);
+        _setPracticeStatus('Replay prefetch failed: ' + String(e && e.message ? e.message : e));
+        // Do not hard-stop on one failure; allow the next frame to retry.
+      }).finally(function(){
+        try{ if(state && state.replay) state.replay._prefetchInFlight = false; } catch(_eF){}
+      });
+    } catch(_e){}
+  }
+
+  function _replayConsumeOne(){
+    try{
+      if(!state || !state.replay) return false;
+      if(!Array.isArray(state.replay._queue) || !state.replay._queue.length) return false;
+      var st = state.replay._queue.shift();
+      if(!st) return false;
+      _renderReplayState(st, { skipDraw: true });
+      state.replay._needsDraw = true;
+      return true;
+    } catch(_e){
+      return false;
+    }
+  }
+
+  function _replayStartRafLoop(){
+    try{
+      if(!state || !state.replay) return;
+      if(state.replay._rafId) return;
+      var token = state.replay._loopToken;
+      function frame(ts){
+        try{
+          if(!state || !state.replay) return;
+          if(!state.replay.playing) { state.replay._rafId = null; return; }
+          if(token !== state.replay._loopToken) { state.replay._rafId = null; return; }
+
+          if(!state.replay._rafLastTs) state.replay._rafLastTs = ts;
+          var dt = ts - state.replay._rafLastTs;
+          state.replay._rafLastTs = ts;
+          // Clamp dt to avoid huge catch-up loops after tab was backgrounded.
+          if(!Number.isFinite(dt) || dt < 0) dt = 0;
+          if(dt > 250) dt = 250;
+          state.replay._rafAcc += dt;
+
+          var ms = _replayMsPerStep();
+          // Prevent unbounded accumulation (keeps playback feeling steady).
+          if(state.replay._rafAcc > ms * 5) state.replay._rafAcc = ms * 2;
+
+          var advanced = false;
+          while(state.replay._rafAcc >= ms){
+            var ok = _replayConsumeOne();
+            if(!ok) break;
+            advanced = true;
+            state.replay._rafAcc -= ms;
+          }
+
+          // Keep the buffer topped up.
+          if(advanced || _replayQueueLen() < 4){
+            _replayMaybePrefetch(false);
+          }
+
+          // Draw only when state changed (reduces CPU while keeping responsiveness).
+          if(state.replay._needsDraw){
+            draw();
+            state.replay._needsDraw = false;
+          }
+
+          // Throttle tiny UI updates (labels/tooltips) while replay is running.
+          try{
+            if(!state.replay._lastUiUpdateAt) state.replay._lastUiUpdateAt = ts;
+            if(ts - state.replay._lastUiUpdateAt > 120){
+              _syncPracticePauseBtn();
+              state.replay._lastUiUpdateAt = ts;
+            }
+          } catch(_eUi){}
+
+          state.replay._rafId = requestAnimationFrame(frame);
+        } catch(_eFrame){
+          console.error(_eFrame);
+          try{ _stopReplayTimer(); } catch(_eStop){}
+        }
+      }
+      state.replay._rafId = requestAnimationFrame(frame);
+    } catch(_e){}
   }
 
   async function withReplayPaused(fn){
@@ -5564,7 +6199,8 @@
     }
     return clean;
   }
-  function _renderReplayState(st){
+  function _renderReplayState(st, opts){
+    var o = opts || {};
     if(!st) return;
     if(!state || !state.replay) return;
     state.replay.lastState = st;
@@ -5596,45 +6232,283 @@
     } catch(_e1){}
 
     // Render candles from authoritative display_series.
+    //
+    // Fast path (append-only):
+    // - Only when session filters are "show all" (so dataFull==data)
+    // - Only when the new window overlaps the old window by all-but-last timestamps
+    // - Only when relevant toggles haven't changed since the last replay render
+    //
+    // Otherwise: fall back to the safe full rebuild + applySessionFilter().
+    try{
+      function allSessionsEnabled(){
+        try{
+          return !!(
+            (!ui.sessPreMarket || ui.sessPreMarket.checked) &&
+            (!ui.sessAfterHours || ui.sessAfterHours.checked) &&
+            (!ui.sessClosed || ui.sessClosed.checked)
+          );
+        } catch(_e){ return true; }
+      }
+      function replayFastSig(){
+        var os = getOverlaySettings();
+        return [
+          'sym', String(getSymbol() || ''),
+          'disp', Math.floor(Number(st.disp_tf_sec) || 0),
+          'cand', ui.showCandles && ui.showCandles.checked ? 1 : 0,
+          'cstyle', String(state.candleStyle || ''),
+          'pre', ui.sessPreMarket && ui.sessPreMarket.checked ? 1 : 0,
+          'after', ui.sessAfterHours && ui.sessAfterHours.checked ? 1 : 0,
+          'closed', ui.sessClosed && ui.sessClosed.checked ? 1 : 0,
+          'ema9', os && os.ema9 ? 1 : 0,
+          'ema21', os && os.ema21 ? 1 : 0,
+          'ema50', os && os.ema50 ? 1 : 0,
+          'vwap', os && os.vwap ? 1 : 0
+        ].join('|');
+      }
+      function buildOverlaysFromReplayState(st2){
+        try{
+          var os = getOverlaySettings();
+          if(!os || !anyOverlayEnabled(os)) return [];
+          if(!(st2 && replayOverlaysAvailable(st2.overlays))) return [];
+          var out = [];
+          // Helper to map [{ts,v}] -> y[]
+          function yFromPoints(points){
+            if(!Array.isArray(points)) return [];
+            var y = new Array(points.length);
+            for(var i=0;i<points.length;i++){
+              var p = points[i];
+              var v = (p && p.v !== null && p.v !== undefined) ? Number(p.v) : NaN;
+              y[i] = Number.isFinite(v) ? v : NaN;
+            }
+            return y;
+          }
+          var ema = (st2.overlays && st2.overlays.ema) ? st2.overlays.ema : {};
+          if(os.ema9 && Array.isArray(ema['9']) && ema['9'].length){
+            out.push({ t_ms: [], y: yFromPoints(ema['9']), key: 'ema_9', label: 'EMA 9', color: 'rgba(215,224,234,0.92)', width: 1.25 });
+          }
+          if(os.ema21 && Array.isArray(ema['21']) && ema['21'].length){
+            out.push({ t_ms: [], y: yFromPoints(ema['21']), key: 'ema_21', label: 'EMA 21', color: 'rgba(215,224,234,0.72)', width: 1.25 });
+          }
+          if(os.ema50 && Array.isArray(ema['50']) && ema['50'].length){
+            out.push({ t_ms: [], y: yFromPoints(ema['50']), key: 'ema_50', label: 'EMA 50', color: 'rgba(215,224,234,0.52)', width: 1.25 });
+          }
+          if(os.vwap && Array.isArray(st2.overlays && st2.overlays.vwap) && st2.overlays.vwap.length){
+            out.push({ t_ms: [], y: yFromPoints(st2.overlays.vwap), key: 'vwap_session', label: 'VWAP', color: 'rgb(255, 215, 0)', width: 1.55 });
+          }
+          // Fill t_ms from current data (aligned by index)
+          try{
+            if(Array.isArray(state.dataFull) && state.dataFull.length){
+              for(var si=0; si<out.length; si++){
+                var s = out[si];
+                s.t_ms = new Array(state.dataFull.length);
+                for(var j=0;j<state.dataFull.length;j++) s.t_ms[j] = Number(state.dataFull[j].t);
+              }
+            }
+          } catch(_eTms){}
+          return out;
+        } catch(_e){
+          return [];
+        }
+      }
+      function appendHa(prevHa, rawBar){
+        var o = Number(rawBar.o), h = Number(rawBar.h), l = Number(rawBar.l), c = Number(rawBar.c);
+        var haClose = (o + h + l + c) / 4;
+        var prevOpen = prevHa ? Number(prevHa.o) : NaN;
+        var prevClose = prevHa ? Number(prevHa.c) : NaN;
+        var haOpen = (!Number.isFinite(prevOpen) || !Number.isFinite(prevClose)) ? ((o + c) / 2) : ((prevOpen + prevClose) / 2);
+        var haHigh = Math.max(h, haOpen, haClose);
+        var haLow = Math.min(l, haOpen, haClose);
+        return { o: haOpen, h: haHigh, l: haLow, c: haClose };
+      }
+
+      var rawBars = (st && st.display_series && Array.isArray(st.display_series.bars)) ? st.display_series.bars : [];
+      var newLen = rawBars.length;
+      var oldArr = Array.isArray(state.dataFull) ? state.dataFull : null;
+      var oldLen = oldArr ? oldArr.length : 0;
+      var sig = replayFastSig();
+      var prevSig = (state.replay._fastSig || '');
+
+      var canFast = !!(oldArr && oldLen > 2 && newLen === oldLen && allSessionsEnabled() && sig === prevSig);
+      if(canFast){
+        // Quick compute ts arrays
+        var oldTs0 = new Array(oldLen);
+        for(var i0=0;i0<oldLen;i0++) oldTs0[i0] = Number(oldArr[i0] && oldArr[i0].t);
+        var newTs0 = new Array(newLen);
+        for(var j0=0;j0<newLen;j0++) newTs0[j0] = parseIsoToMs(rawBars[j0] && rawBars[j0].ts);
+
+        // Determine drop count (how many old bars rolled off).
+        var drop = 0;
+        if(oldLen >= 2 && oldTs0[1] === newTs0[0]) drop = 1;
+        else {
+          // find first match of newTs[0] in oldTs (drop index)
+          var head = newTs0[0];
+          for(var k0=0;k0<oldLen;k0++){
+            if(oldTs0[k0] === head){ drop = k0; break; }
+          }
+        }
+        if(drop > 0 && drop < oldLen){
+          // Validate overlap: old[drop..] == new[0..oldLen-drop-1]
+          var ok = true;
+          for(var x=drop; x<oldLen; x++){
+            if(oldTs0[x] !== newTs0[x - drop]) { ok = false; break; }
+          }
+          if(ok){
+            var appendN = drop; // fixed window size
+            // Ensure we are in "no filter" mode: data === dataFull (same reference).
+            if(state.data !== state.dataFull) state.data = state.dataFull;
+            // Drop rolled-off bars
+            state.dataFull.splice(0, drop);
+
+            // Drop aligned derived arrays
+            try{
+              if(Array.isArray(state._sessionType) && state._sessionType.length === oldLen) state._sessionType.splice(0, drop);
+            } catch(_eS){}
+            try{
+              if(Array.isArray(state.ha) && state.ha.length === oldLen) state.ha.splice(0, drop);
+            } catch(_eHaSp){}
+            try{
+              if(Array.isArray(state.overlays)){
+                for(var si0=0; si0<state.overlays.length; si0++){
+                  var s0 = state.overlays[si0];
+                  if(s0 && Array.isArray(s0.y) && s0.y.length === oldLen) s0.y.splice(0, drop);
+                  if(s0 && Array.isArray(s0.t_ms) && s0.t_ms.length === oldLen) s0.t_ms.splice(0, drop);
+                }
+              }
+            } catch(_eOvSp){}
+
+            // Append new bars
+            for(var a=0; a<appendN; a++){
+              var rb = rawBars[newLen - appendN + a];
+              if(!rb) continue;
+              var tm = parseIsoToMs(rb.ts);
+              var nb = { t: Number.isFinite(tm) ? tm : NaN, o: Number(rb.o), h: Number(rb.h), l: Number(rb.l), c: Number(rb.c), v: Number(rb.v), bid: NaN, ask: NaN };
+              state.dataFull.push(nb);
+            }
+
+            // Ensure length restored
+            if(state.dataFull.length !== newLen){
+              throw new Error('fast path length mismatch');
+            }
+
+            // Append session types
+            try{
+              if(!Array.isArray(state._sessionType) || state._sessionType.length !== (newLen - appendN)){
+                state._sessionType = computeSessionTypesForData(state.dataFull);
+              } else {
+                for(var a2=0;a2<appendN;a2++){
+                  var t2 = Number(state.dataFull[newLen - appendN + a2].t);
+                  state._sessionType.push(Number.isFinite(t2) ? sessionTypeForMsEt(t2) : 'closed');
+                }
+              }
+            } catch(_eSess){
+              state._sessionType = computeSessionTypesForData(state.dataFull);
+            }
+
+            // HA append-only (only if HA candles are enabled)
+            var needHa = !!(ui && ui.showCandles && ui.showCandles.checked && state && state.candleStyle === 'ha');
+            if(needHa){
+              try{
+                if(!Array.isArray(state.ha) || state.ha.length !== (newLen - appendN)){
+                  state.ha = computeHeikinAshi(state.dataFull);
+                } else {
+                  var prev = state.ha.length ? state.ha[state.ha.length - 1] : null;
+                  for(var a3=0;a3<appendN;a3++){
+                    var raw = state.dataFull[newLen - appendN + a3];
+                    var haBar = appendHa(prev, raw);
+                    state.ha.push(haBar);
+                    prev = haBar;
+                  }
+                }
+              } catch(_eHa2){
+                state.ha = computeHeikinAshi(state.dataFull);
+              }
+            } else {
+              state.ha = [];
+            }
+
+            // Overlays (prefer server overlays): rebuild once if missing or settings changed; otherwise shift+append last points
+            try{
+              var os2 = getOverlaySettings();
+              if(!os2 || !anyOverlayEnabled(os2)){
+                state.overlays = [];
+              } else if(st && replayOverlaysAvailable(st.overlays)){
+                var needRebuildOv = !Array.isArray(state.overlays) || !state.overlays.length || (state.replay._fastOvSig !== sig);
+                if(needRebuildOv){
+                  // Build from the authoritative overlay arrays (O(n) once per settings change)
+                  state.overlays = buildOverlaysFromReplayState(st);
+                  state.replay._fastOvSig = sig;
+                } else {
+                  // Append overlay points for the newly appended bars (assume overlay arrays aligned to rawBars).
+                  function appendSeries(key, points){
+                    if(!Array.isArray(points) || !points.length) return;
+                    var s = null;
+                    for(var i=0;i<state.overlays.length;i++){
+                      if(state.overlays[i] && state.overlays[i].key === key){ s = state.overlays[i]; break; }
+                    }
+                    if(!s || !Array.isArray(s.y)) return;
+                    // points are full-length; take the last appendN values
+                    for(var q=0;q<appendN;q++){
+                      var p = points[newLen - appendN + q];
+                      var vv = (p && p.v !== null && p.v !== undefined) ? Number(p.v) : NaN;
+                      s.y.push(Number.isFinite(vv) ? vv : NaN);
+                      if(Array.isArray(s.t_ms)) s.t_ms.push(Number(state.dataFull[newLen - appendN + q].t));
+                    }
+                  }
+                  var ema2 = st.overlays.ema || {};
+                  if(os2.ema9) appendSeries('ema_9', ema2['9']);
+                  if(os2.ema21) appendSeries('ema_21', ema2['21']);
+                  if(os2.ema50) appendSeries('ema_50', ema2['50']);
+                  if(os2.vwap) appendSeries('vwap_session', st.overlays.vwap);
+                }
+              } else {
+                // If replay overlays absent, keep overlays empty in fast path (avoid local recompute).
+                state.overlays = [];
+              }
+            } catch(_eOv2){
+              // If overlay update fails, clear them (safe) and continue.
+              state.overlays = [];
+            }
+
+            // Replay UX: keep right-aligned as time advances.
+            state.followLatest = true;
+            state.hoverIdx = -1;
+            if(!o.skipDraw) draw();
+            try{
+              if(state && state.replay && state.replay._fastStats){
+                state.replay._fastStats.hits = (Number(state.replay._fastStats.hits) || 0) + 1;
+                state.replay._fastStats.lastMode = 'fast';
+              }
+            } catch(_eFS){}
+            // Update fast-path signature
+            state.replay._fastSig = sig;
+            return;
+          }
+        }
+      }
+      // Update signature even if fast path not taken (keeps it current for next attempt).
+      state.replay._fastSig = sig;
+    } catch(_eFast){
+      // fall through to full rebuild
+    }
+
+    // Safe full rebuild + filter/derived recompute (correctness path)
     var out = _barsFromReplayState(st);
     state.dataFull = out;
     state.data = out;
-    state._sessionType = computeSessionTypesForData(out);
-    state.ha = computeHeikinAshi(out);
-
-    // Overlays:
-    // - If backend provides overlays with data, use them.
-    // - Otherwise compute locally so EMA/VWAP stays visible during replay gameplay.
-    try{
-      var os = getOverlaySettings();
-      if(os && anyOverlayEnabled(os) && Array.isArray(out) && out.length){
-        if(replayOverlaysAvailable(st.overlays)){
-          var allowed = new Set();
-          for(var i2=0;i2<out.length;i2++) allowed.add(Number(out[i2].t));
-          state.overlaysFull = overlaysFromReplayState(st.overlays, os, allowed);
-        } else {
-          state.overlaysFull = computeOverlays(
-            barsToArrays(out),
-            os,
-            { symbol: String(getSymbol() || ''), bar_s: Math.floor(Number(state.windowSec) || 60) }
-          );
-        }
-        state.overlays = state.overlaysFull;
-      } else {
-        state.overlaysFull = [];
-        state.overlays = [];
-      }
-    } catch(_e2){
-      state.overlaysFull = [];
-      state.overlays = [];
-    }
-
-    // Replay UX: keep right-aligned as time advances.
+    state._sessionType = [];
+    state.ha = [];
+    state.overlaysFull = [];
+    state.overlays = [];
     state.followLatest = true;
     applySessionFilter({ skipSave: true, skipDraw: true });
-    rightAlignXView();
     state.hoverIdx = -1;
-    draw();
+    if(!o.skipDraw) draw();
+    try{
+      if(state && state.replay && state.replay._fastStats){
+        state.replay._fastStats.misses = (Number(state.replay._fastStats.misses) || 0) + 1;
+        state.replay._fastStats.lastMode = 'full';
+      }
+    } catch(_eFS2){}
   }
   async function replayStart(opts){
     var o = opts || {};
@@ -5700,36 +6574,106 @@
       _setPracticeUiStateActive(false);
     }
   }
-  async function replayStepOnce(){
+  async function _replayFetchBatch(dispSteps, dbgSample){
+    // Fetch N display steps from the server.
+    // If dispSteps>1, ask the server to return an array of intermediate states ("states") so
+    // the frontend can buffer and play smoothly.
     if(!state.replay.active || !state.replay.sessionId){
       await replayStart();
-      return;
+      return [];
     }
+    var steps = Math.max(1, Math.floor(Number(dispSteps) || 1));
     try{
-      var j = await _postJson('/replay/step', { session_id: state.replay.sessionId, disp_steps: 1 });
-      // Always render from authoritative state (delta is optional optimization).
-      _renderReplayState(j.state);
-      try{ state.replay._stepFailCount = 0; } catch(_e0){}
+      var t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+      var payload = { session_id: state.replay.sessionId, disp_steps: steps };
+      if(steps > 1) payload.return_states = true;
+      var j = await _postJson('/replay/step', payload);
+      var t1 = (window.performance && performance.now) ? performance.now() : Date.now();
+      try{
+        if(state && state.replay && state.replay._debug && state.replay._debug.enabled){
+          var fm = Math.max(0, t1 - t0);
+          state.replay._debug.lastFetchMs = fm;
+          try{
+            state.replay._debug._fetch.push(fm);
+            while(state.replay._debug._fetch.length > (state.replay._debug._N || 60)) state.replay._debug._fetch.shift();
+            var mf = -Infinity;
+            for(var ii=0; ii<state.replay._debug._fetch.length; ii++){
+              var x = Number(state.replay._debug._fetch[ii]);
+              if(Number.isFinite(x) && x > mf) mf = x;
+            }
+            state.replay._debug.maxFetchMs = (mf === -Infinity) ? NaN : mf;
+          } catch(_eArr){}
+        }
+      } catch(_eDbgF){}
+      try{
+        if(dbgSample){
+          dbgSample.fetch_ms = Math.max(0, t1 - t0);
+        }
+      } catch(_eS0){}
+      var states = (j && Array.isArray(j.states) && j.states.length) ? j.states : (j && j.state ? [j.state] : []);
+      return states;
     } catch(e){
       console.error(e);
       var msg = String(e && e.message ? e.message : e);
-      _setPracticeStatus('Replay step failed: ' + msg);
+      _setPracticeStatus('Replay fetch failed: ' + msg);
       try{ state.replay._stepFailCount = (Number(state.replay._stepFailCount) || 0) + 1; } catch(_e1){}
-
       // If the server session is gone, pause (don't nuke local state; allow Play to restart).
       if(msg.indexOf('HTTP 404') !== -1 || msg.indexOf('session not found') !== -1){
         _stopReplayTimer();
-        _setPracticeStatus('Replay paused: session not found (server). Press Play to start a new session.');
-        return;
+        _setPracticeStatus('Replay restarting: session not found (server).');
+        // Auto-restart a new session and resume playback (sessions are in-memory; server restarts clear them).
+        try{
+          replayStart({ autoPlay: true });
+        } catch(_eAuto){
+          _setPracticeStatus('Replay paused: session not found (server). Press Play to start a new session.');
+        }
+        return [];
       }
       // Avoid infinite noisy failing; pause after repeated failures.
       try{
         if((Number(state.replay._stepFailCount) || 0) >= 3){
           _stopReplayTimer();
-          _setPracticeStatus('Replay paused after repeated step errors. Press Resume to retry.');
+          _setPracticeStatus('Replay paused after repeated fetch errors. Press Resume to retry.');
         }
       } catch(_e2){}
+      return [];
     }
+  }
+
+  async function replayStepOnce(dbgSample){
+    // Compatibility: single-step fetch + render (used by non-buffered callers).
+    var states = await _replayFetchBatch(1, dbgSample);
+    if(!states || !states.length) return;
+    var st = states[states.length - 1];
+    // Always render from authoritative state (delta is optional optimization).
+    var r0 = (window.performance && performance.now) ? performance.now() : Date.now();
+    _renderReplayState(st);
+    var r1 = (window.performance && performance.now) ? performance.now() : Date.now();
+    try{
+      if(state && state.replay && state.replay._debug && state.replay._debug.enabled){
+        var rm = Math.max(0, r1 - r0);
+        state.replay._debug.lastRenderMs = rm;
+        try{
+          state.replay._debug._render.push(rm);
+          while(state.replay._debug._render.length > (state.replay._debug._N || 60)) state.replay._debug._render.shift();
+          var mr = -Infinity;
+          for(var jj=0; jj<state.replay._debug._render.length; jj++){
+            var y = Number(state.replay._debug._render[jj]);
+            if(Number.isFinite(y) && y > mr) mr = y;
+          }
+          state.replay._debug.maxRenderMs = (mr === -Infinity) ? NaN : mr;
+        } catch(_eArr2){}
+      }
+    } catch(_eDbgR){}
+    try{
+      if(dbgSample){
+        dbgSample.render_ms = Math.max(0, r1 - r0);
+        if(state && state.replay && state.replay._debug && state.replay._debug.enabled){
+          dbgSample.draw_ms = Number(state.replay._debug.lastDrawMs);
+        }
+      }
+    } catch(_eS1){}
+    try{ state.replay._stepFailCount = 0; } catch(_e0){}
   }
 
   function _practiceQty(){
@@ -5827,15 +6771,26 @@
   if(ui.practiceSpeed){
     ui.practiceSpeed.addEventListener('input', function(){
       _syncPracticeSpeedLabel();
-      // If playing, restart timer with new speed.
-      if(state && state.replay && state.replay.playing){
-        var bpm = _practiceSpeedBpm();
-        var intervalMs = Math.max(80, Math.floor(60000 / bpm));
-        _startReplayLoop(intervalMs);
-      }
+      // Playback cadence is derived from bpm inside the RAF loop; no restart needed.
+      // Reset accumulator so the new cadence takes effect immediately.
+      try{
+        if(state && state.replay && state.replay.playing){
+          state.replay._rafAcc = 0;
+          if(state.replay._debug && state.replay._debug.enabled){
+            state.replay._debug.targetMs = _replayMsPerStep();
+          }
+        }
+      } catch(_e){}
     });
     ui.practiceSpeed.addEventListener('change', function(){
       _syncPracticeSpeedLabel();
+      try{
+        if(state && state.replay && state.replay.playing){
+          if(state.replay._debug && state.replay._debug.enabled){
+            state.replay._debug.targetMs = _replayMsPerStep();
+          }
+        }
+      } catch(_e2){}
     });
   }
   _syncPracticeSpeedLabel();

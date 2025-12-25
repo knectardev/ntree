@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, send_file
+from flask import Flask, render_template, jsonify, request, send_file, redirect
 from database import get_db_connection, init_database, get_synthetic_datasets, list_real_tickers, list_all_tickers, list_chart_tickers
 from datetime import datetime, timedelta, timezone
 import alpaca_trade_api as tradeapi
@@ -657,12 +657,25 @@ def ticker_detail(ticker):
     # Alternate chart view: /ticker/SPY?band
     # (keeps existing detail view intact unless explicitly requested).
     if "band" in request.args:
-        # Cache-buster for the iframe so Chrome always requests the newest demo file.
+        # Legacy wrapper template used an iframe (templates/ticker_band.html). This is no longer
+        # necessary and made debugging/caching confusing. Redirect directly to the demo page.
+        #
+        # Preserve any relevant query params (bar_s/span/etc), but force API mode and symbol.
         try:
             cache_bust = int(os.path.getmtime("demo_static.html"))
         except Exception:
             cache_bust = int(time.time())
-        return render_template("ticker_band.html", ticker=ticker, cache_bust=cache_bust)
+
+        params = dict(request.args)
+        params.pop("band", None)
+        params["mode"] = "api"
+        params["symbol"] = ticker
+        params["v"] = str(cache_bust)
+
+        # Rebuild query string without importing url_for (keep it simple).
+        from urllib.parse import urlencode
+
+        return redirect("/demo_static.html?" + urlencode(params), code=302)
     interval = request.args.get('interval', '1Min')
     return render_template(
         'detail.html',
@@ -1600,9 +1613,17 @@ def replay_step():
     payload = request.get_json(silent=True) or {}
     session_id = (payload.get("session_id") or "").strip()
     disp_steps = int(payload.get("disp_steps") or 1)
+    return_states = bool(payload.get("return_states") or payload.get("batch") or False)
     sess = _get_replay_session(session_id)
     if not sess:
         return jsonify({"error": "session not found"}), 404
+
+    # For smooth browser playback we optionally return one state payload per display step.
+    # Backwards-compatible: if return_states is false (or disp_steps==1), return a single state.
+    if return_states and disp_steps > 1:
+        states = sess.step_payloads(disp_steps=disp_steps)
+        last_state = states[-1] if states else sess.get_state_payload()
+        return jsonify({"state": last_state, "states": states, "delta": {}})
 
     sess.step(disp_steps=disp_steps)
     return jsonify({"state": sess.get_state_payload(), "delta": {}})

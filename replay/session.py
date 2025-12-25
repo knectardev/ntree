@@ -11,6 +11,17 @@ from replay.events import EventLogger, _iso_z
 from replay.market import MarketFeed
 from replay.types import Order, Position, ReplayState
 
+try:
+    # Python 3.9+
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[assignment]
+
+try:
+    import pytz
+except Exception:  # pragma: no cover
+    pytz = None  # type: ignore[assignment]
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -41,6 +52,121 @@ def _floor_time_to_step(dt: datetime, step_sec: int) -> datetime:
     t = dt.timestamp()
     snapped = (int(t) // step) * step
     return datetime.fromtimestamp(snapped, tz=timezone.utc)
+
+
+def _ema_series(values: List[float], period: int) -> List[Optional[float]]:
+    """
+    EMA implementation intentionally matches demo_static.html:
+    - k = 2/(p+1)
+    - seed EMA with close[0]
+    - if close[i] is not finite, reuse previous EMA
+    """
+    p = max(1, int(period))
+    if not values:
+        return []
+    k = 2.0 / (p + 1.0)
+    out: List[Optional[float]] = [None] * len(values)
+    ema = float(values[0])
+    out[0] = ema
+    for i in range(1, len(values)):
+        c = values[i]
+        try:
+            c_f = float(c)
+        except Exception:
+            c_f = ema
+        # Avoid NaNs poisoning the series.
+        if c_f != c_f:  # NaN check
+            c_f = ema
+        ema = c_f * k + ema * (1.0 - k)
+        out[i] = ema
+    return out
+
+
+def _vwap_session_series(
+    *,
+    ts_utc: List[datetime],
+    high: List[float],
+    low: List[float],
+    close: List[float],
+    volume: List[float],
+) -> List[Optional[float]]:
+    """
+    Session VWAP intended to match demo_static.html logic:
+    - VWAP anchored to 09:30 ET
+    - Before 09:30: None
+    - During regular session [09:30, 16:00): cumulative typical-price * volume / cumulative volume
+    - After 16:00: hold last regular VWAP flat
+    - Reset at day boundary, and when crossing from <09:30 to >=09:30
+    """
+    n = min(len(ts_utc), len(high), len(low), len(close), len(volume))
+    if n <= 0:
+        return []
+    ny = None
+    if ZoneInfo is not None:
+        try:
+            ny = ZoneInfo("America/New_York")
+        except Exception:
+            ny = None
+    if ny is None and pytz is not None:
+        try:
+            ny = pytz.timezone("America/New_York")
+        except Exception:
+            ny = None
+    if ny is None:
+        return [None] * n
+    open_mins = 9 * 60 + 30
+    close_mins = 16 * 60
+
+    out: List[Optional[float]] = [None] * n
+    cum_pv = 0.0
+    cum_v = 0.0
+    prev_day_key: Optional[Tuple[int, int, int]] = None
+    prev_mins = -1
+    last_reg_vwap: Optional[float] = None
+
+    for i in range(n):
+        dt = ts_utc[i]
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt_ny = dt.astimezone(ny)
+        mins = dt_ny.hour * 60 + dt_ny.minute
+        day_key = (dt_ny.year, dt_ny.month, dt_ny.day)
+
+        reset = False
+        if i == 0:
+            reset = True
+        elif prev_day_key is not None and day_key != prev_day_key:
+            reset = True
+        elif prev_mins < open_mins <= mins:
+            reset = True
+        if reset:
+            cum_pv = 0.0
+            cum_v = 0.0
+            last_reg_vwap = None
+
+        # Before 09:30: no VWAP (don't accumulate premarket prints)
+        if mins < open_mins:
+            out[i] = None
+        # After 16:00: hold last regular VWAP flat
+        elif mins >= close_mins:
+            out[i] = last_reg_vwap
+        else:
+            tp = (float(high[i]) + float(low[i]) + float(close[i])) / 3.0
+            if tp != tp:  # NaN
+                tp = float(close[i])
+            vv = float(volume[i]) if volume[i] == volume[i] else 0.0
+            if vv < 0:
+                vv = 0.0
+            cum_pv += tp * vv
+            cum_v += vv
+            vwap = (cum_pv / cum_v) if cum_v > 0 else tp
+            out[i] = vwap
+            last_reg_vwap = vwap
+
+        prev_day_key = day_key
+        prev_mins = mins
+
+    return out
 
 
 @dataclass(frozen=True)
@@ -180,11 +306,9 @@ class ReplaySession:
                 dt = dt.replace(tzinfo=timezone.utc)
             return (int(dt.timestamp()) // step_sec) * step_sec
 
-        for b in self.feed.bars:
-            if b.ts < series_start:
-                continue
-            if b.ts >= window_end:
-                break
+        # Fast range scan (avoid iterating the entire feed each step).
+        i0, i1 = self.feed.range_indices(start_ts=series_start, end_ts_exclusive=window_end)
+        for b in self.feed.bars[i0:i1]:
             k = bucket_key(b.ts)
             cur = buckets.get(k)
             if cur is None:
@@ -203,18 +327,28 @@ class ReplaySession:
                 cur["v"] = float(cur["v"]) + float(b.volume or 0.0)
 
         bars_out = []
+        # Keep arrays for overlays. These are derived from display buckets (disp_tf_sec), not exec bars.
+        ts_list: List[datetime] = []
+        o_list: List[float] = []
+        h_list: List[float] = []
+        l_list: List[float] = []
+        c_list: List[float] = []
+        v_list: List[float] = []
         for k in sorted(buckets.keys()):
             bb = buckets[k]
-            bars_out.append(
-                {
-                    "ts": _iso_z(bb["ts"]),
-                    "o": float(bb["o"]),
-                    "h": float(bb["h"]),
-                    "l": float(bb["l"]),
-                    "c": float(bb["c"]),
-                    "v": float(bb["v"]),
-                }
-            )
+            ts_dt = bb["ts"]
+            o0 = float(bb["o"])
+            h0 = float(bb["h"])
+            l0 = float(bb["l"])
+            c0 = float(bb["c"])
+            v0 = float(bb["v"])
+            bars_out.append({"ts": _iso_z(ts_dt), "o": o0, "h": h0, "l": l0, "c": c0, "v": v0})
+            ts_list.append(ts_dt)
+            o_list.append(o0)
+            h_list.append(h0)
+            l_list.append(l0)
+            c_list.append(c0)
+            v_list.append(v0)
 
         # Basic position payload; unrealized is approximated from last close.
         last_px = None
@@ -231,6 +365,28 @@ class ReplaySession:
                 unreal = (last_px - float(self.position.avg_price)) * float(self.position.qty)
         except Exception:
             unreal = 0.0
+
+        # Optional overlays (EMA + session VWAP). Kept best-effort: UI can handle empty.
+        overlays: Dict[str, Any] = {}
+        try:
+            n = len(ts_list)
+            if n >= 2:
+                ema9 = _ema_series(c_list, 9)
+                ema21 = _ema_series(c_list, 21)
+                ema50 = _ema_series(c_list, 50)
+                vwap = _vwap_session_series(ts_utc=ts_list, high=h_list, low=l_list, close=c_list, volume=v_list)
+                overlays = {
+                    "ema": {
+                        "9": [{"ts": _iso_z(ts_list[i]), "v": ema9[i]} for i in range(n)],
+                        "21": [{"ts": _iso_z(ts_list[i]), "v": ema21[i]} for i in range(n)],
+                        "50": [{"ts": _iso_z(ts_list[i]), "v": ema50[i]} for i in range(n)],
+                    },
+                    "vwap": [
+                        {"ts": _iso_z(ts_list[i]), "v": vwap[i]} for i in range(n)
+                    ],
+                }
+        except Exception:
+            overlays = {}
 
         return {
             "session_id": st.session_id,
@@ -254,9 +410,21 @@ class ReplaySession:
                 "unrealized_pnl": float(unreal),
             },
             "orders": [o.__dict__ for o in st.orders],
-            "overlays": {},  # optional; UI can handle empty
+            "overlays": overlays,  # optional; UI can handle empty
             "score": {},     # optional
         }
+
+    def step_payloads(self, *, disp_steps: int = 1) -> List[Dict[str, Any]]:
+        """
+        Step the session forward by disp_steps display windows, returning a payload snapshot per step.
+        This is used by the browser replay UI to prefetch a small buffer and play it back smoothly.
+        """
+        steps = max(1, int(disp_steps))
+        out: List[Dict[str, Any]] = []
+        for _ in range(steps):
+            self.step(disp_steps=1)
+            out.append(self.get_state_payload())
+        return out
 
     def place_limit(self, *, side: str, price: float, qty: float, tag: Optional[str] = None) -> Order:
         oid = str(uuid.uuid4())

@@ -1,119 +1,360 @@
-Perfect — Option A (wall-clock window stepping) is the right choice for your “velocity-controlled practice field,” and it will eliminate the confusing “15 minutes expected, 50 minutes actual” behavior you just saw when there are gaps in the 1-minute series. 
+Why the /replay/step payload is still huge
 
-replay_smoke
+Your frontend is still asking the backend for full state snapshots, and the backend only knows how to return full state snapshots.
 
-What changes with Option A
+Frontend replayStepOnce() always does:
 
-A “display step” means:
+POST /replay/step { session_id, disp_steps: 1 } and then renders j.state. 
 
-Advance the display window by exactly disp_tf_sec in real time (e.g., 5 minutes)
+demo_static
 
-Inside that window, process all exec bars whose timestamps fall within [window_start, window_end)
+Frontend batch prefetch _replayFetchBatch() does:
 
-So if there’s a 36-minute gap in the 1-minute feed (as your diagnostics showed), the clock still advances by 5 minutes per step, but you might consume 0 exec bars for that window (and you should log that explicitly). 
+POST /replay/step { session_id, disp_steps: steps, return_states: true } when steps > 1, and it buffers j.states. 
 
-replay_smoke
+demo_static
 
-Concrete implementation notes for Cursor
-1) Add display-window cursor state
+Backend /replay/step returns sess.get_state_payload() (or states = sess.step_payloads(...)) — i.e., full state every time. 
 
-In ReplaySessionState keep:
+app
 
-cursor_disp_start_ts
+So even if you make the rendering append-only, you’re still paying:
 
-cursor_disp_end_ts (or compute as start + disp_tf)
+big JSON serialize on server
 
-cursor_exec_ts (last processed exec ts)
+big JSON transfer
 
-cursor_exec_idx (optional, for debug)
+big JSON parse + GC on client
 
-2) Implement step as time windows (not bar counts)
+That matches exactly what you saw in Network: ~130–140kb every step.
 
-Pseudo-logic:
+Why “800 bars” keeps showing up
 
-Let disp_start = current_disp_end (or start)
+Your frontend hard-caps replay history to 800 bars:
 
-Let disp_end = disp_start + disp_tf_sec
-
-Consume exec bars where disp_start <= bar.ts < disp_end
-
-For each consumed exec bar:
-
-evaluate fills
-
-update position/pnl
-
-append events
-
-Set cursor_disp_end_ts = disp_end
-
-Set cursor_exec_ts = last_consumed_exec_ts (or leave unchanged if none)
-
-3) Handle “no exec bars in window” cleanly
-
-This will happen due to:
-
-market closed
-
-missing minutes
-
-requested time outside available data
-
-In that case:
-
-Advance display clock anyway
-
-Return a display candle as NA/empty or “no-trade candle” (your choice), but do not invent OHLC
-
-Emit an event like WINDOW_EMPTY (helps debug + analytics)
-
-4) Snap display windows to boundaries (recommended default)
-
-Your session currently starts at 13:18, but 5-minute bars on charts are aligned to :00/:05/:10.... 
-
-replay_smoke
+var MAX_HISTORY_BARS = 800;
+payload.initial_history_bars = clamp(wantBars, 50, MAX_HISTORY_BARS);
 
 
-So on session start:
+demo_static
 
-snap t_start up to next display boundary (e.g., 13:20 for 5m)
+And since the backend state payload contains that “current window”, every /replay/step snapshot ships those arrays again.
 
-keep original requested start stored separately for audit
+You’re right to question it: if the UI prevents resizing the x-axis and you’re not letting the user pan way back, then 800 is arbitrary overhead.
 
-5) Update the smoke test expectations
+What to do next (in order of impact)
+1) Quick win: stop asking for batched full snapshots
 
-Right now replay_smoke.py assumes continuous 1-minute bars to predict cursor advance. 
+If you’re currently running with _replayFetchBatch(steps>1) a lot, you’re potentially transferring multiples of that snapshot at once (because return_states returns an array of full states, not deltas). 
 
-replay_smoke
+demo_static
+
+Change: make _replayFetchBatch() always fetch disp_steps: 1 (no return_states) until deltas exist.
+
+This won’t make each request smaller, but it will prevent the worst-case payload spikes that happen when batching full snapshots.
+
+2) Reduce the history window from 800 to something tied to pixels
+
+Change the replay start logic so initial_history_bars is driven by visible candle capacity, not “1 month / capped to 800”.
+
+For example:
+
+target ~250–350 candles (enough context for overlays)
+
+plus a little slack
+
+That one change alone often cuts payload from ~135kb → ~40–60kb depending on what else is in the state.
+
+Where to change: replayStart() payload builder. 
+
+demo_static
+
+3) The real fix: implement true delta payloads
+
+Right now the backend always returns:
+
+return jsonify({"state": sess.get_state_payload(), "delta": {}})
 
 
-With Option A, that expectation becomes true again:
+app
 
-disp_steps=3, disp_tf_sec=300 ⇒ clock advances exactly 900 seconds, always.
+Notice delta is always {}. So the “delta path” doesn’t exist yet.
 
-So after the change, the smoke output should show:
+What you want instead:
 
-cursor display time advances 15m
+/replay/step optionally returns:
 
-exec bars consumed may be 0..15 depending on gaps
+delta: { append: {t,o,h,l,c,v}, overlays_append: {...}, ... }
 
-6) One more improvement to the smoke test
+drop_n: 1 (or window_slide info)
 
-Your comment says the placed limit isn’t guaranteed to fill. 
+minimal meta (last timestamp, etc.)
 
-replay_smoke
+and no full state unless explicitly requested.
+
+That’s the point where payload drops to “a few hundred bytes per step”, and the jank from parse/GC largely disappears.
+
+Sanity check: why the append-only render change didn’t help
+
+Because it only attacked CPU churn in _renderReplayState(), not the transfer+parse cost.
+
+You can literally see in your own code that replay rendering is still “authoritative full state”:
+
+// Always render from authoritative state (delta is optional optimization).
+_renderReplayState(j.state); 
+
+demo_static
+
+So even if _renderReplayState() got smarter internally, it’s still being handed a giant object every step.
+
+If you want the shortest path to “smooth like a game engine”
+
+Do these in this exact order:
+
+Disable return_states batching for now (prevents giant spikes).
+
+Drop MAX_HISTORY_BARS from 800 → ~250 (immediate payload reduction).
+
+Add a delta mode to /replay/step and switch the RAF loop to apply deltas.
+
+If you paste the ReplaySession.get_state_payload() shape (or the class file where it’s defined), I can tell you exactly what fields are dominating the payload and propose a clean delta schema that doesn’t break your UI contract.
 
 
-For a more definitive v1 test, add an optional “guaranteed fill mode”:
+Yeah — if the UI is locking the visible span, there’s no good reason to ship ~800 bars every step. What’s happening is: the backend is returning a full “display_series window” snapshot on each /replay/step, and that window is sized by your “max bars” / padding logic rather than by what’s actually changing (1 new bar). Even if the x-axis is locked, the server is still re-sending the whole window because that’s the payload contract.
 
-buy limit at bars[0].high (or just a very high price) so low <= limit is always true and you can validate fill + logging deterministically.
+Here’s how to think about it, and what to change.
 
-How you’ll know you’re “green”
+Why 800 bars is showing up anyway
 
-After Option A is implemented, rerun the smoke test and you should see:
+Even with a fixed viewport, the replay engine needs some rolling history so it can:
 
-Expected advance = actual advance (15m for 3×5m)
+draw candles to the left of the current bar
 
-Exec bars consumed may be less than 15 if the window hits gaps
+compute overlays (EMA/VWAP) consistently
 
-No more giant wall-clock jumps caused by missing minutes
+keep the chart “context” stable
+
+But that history should be:
+
+loaded once at replay start, then
+
+incrementally updated (append/drop) as replay advances
+
+Right now you’re doing the opposite: re-sending the entire window every step.
+
+So the question isn’t “why does it need 800 bars” — it’s “why are we paying the 800-bar cost repeatedly instead of once”.
+
+The real fix: stop sending the window on every step
+
+There are two clean approaches; either one will solve this.
+
+Option 1 (best): /replay/step returns delta-only in replay mode
+
+Change the API contract so that after start, each step returns only:
+
+the new bar(s) (usually 1)
+
+the bar timestamp
+
+any new overlay points for those bars (optional)
+
+minimal position/PnL metadata if needed
+
+Example response:
+
+{
+  "ok": true,
+  "delta": {
+    "append": [{ "t": 170..., "o":..., "h":..., "l":..., "c":..., "v":... }],
+    "drop": 1,
+    "overlays": {
+      "ema": { "9": [ { "ts":"...", "v": ... } ] },
+      "vwap": [ { "ts":"...", "v": ... } ]
+    }
+  }
+}
+
+
+Frontend:
+
+state.dataFull.splice(0, drop)
+
+state.dataFull.push(...append)
+
+update derived arrays incrementally
+
+draw
+
+This makes Network tab go from 135KB per bar → a few hundred bytes per bar.
+
+Option 2 (almost as good): batch states, but don’t rebuild per state
+
+If you don’t want new API semantics yet:
+
+request disp_steps: 50, return_states: true
+
+you’ll still download big payloads, but far less frequently
+
+then the frontend consumes them from a queue and uses append-only updates
+
+This reduces stutter, but you’ll still see periodic GC “hiccups” when the big batch arrives and gets parsed.
+
+Given your screenshot, I’d do Option 1.
+
+Why the UI “locking” doesn’t matter
+
+Locking the x-axis means “user can’t zoom/pan right now.”
+It does not imply the backend knows it can safely send less — unless you explicitly make that part of the replay protocol.
+
+Right now the backend is basically saying: “Here is the entire window I want you to draw.” That’s why you keep getting 800 bars repeatedly.
+
+What to change right now (very specific)
+
+In app.py, locate the /replay/step handler and add a delta_only=1 path:
+
+replay session should remember:
+
+last emitted index/time
+
+the current display window (list of bars)
+
+on step:
+
+advance internal pointer
+
+compute drop (usually 1 once the window is “full”)
+
+compute append (the new bar(s))
+
+return only {drop, append} (plus overlays if you want)
+
+On the frontend:
+
+stop calling _renderReplayState(st) for each step
+
+call _applyReplayDelta(delta) which does splice/push and incremental derived update
+
+That’s it.
+
+If you want, paste the /replay/start and /replay/step routes from app.py (or tell me the function names), and I’ll outline the exact delta structure that matches your existing bar format so you can implement it with minimal surface area.
+
+Why the /replay/step payload is still huge
+
+Your frontend is still asking the backend for full state snapshots, and the backend only knows how to return full state snapshots.
+
+Frontend replayStepOnce() always does:
+
+POST /replay/step { session_id, disp_steps: 1 } and then renders j.state. 
+
+demo_static
+
+Frontend batch prefetch _replayFetchBatch() does:
+
+POST /replay/step { session_id, disp_steps: steps, return_states: true } when steps > 1, and it buffers j.states. 
+
+demo_static
+
+Backend /replay/step returns sess.get_state_payload() (or states = sess.step_payloads(...)) — i.e., full state every time. 
+
+app
+
+So even if you make the rendering append-only, you’re still paying:
+
+big JSON serialize on server
+
+big JSON transfer
+
+big JSON parse + GC on client
+
+That matches exactly what you saw in Network: ~130–140kb every step.
+
+Why “800 bars” keeps showing up
+
+Your frontend hard-caps replay history to 800 bars:
+
+var MAX_HISTORY_BARS = 800;
+payload.initial_history_bars = clamp(wantBars, 50, MAX_HISTORY_BARS);
+
+
+demo_static
+
+And since the backend state payload contains that “current window”, every /replay/step snapshot ships those arrays again.
+
+You’re right to question it: if the UI prevents resizing the x-axis and you’re not letting the user pan way back, then 800 is arbitrary overhead.
+
+What to do next (in order of impact)
+1) Quick win: stop asking for batched full snapshots
+
+If you’re currently running with _replayFetchBatch(steps>1) a lot, you’re potentially transferring multiples of that snapshot at once (because return_states returns an array of full states, not deltas). 
+
+demo_static
+
+Change: make _replayFetchBatch() always fetch disp_steps: 1 (no return_states) until deltas exist.
+
+This won’t make each request smaller, but it will prevent the worst-case payload spikes that happen when batching full snapshots.
+
+2) Reduce the history window from 800 to something tied to pixels
+
+Change the replay start logic so initial_history_bars is driven by visible candle capacity, not “1 month / capped to 800”.
+
+For example:
+
+target ~250–350 candles (enough context for overlays)
+
+plus a little slack
+
+That one change alone often cuts payload from ~135kb → ~40–60kb depending on what else is in the state.
+
+Where to change: replayStart() payload builder. 
+
+demo_static
+
+3) The real fix: implement true delta payloads
+
+Right now the backend always returns:
+
+return jsonify({"state": sess.get_state_payload(), "delta": {}})
+
+
+app
+
+Notice delta is always {}. So the “delta path” doesn’t exist yet.
+
+What you want instead:
+
+/replay/step optionally returns:
+
+delta: { append: {t,o,h,l,c,v}, overlays_append: {...}, ... }
+
+drop_n: 1 (or window_slide info)
+
+minimal meta (last timestamp, etc.)
+
+and no full state unless explicitly requested.
+
+That’s the point where payload drops to “a few hundred bytes per step”, and the jank from parse/GC largely disappears.
+
+Sanity check: why the append-only render change didn’t help
+
+Because it only attacked CPU churn in _renderReplayState(), not the transfer+parse cost.
+
+You can literally see in your own code that replay rendering is still “authoritative full state”:
+
+// Always render from authoritative state (delta is optional optimization).
+_renderReplayState(j.state); 
+
+demo_static
+
+So even if _renderReplayState() got smarter internally, it’s still being handed a giant object every step.
+
+If you want the shortest path to “smooth like a game engine”
+
+Do these in this exact order:
+
+Disable return_states batching for now (prevents giant spikes).
+
+Drop MAX_HISTORY_BARS from 800 → ~250 (immediate payload reduction).
+
+Add a delta mode to /replay/step and switch the RAF loop to apply deltas.
+
+If you paste the ReplaySession.get_state_payload() shape (or the class file where it’s defined), I can tell you exactly what fields are dominating the payload and propose a clean delta schema that doesn’t break your UI contract.

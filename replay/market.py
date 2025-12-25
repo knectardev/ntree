@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, List, Optional
@@ -23,6 +24,8 @@ class MarketFeed:
 
     symbol: str
     bars: List[Bar]
+    # Precomputed timestamps for bisect (epoch ms). Keeps replay payload generation fast.
+    _t_ms: Optional[List[int]] = None
 
     @classmethod
     def from_stock_data(
@@ -59,10 +62,12 @@ class MarketFeed:
             conn.close()
 
         bars: List[Bar] = []
+        t_ms: List[int] = []
         for (ts, o, h, l, c, v) in rows:
+            dt = _parse_ts(ts)
             bars.append(
                 Bar(
-                    ts=_parse_ts(ts),
+                    ts=dt,
                     open=float(o),
                     high=float(h),
                     low=float(l),
@@ -70,7 +75,12 @@ class MarketFeed:
                     volume=float(v or 0.0),
                 )
             )
-        return cls(symbol=symbol, bars=bars)
+            try:
+                t_ms.append(int(dt.timestamp() * 1000))
+            except Exception:
+                # Fallback: keep list aligned even if parsing is odd.
+                t_ms.append(0)
+        return cls(symbol=symbol, bars=bars, _t_ms=t_ms)
 
     def iter_window(self, *, start_idx: int, end_idx_exclusive: int) -> Iterable[Bar]:
         for i in range(start_idx, min(end_idx_exclusive, len(self.bars))):
@@ -82,5 +92,27 @@ class MarketFeed:
             if b.ts == ts:
                 return i
         return None
+
+    def range_indices(self, *, start_ts: datetime, end_ts_exclusive: datetime) -> tuple[int, int]:
+        """
+        Return (start_idx, end_idx) for bars whose timestamps are in [start_ts, end_ts_exclusive).
+        Uses bisect on epoch-ms list when available; falls back to linear scan if needed.
+        """
+        if not self.bars:
+            return (0, 0)
+        if self._t_ms and len(self._t_ms) == len(self.bars):
+            s = int(start_ts.timestamp() * 1000)
+            e = int(end_ts_exclusive.timestamp() * 1000)
+            i0 = bisect.bisect_left(self._t_ms, s)
+            i1 = bisect.bisect_left(self._t_ms, e)
+            return (max(0, i0), max(0, i1))
+        # Fallback: linear scan (should be rare).
+        i0 = 0
+        while i0 < len(self.bars) and self.bars[i0].ts < start_ts:
+            i0 += 1
+        i1 = i0
+        while i1 < len(self.bars) and self.bars[i1].ts < end_ts_exclusive:
+            i1 += 1
+        return (i0, i1)
 
 
