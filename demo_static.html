@@ -5489,6 +5489,11 @@
       // *cause* the stop/start cadence even if we buffer.
       var low = 2;
       var want = 4; // batch size
+      // If we detected a delta alignment issue, force an immediate resync fetch.
+      if(state.replay.deltaMode && state.replay._forceResync){
+        force = true;
+        want = 1;
+      }
       if(!force && _replayQueueLen() >= low) return;
       state.replay._prefetchInFlight = true;
       // Fetch a batch of future steps. We don't render immediately; we enqueue.
@@ -5516,9 +5521,14 @@
     try{
       if(!state || !state.replay) return false;
       if(!Array.isArray(state.replay._queue) || !state.replay._queue.length) return false;
-      var st = state.replay._queue.shift();
-      if(!st) return false;
-      _renderReplayState(st, { skipDraw: true });
+      var item = state.replay._queue.shift();
+      if(!item) return false;
+      if(state.replay.deltaMode){
+        var ok = _applyReplayDelta(item, { skipDraw: true });
+        if(!ok) return false;
+      } else {
+        _renderReplayState(item, { skipDraw: true });
+      }
       state.replay._needsDraw = true;
       return true;
     } catch(_e){
@@ -6510,6 +6520,241 @@
       }
     } catch(_eFS2){}
   }
+
+  function _applyReplayDelta(item, opts){
+    var o = opts || {};
+    try{
+      if(!item) return false;
+      // If server included a full resync snapshot, just render it (correctness-first).
+      if(item.state){
+        _renderReplayState(item.state, o);
+        return true;
+      }
+      var d = item.delta || null;
+      if(!d) return false;
+      if(!state || !state.replay) return false;
+
+      var drop = Math.max(0, Math.floor(Number(d.drop) || 0));
+      var appendBars = Array.isArray(d.append_bars) ? d.append_bars : [];
+      if(!Array.isArray(state.dataFull) || !state.dataFull.length){
+        state.replay._forceResync = true;
+        return false;
+      }
+      function _allSessionsEnabled(){
+        try{
+          return !!(
+            (!ui.sessPreMarket || ui.sessPreMarket.checked) &&
+            (!ui.sessAfterHours || ui.sessAfterHours.checked) &&
+            (!ui.sessClosed || ui.sessClosed.checked)
+          );
+        } catch(_e){ return true; }
+      }
+      var _filtersAll = _allSessionsEnabled();
+      if(_filtersAll){
+        // Fast delta path assumes no filtering, so keep data as the authoritative full window.
+        if(state.data !== state.dataFull) state.data = state.dataFull;
+      }
+
+      // Fixed-window expectation: usually drop === appendBars.length.
+      if(drop > 0 && appendBars.length && drop !== appendBars.length){
+        state.replay._forceResync = true;
+      }
+
+      if(drop){
+        state.dataFull.splice(0, drop);
+        if(_filtersAll){
+          try{
+            if(Array.isArray(state._sessionType) && state._sessionType.length >= drop) state._sessionType.splice(0, drop);
+          } catch(_eS){}
+          try{
+            if(Array.isArray(state.ha) && state.ha.length >= drop) state.ha.splice(0, drop);
+          } catch(_eHa){}
+          try{
+            if(Array.isArray(state.overlays)){
+              for(var si=0; si<state.overlays.length; si++){
+                var s = state.overlays[si];
+                if(s && Array.isArray(s.y) && s.y.length >= drop) s.y.splice(0, drop);
+                if(s && Array.isArray(s.t_ms) && s.t_ms.length >= drop) s.t_ms.splice(0, drop);
+              }
+            }
+          } catch(_eOv){}
+        }
+      }
+
+      function barFromDelta(b){
+        var tm = parseIsoToMs(b && b.ts);
+        return {
+          t: Number.isFinite(tm) ? tm : NaN,
+          o: Number(b && b.o),
+          h: Number(b && b.h),
+          l: Number(b && b.l),
+          c: Number(b && b.c),
+          v: Number(b && b.v),
+          bid: NaN,
+          ask: NaN
+        };
+      }
+
+      var newOnes = [];
+      for(var i=0;i<appendBars.length;i++){
+        var bb = appendBars[i];
+        if(!bb) continue;
+        var b2 = barFromDelta(bb);
+        if(b2 && Number.isFinite(Number(b2.t))) newOnes.push(b2);
+      }
+      for(var j=0;j<newOnes.length;j++) state.dataFull.push(newOnes[j]);
+
+      // Keep replay.lastState updated so applySessionFilter() can build server-authoritative overlays.
+      try{
+        if(!state.replay.lastState) state.replay.lastState = {};
+        var ls = state.replay.lastState;
+        if(!ls.display_series) ls.display_series = { bars: [] };
+        if(!Array.isArray(ls.display_series.bars)) ls.display_series.bars = [];
+        if(drop && ls.display_series.bars.length >= drop) ls.display_series.bars.splice(0, drop);
+        for(var jj=0;jj<appendBars.length;jj++){
+          var rb = appendBars[jj];
+          if(rb) ls.display_series.bars.push(rb);
+        }
+        if(item.meta && item.meta.disp_window_end){
+          if(!ls.clock) ls.clock = {};
+          if(!ls.clock.disp_window) ls.clock.disp_window = {};
+          ls.clock.disp_window.end = String(item.meta.disp_window_end);
+        }
+        // Shift+append overlays in lastState (window-sized).
+        var oaLS = d.overlays_append || {};
+        if(!ls.overlays) ls.overlays = {};
+        var ovLS = ls.overlays;
+        if(!ovLS.ema) ovLS.ema = {};
+        function shiftAppend(arr, pt){
+          if(!Array.isArray(arr)) arr = [];
+          if(drop && arr.length >= drop) arr.splice(0, drop);
+          if(pt) arr.push(pt);
+          return arr;
+        }
+        try{
+          var emaLS = oaLS.ema || {};
+          var p9 = (Array.isArray(emaLS['9']) && emaLS['9'].length) ? emaLS['9'][emaLS['9'].length - 1] : null;
+          var p21 = (Array.isArray(emaLS['21']) && emaLS['21'].length) ? emaLS['21'][emaLS['21'].length - 1] : null;
+          var p50 = (Array.isArray(emaLS['50']) && emaLS['50'].length) ? emaLS['50'][emaLS['50'].length - 1] : null;
+          ovLS.ema['9'] = shiftAppend(ovLS.ema['9'], p9);
+          ovLS.ema['21'] = shiftAppend(ovLS.ema['21'], p21);
+          ovLS.ema['50'] = shiftAppend(ovLS.ema['50'], p50);
+        } catch(_eEmaLS){}
+        try{
+          var vwLS = (Array.isArray(oaLS.vwap) && oaLS.vwap.length) ? oaLS.vwap[oaLS.vwap.length - 1] : null;
+          ovLS.vwap = shiftAppend(ovLS.vwap, vwLS);
+        } catch(_eVwLS){}
+      } catch(_eLS){}
+
+      // If session filters are active, rebuild filtered view + derived arrays for correctness.
+      if(!_filtersAll){
+        try{
+          applySessionFilter({ skipSave: true, skipDraw: true });
+        } catch(_eFilt){}
+        state.followLatest = true;
+        state.hoverIdx = -1;
+        if(!o.skipDraw) draw();
+        return true;
+      }
+
+      // Session types (best-effort; fast path only)
+      try{
+        if(!Array.isArray(state._sessionType)) state._sessionType = [];
+        for(var k=0;k<newOnes.length;k++){
+          var t2 = Number(newOnes[k].t);
+          state._sessionType.push(Number.isFinite(t2) ? sessionTypeForMsEt(t2) : 'closed');
+        }
+      } catch(_eSess){}
+
+      // HA append-only if enabled
+      try{
+        var needHa = !!(ui && ui.showCandles && ui.showCandles.checked && state && state.candleStyle === 'ha');
+        function appendHa(prevHa, rawBar){
+          var oo = Number(rawBar.o), hh = Number(rawBar.h), ll = Number(rawBar.l), cc = Number(rawBar.c);
+          var haClose = (oo + hh + ll + cc) / 4;
+          var prevOpen = prevHa ? Number(prevHa.o) : NaN;
+          var prevClose = prevHa ? Number(prevHa.c) : NaN;
+          var haOpen = (!Number.isFinite(prevOpen) || !Number.isFinite(prevClose)) ? ((oo + cc) / 2) : ((prevOpen + prevClose) / 2);
+          var haHigh = Math.max(hh, haOpen, haClose);
+          var haLow = Math.min(ll, haOpen, haClose);
+          return { o: haOpen, h: haHigh, l: haLow, c: haClose };
+        }
+        if(needHa){
+          if(!Array.isArray(state.ha)) state.ha = [];
+          var prev = state.ha.length ? state.ha[state.ha.length - 1] : null;
+          for(var a=0;a<newOnes.length;a++){
+            var haBar = appendHa(prev, newOnes[a]);
+            state.ha.push(haBar);
+            prev = haBar;
+          }
+          // Safety: if anything drifted (e.g. after a resync/mismatch), rebuild once from authoritative bars.
+          if(!Array.isArray(state.ha) || state.ha.length !== state.dataFull.length){
+            state.ha = computeHeikinAshi(state.dataFull);
+          }
+        } else {
+          state.ha = [];
+        }
+      } catch(_eHa2){
+        state.ha = [];
+      }
+
+      // Overlays append (server-authoritative)
+      try{
+        var os = getOverlaySettings();
+        if(!os || !anyOverlayEnabled(os)){
+          state.overlays = [];
+        } else if(Array.isArray(state.overlays) && state.overlays.length){
+          var oa = d.overlays_append || {};
+          var ema = oa.ema || {};
+          var vwap = oa.vwap || [];
+          function pushPoint(seriesKey, pt){
+            if(!pt) return;
+            var v = (pt.v !== null && pt.v !== undefined) ? Number(pt.v) : NaN;
+            for(var ii=0; ii<state.overlays.length; ii++){
+              var s2 = state.overlays[ii];
+              if(!s2 || s2.key !== seriesKey) continue;
+              if(!Array.isArray(s2.y)) s2.y = [];
+              if(!Array.isArray(s2.t_ms)) s2.t_ms = [];
+              s2.y.push(Number.isFinite(v) ? v : NaN);
+              var tms = state.dataFull.length ? Number(state.dataFull[state.dataFull.length - 1].t) : NaN;
+              s2.t_ms.push(Number.isFinite(tms) ? tms : NaN);
+              return;
+            }
+          }
+          if(os.ema9 && Array.isArray(ema['9']) && ema['9'].length) pushPoint('ema_9', ema['9'][ema['9'].length - 1]);
+          if(os.ema21 && Array.isArray(ema['21']) && ema['21'].length) pushPoint('ema_21', ema['21'][ema['21'].length - 1]);
+          if(os.ema50 && Array.isArray(ema['50']) && ema['50'].length) pushPoint('ema_50', ema['50'][ema['50'].length - 1]);
+          if(os.vwap && Array.isArray(vwap) && vwap.length) pushPoint('vwap_session', vwap[vwap.length - 1]);
+        } else {
+          state.overlays = [];
+        }
+      } catch(_eOv2){
+        state.overlays = [];
+      }
+
+      // Update metadata/bounds (best-effort)
+      try{
+        if(!state.replay.lastState) state.replay.lastState = {};
+        if(item.position) state.replay.lastState.position = item.position;
+        if(item.orders) state.replay.lastState.orders = item.orders;
+        if(item.meta && item.meta.disp_window_end){
+          var endMs = parseIsoToMs(item.meta.disp_window_end);
+          if(Number.isFinite(endMs)){
+            state.datasetEndMs = endMs;
+            state.viewEndMs = endMs;
+          }
+        }
+      } catch(_eMeta){}
+
+      state.followLatest = true;
+      state.hoverIdx = -1;
+      if(!o.skipDraw) draw();
+      return true;
+    } catch(_e){
+      try{ if(state && state.replay) state.replay._forceResync = true; } catch(_e2){}
+      return false;
+    }
+  }
   async function replayStart(opts){
     var o = opts || {};
     await _endReplaySession();
@@ -6534,7 +6779,9 @@
       disp_tf_sec: dispTf,
       // Randomize scenario/anchor each time replay starts.
       seed: Math.floor(Math.random() * 1000000000),
-      snap_to_disp_boundary: true
+      snap_to_disp_boundary: true,
+      // Opt-in delta protocol for replay (keeps payloads tiny per step).
+      delta_mode: true
     };
     // Display history: one month of display buckets (plus small slack).
     var targetSpanMs = Number(SPAN_PRESETS['1m']) || (30*24*60*60*1000);
@@ -6555,6 +6802,8 @@
       var j = await _postJson('/replay/start', payload);
       state.replay.active = true;
       state.replay.sessionId = String(j.session_id || '');
+      state.replay.deltaMode = true;
+      state.replay._forceResync = false;
       state.replay.playing = false;
       state.replay.timer = null;
       _renderReplayState(j.state);
@@ -6586,7 +6835,18 @@
     try{
       var t0 = (window.performance && performance.now) ? performance.now() : Date.now();
       var payload = { session_id: state.replay.sessionId, disp_steps: steps };
-      if(steps > 1) payload.return_states = true;
+      if(state.replay.deltaMode){
+        payload.delta_only = true;
+        payload.return_deltas = (steps > 1);
+        payload.resync_every = 500;
+        if(state.replay._forceResync){
+          payload.force_state = true;
+          try{ state.replay._queue = []; } catch(_eQ){}
+          state.replay._forceResync = false;
+        }
+      } else {
+        if(steps > 1) payload.return_states = true;
+      }
       var j = await _postJson('/replay/step', payload);
       var t1 = (window.performance && performance.now) ? performance.now() : Date.now();
       try{
@@ -6610,6 +6870,10 @@
           dbgSample.fetch_ms = Math.max(0, t1 - t0);
         }
       } catch(_eS0){}
+      if(state.replay.deltaMode){
+        var deltas = (j && Array.isArray(j.deltas) && j.deltas.length) ? j.deltas : (j && j.delta ? [j] : []);
+        return deltas;
+      }
       var states = (j && Array.isArray(j.states) && j.states.length) ? j.states : (j && j.state ? [j.state] : []);
       return states;
     } catch(e){

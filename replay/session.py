@@ -28,7 +28,10 @@ def _utc_now() -> datetime:
 
 
 def _parse_iso(ts: str) -> datetime:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 def _ceil_time_to_step(dt: datetime, step_sec: int) -> datetime:
     """
@@ -218,6 +221,19 @@ class ReplaySession:
             self._disp_cursor_start_ts = anchor_dt.astimezone(timezone.utc)
         self._last_event_id = 0
         self._last_bar = None  # last consumed exec bar (for market fills)
+
+        # Delta-mode (opt-in) cache:
+        # - Maintains a fixed-length rolling display window for fast {drop, append} updates.
+        # - Keeps server-authoritative overlays as rolling windows + append points.
+        self._delta_inited: bool = False
+        self._delta_hist: int = max(10, int(cfg.initial_history_bars))
+        self._delta_window_end: Optional[datetime] = None  # exclusive end timestamp for the current right-edge bucket
+        self._delta_bars: List[Dict[str, Any]] = []  # [{"ts","o","h","l","c","v"}] length == _delta_hist
+        self._delta_overlays: Dict[str, Any] = {}  # {"ema": {"9":[{ts,v}], ...}, "vwap":[{ts,v}]}
+        self._delta_ema_last: Dict[str, Optional[float]] = {}  # keys "9","21","50"
+        self._delta_vwap_state: Dict[str, Any] = {}  # incremental state for session VWAP
+        self._delta_steps: int = 0  # number of delta steps emitted (for periodic resync)
+        self._delta_ny_tz = None
 
         # Persist session record
         self._persist_session_row(status="active")
@@ -413,6 +429,435 @@ class ReplaySession:
             "overlays": overlays,  # optional; UI can handle empty
             "score": {},     # optional
         }
+
+    # -----------------------
+    # Delta-mode (opt-in) API
+    # -----------------------
+
+    def _delta_get_ny_tz(self):
+        """
+        Best-effort tz object for America/New_York. Mirrors _vwap_session_series behavior.
+        Cached per session for delta stepping.
+        """
+        if self._delta_ny_tz is not None:
+            return self._delta_ny_tz
+        ny = None
+        if ZoneInfo is not None:
+            try:
+                ny = ZoneInfo("America/New_York")
+            except Exception:
+                ny = None
+        if ny is None and pytz is not None:
+            try:
+                ny = pytz.timezone("America/New_York")
+            except Exception:
+                ny = None
+        self._delta_ny_tz = ny
+        return ny
+
+    def _delta_vwap_next(
+        self,
+        *,
+        dt_utc: datetime,
+        high: float,
+        low: float,
+        close: float,
+        volume: float,
+    ) -> Optional[float]:
+        """
+        Incremental VWAP update to match _vwap_session_series logic.
+        State lives in self._delta_vwap_state.
+        """
+        ny = self._delta_get_ny_tz()
+        if ny is None:
+            return None
+
+        # Init state dict once.
+        st = self._delta_vwap_state
+        if not st:
+            st["open_mins"] = 9 * 60 + 30
+            st["close_mins"] = 16 * 60
+            st["cum_pv"] = 0.0
+            st["cum_v"] = 0.0
+            st["prev_day_key"] = None
+            st["prev_mins"] = -1
+            st["last_reg_vwap"] = None
+
+        if dt_utc.tzinfo is None:
+            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+        dt_ny = dt_utc.astimezone(ny)
+        mins = dt_ny.hour * 60 + dt_ny.minute
+        day_key = (dt_ny.year, dt_ny.month, dt_ny.day)
+
+        open_mins = int(st["open_mins"])
+        close_mins = int(st["close_mins"])
+
+        reset = False
+        if st["prev_day_key"] is None:
+            reset = True
+        elif day_key != st["prev_day_key"]:
+            reset = True
+        elif int(st["prev_mins"]) < open_mins <= mins:
+            reset = True
+
+        if reset:
+            st["cum_pv"] = 0.0
+            st["cum_v"] = 0.0
+            st["last_reg_vwap"] = None
+
+        out: Optional[float]
+        if mins < open_mins:
+            out = None
+        elif mins >= close_mins:
+            out = st["last_reg_vwap"]
+        else:
+            tp = (float(high) + float(low) + float(close)) / 3.0
+            if tp != tp:  # NaN
+                tp = float(close)
+            vv = float(volume) if volume == volume else 0.0
+            if vv < 0:
+                vv = 0.0
+            st["cum_pv"] = float(st["cum_pv"]) + tp * vv
+            st["cum_v"] = float(st["cum_v"]) + vv
+            out = (float(st["cum_pv"]) / float(st["cum_v"])) if float(st["cum_v"]) > 0 else tp
+            st["last_reg_vwap"] = out
+
+        st["prev_day_key"] = day_key
+        st["prev_mins"] = mins
+        return out
+
+    def _delta_aggregate_bar(
+        self, *, start_ts: datetime, end_ts_exclusive: datetime
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Aggregate exec bars into one display bar for [start_ts, end_ts_exclusive).
+        If empty, return None (skip closed/gap windows to match the legacy snapshot behavior).
+        """
+        i0, i1 = self.feed.range_indices(start_ts=start_ts, end_ts_exclusive=end_ts_exclusive)
+        if i1 > i0:
+            o = float(self.feed.bars[i0].open)
+            h = float(self.feed.bars[i0].high)
+            l = float(self.feed.bars[i0].low)
+            c = float(self.feed.bars[i0].close)
+            v = float(self.feed.bars[i0].volume or 0.0)
+            for b in self.feed.bars[i0 + 1 : i1]:
+                h = max(h, float(b.high))
+                l = min(l, float(b.low))
+                c = float(b.close)
+                v += float(b.volume or 0.0)
+            return {"ts": _iso_z(start_ts), "o": o, "h": h, "l": l, "c": c, "v": v}
+        return None
+
+    def _delta_init_cache(self) -> None:
+        """
+        Initialize the fixed-length rolling window and overlay series used by delta-only stepping.
+        This does NOT change default snapshot behavior; it's only used when delta_mode/delta_only is requested.
+        """
+        if self._delta_inited:
+            return
+        disp_tf_sec = int(self.cfg.disp_tf_sec)
+        step = timedelta(seconds=max(1, disp_tf_sec))
+        hist = max(10, int(self.cfg.initial_history_bars))
+        self._delta_hist = hist
+
+        # Keep initial semantics aligned with existing UI: window_end is "current display window end".
+        # (demo_static clamps viewEnd to this.)
+        window_end = self._disp_cursor_start_ts + step
+        self._delta_window_end = window_end
+
+        series_start = window_end - step * hist
+        bars: List[Dict[str, Any]] = []
+        # Build rolling bars window by aggregating each display bucket and skipping empty windows.
+        for i in range(hist):
+            b_start = series_start + step * i
+            b_end = b_start + step
+            bb = self._delta_aggregate_bar(start_ts=b_start, end_ts_exclusive=b_end)
+            if bb is not None:
+                bars.append(bb)
+        self._delta_bars = bars
+
+        # Seed overlay rolling windows (server-authoritative) and incremental state.
+        ts_list: List[datetime] = []
+        h_list: List[float] = []
+        l_list: List[float] = []
+        c_list: List[float] = []
+        v_list: List[float] = []
+        for i in range(len(bars)):
+            dt = _parse_iso(str(bars[i]["ts"]))
+            ts_list.append(dt.astimezone(timezone.utc))
+            h_list.append(float(bars[i]["h"]))
+            l_list.append(float(bars[i]["l"]))
+            c_list.append(float(bars[i]["c"]))
+            v_list.append(float(bars[i]["v"]))
+
+        ema9 = _ema_series(c_list, 9) if c_list else []
+        ema21 = _ema_series(c_list, 21) if c_list else []
+        ema50 = _ema_series(c_list, 50) if c_list else []
+
+        # Reset VWAP state and compute window series using incremental updater (ensures continuity state is correct).
+        self._delta_vwap_state = {}
+        vwap_vals: List[Optional[float]] = []
+        for i in range(len(ts_list)):
+            vwap_vals.append(
+                self._delta_vwap_next(
+                    dt_utc=ts_list[i],
+                    high=h_list[i],
+                    low=l_list[i],
+                    close=c_list[i],
+                    volume=v_list[i],
+                )
+            )
+
+        def points(ts: List[datetime], vals: List[Optional[float]]) -> List[Dict[str, Any]]:
+            out: List[Dict[str, Any]] = []
+            n = min(len(ts), len(vals))
+            for i in range(n):
+                out.append({"ts": _iso_z(ts[i]), "v": vals[i]})
+            return out
+
+        self._delta_overlays = {
+            "ema": {"9": points(ts_list, ema9), "21": points(ts_list, ema21), "50": points(ts_list, ema50)},
+            "vwap": points(ts_list, vwap_vals),
+        }
+        # Store last EMA values for incremental stepping (None-safe).
+        self._delta_ema_last = {
+            "9": (ema9[-1] if ema9 else None),
+            "21": (ema21[-1] if ema21 else None),
+            "50": (ema50[-1] if ema50 else None),
+        }
+        self._delta_steps = 0
+        self._delta_inited = True
+
+    def get_state_payload_delta(self) -> Dict[str, Any]:
+        """
+        Full snapshot payload for delta mode (fixed window + overlays).
+        Shape matches demo_static.html expectations, but uses a fixed-length bars window.
+        """
+        self._delta_init_cache()
+        st = self.get_state()
+        disp_tf = int(self.cfg.disp_tf_sec)
+        exec_tf = int(self.cfg.exec_tf_sec)
+        step = timedelta(seconds=max(1, disp_tf))
+        window_end = self._delta_window_end or (self._disp_cursor_start_ts + step)
+        window_start = window_end - step
+
+        # Position payload (same style as get_state_payload).
+        last_px = None
+        try:
+            if self._delta_bars:
+                last_px = float(self._delta_bars[-1]["c"])
+        except Exception:
+            last_px = None
+        unreal = 0.0
+        try:
+            if last_px is not None and float(self.position.qty) != 0:
+                unreal = (last_px - float(self.position.avg_price)) * float(self.position.qty)
+        except Exception:
+            unreal = 0.0
+
+        return {
+            "session_id": st.session_id,
+            "symbol": st.symbol,
+            "exec_tf_sec": exec_tf,
+            "disp_tf_sec": disp_tf,
+            "requested_range": {"start": self.cfg.t_start, "end": self.cfg.t_end},
+            "actual_range": {
+                "start": _iso_z(self.feed.bars[0].ts) if self.feed.bars else self.cfg.t_start,
+                "end": _iso_z(self.feed.bars[-1].ts) if self.feed.bars else self.cfg.t_end,
+            },
+            "clock": {
+                "exec_cursor_ts": _iso_z(st.cursor_exec_ts),
+                "disp_window": {"start": _iso_z(window_start), "end": _iso_z(window_end)},
+            },
+            "display_series": {"bars": list(self._delta_bars)},
+            "position": {
+                "qty": float(self.position.qty),
+                "avg_price": float(self.position.avg_price),
+                "realized_pnl": float(self.position.realized_pnl),
+                "unrealized_pnl": float(unreal),
+            },
+            "orders": [o.__dict__ for o in st.orders],
+            "overlays": self._delta_overlays,
+            "score": {},
+        }
+
+    def step_delta(
+        self,
+        *,
+        resync_every: int = 0,
+        force_state: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Advance the simulation by 1 display step, returning a delta payload.
+        May include a full `state` snapshot occasionally for resync (or when forced).
+        """
+        self._delta_init_cache()
+
+        before_end = self._delta_window_end
+
+        disp_tf_sec = int(self.cfg.disp_tf_sec)
+        step_td = timedelta(seconds=max(1, disp_tf_sec))
+        if before_end is None:
+            before_end = self._disp_cursor_start_ts + step_td
+
+        # Delta playback should feel like a steady "tick" even during closed hours/weekends.
+        # Instead of emitting no-op deltas (which makes the UI appear stalled), fast-forward
+        # over empty windows until we find a real bar to append.
+        st_after = None
+        new_end = before_end
+        bar = None
+        max_skips = 256  # safety: cap fast-forwarding in a single delta step
+        for _ in range(max_skips):
+            # Step sim (fills/orders/position); advances internal cursor by 1 display window.
+            st_after = self.step(disp_steps=1)
+            if st_after.paused and self._disp_cursor_start_ts >= self._t_end_dt:
+                full = self.get_state_payload_delta()
+                return {"ok": True, "delta": {"drop": 0, "append_bars": [], "overlays_append": {}}, "state": full}
+
+            new_end = new_end + step_td
+            self._delta_window_end = new_end
+            bar = self._delta_aggregate_bar(start_ts=new_end - step_td, end_ts_exclusive=new_end)
+            if bar is not None:
+                break
+
+        # If we couldn't find a bar within max_skips, emit a no-op delta as a fallback (rare).
+        if bar is None:
+            self._delta_steps = int(self._delta_steps) + 1
+            out0: Dict[str, Any] = {
+                "ok": True,
+                "delta": {"drop": 0, "append_bars": [], "overlays_append": {}},
+                "position": {
+                    "qty": float(self.position.qty),
+                    "avg_price": float(self.position.avg_price),
+                    "realized_pnl": float(self.position.realized_pnl),
+                    "unrealized_pnl": 0.0,
+                },
+                "orders": [o.__dict__ for o in self.get_state().orders],
+                "meta": {"disp_window_end": _iso_z(new_end), "delta_step": int(self._delta_steps), "disp_tf_sec": int(self.cfg.disp_tf_sec)},
+            }
+            include_state0 = bool(force_state)
+            if not include_state0 and resync_every:
+                try:
+                    n0 = max(1, int(resync_every))
+                    if (self._delta_steps % n0) == 0:
+                        include_state0 = True
+                except Exception:
+                    include_state0 = False
+            if include_state0:
+                out0["state"] = self.get_state_payload_delta()
+            return out0
+
+        # Slide window by 1 (only when we have a real bar).
+        drop = 1 if self._delta_bars else 0
+        if drop and self._delta_bars:
+            self._delta_bars.pop(0)
+        self._delta_bars.append(bar)
+
+        # Overlays append (server-authoritative, append-only points).
+        # EMA incremental: same constants as _ema_series.
+        k9 = 2.0 / (9.0 + 1.0)
+        k21 = 2.0 / (21.0 + 1.0)
+        k50 = 2.0 / (50.0 + 1.0)
+        c = float(bar["c"])
+        ema_append: Dict[str, Dict[str, Any]] = {}
+        for p, k in (("9", k9), ("21", k21), ("50", k50)):
+            prev = self._delta_ema_last.get(p)
+            if prev is None:
+                ema = c
+            else:
+                ema = float(c) * float(k) + float(prev) * (1.0 - float(k))
+            self._delta_ema_last[p] = ema
+            ema_append[p] = {"ts": str(bar["ts"]), "v": ema}
+
+        # VWAP incremental.
+        dt_utc = _parse_iso(str(bar["ts"])).astimezone(timezone.utc)
+        vwap_v = self._delta_vwap_next(
+            dt_utc=dt_utc, high=float(bar["h"]), low=float(bar["l"]), close=float(bar["c"]), volume=float(bar["v"])
+        )
+        vwap_append = {"ts": str(bar["ts"]), "v": vwap_v}
+
+        # Maintain rolling overlay windows for resync snapshots.
+        try:
+            ov = self._delta_overlays
+            if isinstance(ov.get("ema"), dict):
+                for p in ("9", "21", "50"):
+                    arr = ov["ema"].get(p)
+                    if isinstance(arr, list) and arr:
+                        arr.pop(0)
+                        arr.append({"ts": str(bar["ts"]), "v": ema_append[p]["v"]})
+            vw = ov.get("vwap")
+            if isinstance(vw, list) and vw:
+                vw.pop(0)
+                vw.append({"ts": str(bar["ts"]), "v": vwap_v})
+        except Exception:
+            # If maintenance fails, we can still emit append points; resync will rebuild on demand.
+            pass
+
+        # Count emitted deltas (not internal skipped windows).
+        self._delta_steps = int(self._delta_steps) + 1
+
+        include_state = bool(force_state)
+        if not include_state and resync_every:
+            try:
+                n = max(1, int(resync_every))
+                if (self._delta_steps % n) == 0:
+                    include_state = True
+            except Exception:
+                include_state = False
+
+        # Lightweight position/orders snapshot each tick (small; keeps UI reactive without full state).
+        last_px = None
+        try:
+            if self._delta_bars:
+                last_px = float(self._delta_bars[-1]["c"])
+        except Exception:
+            last_px = None
+        unreal = 0.0
+        try:
+            if last_px is not None and float(self.position.qty) != 0:
+                unreal = (last_px - float(self.position.avg_price)) * float(self.position.qty)
+        except Exception:
+            unreal = 0.0
+
+        out: Dict[str, Any] = {
+            "ok": True,
+            "delta": {
+                "drop": drop,
+                "append_bars": [bar],
+                "overlays_append": {
+                    "ema": {"9": [ema_append["9"]], "21": [ema_append["21"]], "50": [ema_append["50"]]},
+                    "vwap": [vwap_append],
+                },
+            },
+            "position": {
+                "qty": float(self.position.qty),
+                "avg_price": float(self.position.avg_price),
+                "realized_pnl": float(self.position.realized_pnl),
+                "unrealized_pnl": float(unreal),
+            },
+            "orders": [o.__dict__ for o in self.get_state().orders],
+            "meta": {"disp_window_end": _iso_z(new_end), "delta_step": int(self._delta_steps), "disp_tf_sec": int(self.cfg.disp_tf_sec)},
+        }
+        if include_state:
+            out["state"] = self.get_state_payload_delta()
+        return out
+
+    def step_delta_payloads(
+        self,
+        *,
+        disp_steps: int = 1,
+        resync_every: int = 0,
+        force_state: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Batch delta stepping: returns one delta item per step (small payloads; safe to buffer on the client).
+        """
+        steps = max(1, int(disp_steps))
+        out: List[Dict[str, Any]] = []
+        for i in range(steps):
+            # Only force_state on the first item (client uses it to realign); periodic resync handles the rest.
+            out.append(self.step_delta(resync_every=resync_every, force_state=force_state if i == 0 else False))
+        return out
 
     def step_payloads(self, *, disp_steps: int = 1) -> List[Dict[str, Any]]:
         """

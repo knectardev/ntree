@@ -1510,6 +1510,7 @@ def replay_start():
     initial_history_bars = payload.get("initial_history_bars")
     min_future_disp_bars = payload.get("min_future_disp_bars")
     min_anchor_age_days = payload.get("min_anchor_age_days")
+    delta_mode = bool(payload.get("delta_mode") or payload.get("delta") or False)
 
     try:
         initial_history_bars_int = int(initial_history_bars) if initial_history_bars is not None else 200
@@ -1604,7 +1605,9 @@ def replay_start():
         return jsonify({"error": str(e)}), 400
 
     _REPLAY_SESSIONS[sess.session_id] = sess
-    state_payload = sess.get_state_payload()
+    # Default: keep existing snapshot payload for backwards compatibility.
+    # Delta mode (opt-in): return a fixed-length window snapshot aligned with delta-only stepping.
+    state_payload = sess.get_state_payload_delta() if delta_mode else sess.get_state_payload()
     return jsonify({"session_id": sess.session_id, "state": state_payload})
 
 
@@ -1614,9 +1617,30 @@ def replay_step():
     session_id = (payload.get("session_id") or "").strip()
     disp_steps = int(payload.get("disp_steps") or 1)
     return_states = bool(payload.get("return_states") or payload.get("batch") or False)
+    delta_only = bool(payload.get("delta_only") or (str(payload.get("mode") or "").lower() == "delta"))
+    # Resync controls (delta mode only)
+    force_state = bool(payload.get("force_state") or payload.get("resync") or False)
+    try:
+        resync_every = int(payload.get("resync_every") or payload.get("resync_interval") or 0)
+    except Exception:
+        resync_every = 0
+    resync_every = max(0, min(5000, resync_every))
+    return_deltas = bool(payload.get("return_deltas") or payload.get("deltas") or False)
     sess = _get_replay_session(session_id)
     if not sess:
         return jsonify({"error": "session not found"}), 404
+
+    # Delta-only stepping (opt-in): return tiny payloads.
+    # Supports batching by returning one delta item per step (safe to buffer client-side).
+    if delta_only:
+        steps = max(1, int(disp_steps))
+        if steps > 1 or return_deltas:
+            deltas = sess.step_delta_payloads(disp_steps=steps, resync_every=resync_every, force_state=force_state)
+            last = deltas[-1] if deltas else None
+            # Convenience: also include the last state if it was included (helps some callers).
+            return jsonify({"deltas": deltas, "state": (last or {}).get("state")})
+        d = sess.step_delta(resync_every=resync_every, force_state=force_state)
+        return jsonify(d)
 
     # For smooth browser playback we optionally return one state payload per display step.
     # Backwards-compatible: if return_states is false (or disp_steps==1), return a single state.

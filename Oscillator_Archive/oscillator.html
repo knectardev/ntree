@@ -1,0 +1,1014 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Detrend + Oscillation Scan (Continuous Series Demo)</title>
+  <style>
+    :root{
+      --bg:#050505;
+      --panel:#0b0b0b;
+      --grid:#171717;
+      --fg:#eaeaea;
+      --muted:#9a9a9a;
+      --accent:#ff2bd6;
+      --up:#1fd28e;
+      --dn:#ff4b5c;
+      --line:#ffe400;
+      --ghost:#0f0f0f;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+    .wrap{display:grid;grid-template-columns:290px 1fr;min-height:100vh;}
+    .sidebar{padding:14px;border-right:1px solid #111;background:linear-gradient(#070707,#040404);}
+    .row{margin:10px 0;}
+    label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px;}
+    select,button,input{
+      width:100%;padding:9px 10px;border-radius:10px;border:1px solid #1a1a1a;background:var(--panel);color:var(--fg);
+    }
+    button{cursor:pointer;background:#0e0e0e;}
+    button:hover{border-color:#2a2a2a;}
+    .chk{display:flex;align-items:center;gap:10px;user-select:none;cursor:pointer;color:var(--fg);}
+    .chk input{width:16px;height:16px;padding:0;}
+    .hint{margin-top:14px;padding:10px;border:1px solid #141414;border-radius:12px;background:#070707;color:var(--muted);font-size:12px;}
+
+    .main{padding:14px;}
+    .titlebar{display:flex;align-items:flex-end;gap:14px;justify-content:space-between;margin-bottom:10px;}
+    .titlebar h1{margin:0;font-size:16px;font-weight:800;}
+    .sub{color:var(--muted);font-size:12px;margin-top:2px;}
+    .status{color:var(--muted);font-size:12px;}
+
+    .panel{border:1px solid #111;border-radius:16px;background:radial-gradient(1200px 700px at 30% 20%,#0b0b0b 0%,#050505 55%,#040404 100%);
+           padding:10px;}
+    canvas{width:100%;height:100%;display:block;border-radius:12px;}
+
+    /* Cap chart heights so they don't grow endlessly on tall/wide screens */
+    .chartFrame{height:min(700px, 58vh);max-height:700px;}
+    .chartFrame.analysis{height:min(700px, 36vh);max-height:700px;}
+    .sp{height:12px;}
+    .pill{
+      display:inline-flex;gap:8px;align-items:center;
+      padding:4px 10px;border:1px solid #151515;border-radius:999px;
+      background:#070707;color:var(--muted);font-size:12px;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="sidebar">
+    <div class="row">
+      <div style="font-weight:800;">Continuous detrend + oscillation scan</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:4px;">(Archived the weekday-matrix framing)</div>
+    </div>
+
+    <div class="row">
+      <label for="ticker">Ticker</label>
+      <select id="ticker">
+        <option>QQQ</option>
+        <option>AAPL</option>
+        <option>SPY</option>
+        <option>TSLA</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="days">Trading days</label>
+      <select id="days">
+        <option value="5">5</option>
+        <option value="10" selected>10</option>
+        <option value="20">20</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="tf">Chart candle (minutes) <span style="color:var(--muted);font-weight:500;">(display only)</span></label>
+      <select id="tf">
+        <option value="1">1</option>
+        <option value="5" selected>5</option>
+        <option value="15">15</option>
+        <option value="30">30</option>
+      </select>
+      <div style="color:var(--muted);font-size:11px;margin-top:6px;">Candles are rendered at this resolution. Detrend + scan always use 1‑minute data.</div>
+    </div>
+
+    <div class="row">
+      <button id="regen">Regenerate random data</button>
+    </div>
+
+    <div class="row">
+      <label class="chk"><input id="toggleDetrend" type="checkbox" checked /> <span>Show detrended overlay</span></label>
+    </div>
+
+    <div class="row" style="display:flex;gap:10px;align-items:flex-end;">
+      <div style="flex:1;">
+        <label for="detrendHours">Detrend window (hours)</label>
+        <input id="detrendHours" type="number" min="0.01" step="0.01" value="2" />
+        <div style="color:var(--muted);font-size:11px;margin-top:6px;">Tip: this is the trend-removal horizon. Bigger = remove slower drift. (Separate from the “Selected period” below.)</div>
+      </div>
+      <div style="flex:1;">
+        <label for="scanWindow">Scan window (minutes)</label>
+        <input id="scanWindow" type="number" min="120" step="30" value="780" />
+      </div>
+    </div>
+
+    <div class="row">
+      <label class="chk"><input id="toggleScan" type="checkbox" checked /> <span>Show oscillation scan</span></label>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span class="pill">Selected period: <b id="selPeriod">Auto</b></span>
+        <span style="color:var(--muted);font-size:11px;">Click a bar to set the selected period (used for the cycle component).</span>
+      </div>
+    </div>
+
+    <div class="hint">
+      <div style="color:var(--accent);margin-bottom:6px;">What this does</div>
+      <div><b>Top</b>: continuous candles across N trading days (random walk).</div>
+      <div><b>Detrend overlay (magenta)</b>: computed from 1‑minute closes, then downsampled to match the chart candle resolution.</div>
+      <div><b>Residual (yellow)</b>: detrended close (1‑minute), then downsampled for display.</div>
+      <div><b>Oscillation scan</b>: scores candidate periods on the last <i>Scan window</i> minutes of 1‑minute data.</div>
+      <div style="margin-top:8px;color:var(--muted);"><b>Detrend window</b> = trend-removal horizon (bigger = remove slower drift).<br/>
+      <b>Scan window</b> = how many recent minutes are used when scoring the periods (bigger = more stable, less reactive).</div>
+    </div>
+
+    <div class="hint" style="margin-top:10px;">
+      <div style="color:var(--accent);margin-bottom:6px;">Open question</div>
+      <div>When you later switch to real data, do you want the scan to treat <b>overnight</b> as continuous time, or <b>session-only</b> (RTH concatenated)?</div>
+      <div style="margin-top:6px;">Right now this demo is <b>session-only</b> (390 minutes/day).</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="titlebar">
+      <div>
+        <h1>Detrend + Oscillation Scan (Continuous Series Demo)</h1>
+        <div class="sub">rolling linear detrend • simple period scan (energy × zero-crossing regularity)</div>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="panel">
+      <div class="chartFrame price"><canvas id="price"></canvas></div>
+      <div class="sp"></div>
+      <div class="chartFrame analysis"><canvas id="analysis"></canvas></div>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  // ---------------- Core constants ----------------
+  const MINUTES_PER_DAY = 390; // RTH-only
+  const OUTER_PAD = 10;
+  const GUTTER_W = 260; // keep price + residual aligned on the same x-axis
+
+  const PERIODS = [
+    {label:"1m",  min:1},
+    {label:"5m",  min:5},
+    {label:"30m", min:30},
+    {label:"1h",  min:60},
+    {label:"2h",  min:120},
+    {label:"4h",  min:240},
+    {label:"12h", min:720},
+    {label:"24h", min:1440}
+  ];
+
+  // ---------------- Utilities ----------------
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+  const clamp01 = (x)=>Math.max(0, Math.min(1, x));
+
+  function mulberry32(seed){
+    let t = seed >>> 0;
+    return function(){
+      t += 0x6D2B79F5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function getCSS(varName){
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  }
+
+  function setupHiDPICanvas(canvas){
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.floor(rect.width * dpr));
+    const h = Math.max(1, Math.floor(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h){
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.scale(dpr, dpr);
+    return ctx;
+  }
+
+  function drawText(ctx, text, x, y, opts){
+    const o = opts || {};
+    ctx.save();
+    ctx.font = o.font || "12px system-ui";
+    ctx.fillStyle = o.color || getCSS("--fg");
+    ctx.textBaseline = o.baseline || "alphabetic";
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  function strokePolyline(ctx, pts, color, width){
+    if (!pts || pts.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width || 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function rms(series){
+    if (!series || !series.length) return 0;
+    let s = 0;
+    for (const v of series) s += v*v;
+    return Math.sqrt(s / series.length);
+  }
+
+  function zeroCrossings(series){
+    if (!series || series.length < 2) return 0;
+    let z = 0;
+    let prev = series[0];
+    for (let i=1;i<series.length;i++){
+      const cur = series[i];
+      if ((prev <= 0 && cur > 0) || (prev >= 0 && cur < 0)) z++;
+      prev = cur;
+    }
+    return z;
+  }
+
+  // ---------------- Time-series ops ----------------
+  function detrendRollingLinear(series, L){
+    // Returns residuals after removing a rolling linear fit over the last L samples.
+    const n = series.length;
+    const out = new Array(n).fill(0);
+    const w = Math.max(3, Math.floor(Number(L) || 24));
+    for(let i=0;i<n;i++){
+      const a = Math.max(0, i - w + 1);
+      const b = i;
+      const m = (b - a + 1);
+      if(m < 3){ out[i] = 0; continue; }
+      let sumT = 0, sumY = 0, sumTT = 0, sumTY = 0;
+      for(let j=0;j<m;j++){
+        const t = j;
+        const y = series[a + j];
+        sumT += t; sumY += y; sumTT += t*t; sumTY += t*y;
+      }
+      const denom = (m*sumTT - sumT*sumT) || 1e-9;
+      const beta = (m*sumTY - sumT*sumY) / denom;
+      const alpha = (sumY - beta*sumT) / m;
+      const yhat = alpha + beta*(m-1);
+      out[i] = series[i] - yhat;
+    }
+    return out;
+  }
+
+  function smaRolling(series, L){
+    const n = series.length;
+    const out = new Array(n).fill(0);
+    const w = Math.max(1, Math.floor(Number(L) || 24));
+    let sum = 0;
+    for(let i=0;i<n;i++){
+      sum += series[i];
+      if(i >= w) sum -= series[i-w];
+      const denom = Math.min(i+1, w);
+      out[i] = sum / denom;
+    }
+    return out;
+  }
+
+  // ---------------- Data generation ----------------
+  function generateDays({days, seed}){
+    // days[dayIndex] = 1m candles of length MINUTES_PER_DAY
+    const rng = mulberry32(seed);
+    let price = 100 + rng()*20;
+    const out = [];
+    for (let d=0; d<days; d++){
+      const day = [];
+      for (let i=0; i<MINUTES_PER_DAY; i++){
+        const o = price;
+        const flip = rng() < 0.5 ? -1 : 1;
+        const step = flip * (0.03 + rng()*0.25); // %
+        const c = o * (1 + step/100);
+
+        const wick = (0.02 + rng()*0.18) / 100;
+        const hi = Math.max(o,c) * (1 + wick);
+        const lo = Math.min(o,c) * (1 - wick);
+        const v = 50 + rng()*150;
+
+        day.push({o,h:hi,l:lo,c,v});
+        price = c;
+      }
+      out.push(day);
+    }
+    return out;
+  }
+
+  function resampleCandles(candles1m, tfMinutes){
+    const tf = Math.max(1, Math.floor(Number(tfMinutes) || 1));
+    if (tf === 1) return candles1m.slice();
+
+    const out = [];
+    for (let i=0; i<candles1m.length; i += tf){
+      const chunk = candles1m.slice(i, i+tf);
+      if (!chunk.length) continue;
+      const o = chunk[0].o;
+      const c = chunk[chunk.length-1].c;
+      let h = -Infinity;
+      let l = Infinity;
+      let v = 0;
+      for (const k of chunk){
+        h = Math.max(h, k.h);
+        l = Math.min(l, k.l);
+        v += (k.v || 0);
+      }
+      out.push({o,h,l,c,v});
+    }
+    return out;
+  }
+
+  function resampleSeriesAvg(series, tfMinutes){
+    // Downsample numeric series to match candle TF by averaging each tf-sized bucket.
+    const tf = Math.max(1, Math.floor(Number(tfMinutes) || 1));
+    if (tf === 1) return series.slice();
+    const out = [];
+    for (let i=0; i<series.length; i += tf){
+      const end = Math.min(series.length, i + tf);
+      let sum = 0;
+      let n = 0;
+      for (let j=i; j<end; j++){ sum += series[j]; n++; }
+      out.push(n ? (sum / n) : 0);
+    }
+    return out;
+  }
+
+  function flattenDays(days){
+    const flat = [];
+    const dayStartIdx = [];
+    for (let d=0; d<days.length; d++){
+      dayStartIdx.push(flat.length);
+      for (const k of days[d]) flat.push(k);
+    }
+    return {flat, dayStartIdx};
+  }
+
+  // ---------------- Rendering helpers ----------------
+  function drawGrid(ctx, x,y,w,h){
+    ctx.save();
+    ctx.fillStyle = getCSS("--panel");
+    ctx.fillRect(x,y,w,h);
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.lineWidth = 1;
+    const gx = 6;
+    const gy = 4;
+    for (let i=1;i<gx;i++){
+      const xx = x + w*(i/gx);
+      ctx.beginPath();ctx.moveTo(xx, y);ctx.lineTo(xx, y+h);ctx.stroke();
+    }
+    for (let j=1;j<gy;j++){
+      const yy = y + h*(j/gy);
+      ctx.beginPath();ctx.moveTo(x, yy);ctx.lineTo(x+w, yy);ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function extentCandles(candles){
+    let minP = Infinity;
+    let maxP = -Infinity;
+    for (const k of candles){
+      minP = Math.min(minP, k.l, k.c, k.o);
+      maxP = Math.max(maxP, k.h, k.c, k.o);
+    }
+    if (!Number.isFinite(minP) || !Number.isFinite(maxP)) return {minP:0,maxP:1};
+    if (maxP === minP) maxP = minP + 1e-6;
+    return {minP, maxP};
+  }
+
+  function drawCandles(ctx, candles, rect, dayStarts){
+    const {x,y,w,h} = rect;
+    const pad = 8;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+
+    drawGrid(ctx, x,y,w,h);
+    if (!candles || !candles.length) return;
+
+    const {minP, maxP} = extentCandles(candles);
+    const span = (maxP - minP) || 1;
+    const n = candles.length;
+    const candleW = innerW / n;
+    const bodyW = Math.max(1, candleW*0.62);
+
+    function yMap(p){
+      const t = (p - minP) / span;
+      return innerY + innerH*(1 - t);
+    }
+
+    // Day separators
+    if (Array.isArray(dayStarts) && dayStarts.length){
+      ctx.save();
+      ctx.strokeStyle = getCSS("--grid");
+      ctx.lineWidth = 1;
+      for (let di=0; di<dayStarts.length; di++){
+        const idx = dayStarts[di];
+        if (idx <= 0) continue;
+        const xx = innerX + idx * candleW;
+        ctx.beginPath();ctx.moveTo(xx, innerY);ctx.lineTo(xx, innerY+innerH);ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    for (let i=0;i<n;i++){
+      const k = candles[i];
+      const cx = innerX + i*candleW + candleW/2;
+      const yO = yMap(k.o);
+      const yC = yMap(k.c);
+      const yH = yMap(k.h);
+      const yL = yMap(k.l);
+      const up = k.c >= k.o;
+
+      ctx.strokeStyle = up ? getCSS("--up") : getCSS("--dn");
+      ctx.fillStyle = up ? getCSS("--up") : getCSS("--dn");
+
+      ctx.beginPath();
+      ctx.moveTo(cx, yH);
+      ctx.lineTo(cx, yL);
+      ctx.stroke();
+
+      const top = Math.min(yO,yC);
+      const bot = Math.max(yO,yC);
+      const bh = Math.max(1, bot-top);
+      ctx.fillRect(cx - bodyW/2, top, bodyW, bh);
+    }
+  }
+
+  function candlesToClosePoints(candles, rect, minP, maxP){
+    const {x,y,w,h} = rect;
+    const pad = 8;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+    if (!candles || !candles.length) return [];
+
+    const span = (maxP - minP) || 1;
+    const n = candles.length;
+    const step = innerW / Math.max(1,(n-1));
+
+    const pts = [];
+    for (let i=0;i<n;i++){
+      const xx = innerX + i*step;
+      const t = (candles[i].c - minP) / span;
+      const yy = innerY + innerH*(1-t);
+      pts.push({x:xx,y:yy});
+    }
+    return pts;
+  }
+
+  function drawResidualLine(ctx, resid, rect){
+    const {x,y,w,h} = rect;
+    const pad = 8;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+
+    drawGrid(ctx, x,y,w,h);
+    if (!resid || !resid.length) return;
+
+    let minV = Infinity, maxV = -Infinity;
+    for (const v of resid){ minV = Math.min(minV, v); maxV = Math.max(maxV, v); }
+    if (!Number.isFinite(minV) || !Number.isFinite(maxV)){ minV = -1; maxV = 1; }
+    if (maxV === minV){ maxV = minV + 1e-6; }
+
+    const span = (maxV - minV) || 1;
+    const n = resid.length;
+
+    // zero line
+    const zt = (0 - minV) / span;
+    const zy = innerY + innerH*(1-zt);
+    ctx.save();
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.beginPath();ctx.moveTo(innerX, zy);ctx.lineTo(innerX+innerW, zy);ctx.stroke();
+    ctx.restore();
+
+    const pts = [];
+    for (let i=0;i<n;i++){
+      const xx = innerX + (i/(n-1)) * innerW;
+      const t = (resid[i] - minV) / span;
+      const yy = innerY + innerH*(1-t);
+      pts.push({x:xx,y:yy});
+    }
+    strokePolyline(ctx, pts, getCSS("--line"), 2);
+
+    drawText(ctx, "Residual (detrended close)", x+10, y+18, {font:"700 12px system-ui", color:getCSS("--muted")});
+  }
+
+  function drawCycleLine(ctx, series, rect, label){
+    const {x,y,w,h} = rect;
+    const pad = 8;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+
+    drawGrid(ctx, x,y,w,h);
+    if (!series || !series.length) return;
+
+    let minV = Infinity, maxV = -Infinity;
+    for (const v of series){ minV = Math.min(minV, v); maxV = Math.max(maxV, v); }
+    if (!Number.isFinite(minV) || !Number.isFinite(maxV)){ minV = -1; maxV = 1; }
+    if (maxV === minV){ maxV = minV + 1e-6; }
+
+    const span = (maxV - minV) || 1;
+    const n = series.length;
+
+    // zero line
+    const zt = (0 - minV) / span;
+    const zy = innerY + innerH*(1-zt);
+    ctx.save();
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.beginPath();ctx.moveTo(innerX, zy);ctx.lineTo(innerX+innerW, zy);ctx.stroke();
+    ctx.restore();
+
+    const pts = [];
+    for (let i=0;i<n;i++){
+      const xx = innerX + (i/(n-1)) * innerW;
+      const t = (series[i] - minV) / span;
+      const yy = innerY + innerH*(1-t);
+      pts.push({x:xx,y:yy});
+    }
+    strokePolyline(ctx, pts, getCSS("--accent"), 2);
+
+    drawText(ctx, label || "Cycle component", x+10, y+18, {font:"700 12px system-ui", color:getCSS("--muted")});
+  }
+
+  // ---------------- Oscillation scan ----------------
+  function ema(series, L){
+    const n = series.length;
+    const out = new Array(n).fill(0);
+    const len = Math.max(1, Math.floor(Number(L) || 1));
+    const a = 2 / (len + 1);
+    let prev = series[0] || 0;
+    out[0] = prev;
+    for (let i=1;i<n;i++){
+      const v = series[i];
+      prev = a*v + (1-a)*prev;
+      out[i] = prev;
+    }
+    return out;
+  }
+
+  function bandpassApprox(series, periodMin){
+    // Very simple “band-pass-ish” component using EMA difference.
+    // Not meant to be perfect; meant to be interpretable in this prototype.
+    const P = Math.max(2, Math.round(Number(periodMin) || 5));
+    const fast = Math.max(2, Math.round(P/3));
+    const slow = Math.max(fast+1, Math.round(P));
+    const eFast = ema(series, fast);
+    const eSlow = ema(series, slow);
+    const out = new Array(series.length);
+    for (let i=0;i<series.length;i++) out[i] = eFast[i] - eSlow[i];
+    return out;
+  }
+
+  function computeOscillationScanOnResidual(resid1m, scanWindowMinutes){
+    const N = resid1m.length;
+    const tailN = clamp(Math.floor(Number(scanWindowMinutes) || 780), 120, N);
+
+    const scores = PERIODS.map(per => {
+      const bp = bandpassApprox(resid1m, per.min);
+      const tail = bp.slice(bp.length - tailN);
+
+      const energy = rms(tail);
+      const zc = zeroCrossings(tail);
+      const expected = Math.max(1, Math.round((tail.length / per.min) * 2));
+      const regularity = clamp01(1 - (Math.abs(zc - expected) / expected));
+
+      const raw = energy * regularity;
+      return {...per, raw, norm: 0, energy, regularity};
+    });
+
+    let maxRaw = 0;
+    for (const s of scores){ maxRaw = Math.max(maxRaw, s.raw || 0); }
+    for (const s of scores){ s.norm = (maxRaw > 0) ? (s.raw / maxRaw) : 0; }
+
+    let best = null;
+    for (const s of scores){ if (!best || s.raw > best.raw) best = s; }
+
+    // ratio to runner-up (simple “confidence” proxy)
+    const sorted = scores.slice().sort((a,b)=>b.raw-a.raw);
+    const bestRatio = (sorted.length >= 2 && sorted[1].raw > 0) ? (sorted[0].raw / sorted[1].raw) : null;
+
+    return {scores, best, bestRatio, maxRaw, tailN};
+  }
+
+  function drawScaleBars(ctx, x, y, w, scores, bestLabel, selectedMin){
+    // Renders the scan bars and returns hit-boxes so the gutter can be clickable.
+    const rowH = 12;
+    const gap = 4;
+    const labelW = 34;
+    const barH = 7;
+
+    const bg = getCSS("--grid");
+    const fill = getCSS("--accent");
+    const txt = getCSS("--muted");
+    const fg = getCSS("--fg");
+
+    drawText(ctx, "Oscillation scan (detrended)", x, y, {font:"12px system-ui", color:txt});
+    if (bestLabel){
+      const bestX = x + Math.max(120, Math.min(195, w - 110));
+      drawText(ctx, bestLabel, bestX, y, {font:"700 12px system-ui", color:fg});
+    }
+
+    let yy = y + 14;
+    const barW = Math.max(40, w - labelW - 10);
+
+    const hitBoxes = [];
+
+    for (const s of scores){
+      const isBest = (bestLabel && s.label && bestLabel.includes(s.label));
+      const isSelected = (selectedMin != null && Number(selectedMin) === Number(s.min));
+
+      drawText(ctx, s.label, x, yy, {
+        font: (isSelected || isBest) ? "700 11px system-ui" : "11px system-ui",
+        color: isSelected ? fg : (isBest ? fg : txt),
+        baseline:"alphabetic"
+      });
+
+      const bx = x + labelW;
+      const by = yy - barH + 2;
+      ctx.save();
+      ctx.fillStyle = bg;
+      ctx.fillRect(bx, by, barW, barH);
+
+      const frac = clamp01(s.norm || 0);
+      ctx.fillStyle = (s.raw == null) ? bg : fill;
+      ctx.fillRect(bx, by, Math.max(0, barW * frac), barH);
+
+      // Selected outline
+      if (isSelected){
+        ctx.strokeStyle = fill;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx - 2, by - 2, barW + 4, barH + 4);
+      }
+      ctx.restore();
+
+      // Clickable row hit box (label + bar)
+      hitBoxes.push({
+        min: s.min,
+        label: s.label,
+        x: x,
+        y: yy - rowH + 2,
+        w: labelW + barW + 10,
+        h: rowH + gap
+      });
+
+      yy += rowH + gap;
+    }
+
+    return hitBoxes;
+  }
+
+  // ---------------- DOM + state ----------------
+  const elTicker = document.getElementById("ticker");
+  const elDays = document.getElementById("days");
+  const elTf = document.getElementById("tf");
+  const elStatus = document.getElementById("status");
+  const elToggleDetrend = document.getElementById("toggleDetrend");
+  const elDetrendHours = document.getElementById("detrendHours");
+  const elToggleScan = document.getElementById("toggleScan");
+  const elScanWindow = document.getElementById("scanWindow");
+  const elSelPeriod = document.getElementById("selPeriod");
+
+  const cPrice = document.getElementById("price");
+  const cAnalysis = document.getElementById("analysis");
+
+  let state = {
+    ticker: elTicker.value,
+    days: Number(elDays.value),
+    tfMinutes: Number(elTf.value),
+    seed: 1337,
+    showDetrend: !!elToggleDetrend.checked,
+    detrendHours: Number(elDetrendHours.value) || 2,
+    showScan: !!elToggleScan.checked,
+    scanWindow: Number(elScanWindow.value) || 780,
+
+    // If set, clicking the scan bars will set the detrend window to this period (minutes).
+    selectedPeriodMin: null,
+    bestPeriodMin: null,
+
+    days1m: null,
+    flat1m: null,
+    dayStarts1m: null,
+
+    // Populated each render when scan is visible
+    scanHitBoxes: []
+  };
+
+  function setStatus(msg){
+    elStatus.textContent = msg;
+  }
+
+  function updateSelPeriodLabel(){
+    if (!elSelPeriod) return;
+    if (state.selectedPeriodMin != null){
+      elSelPeriod.textContent = `${state.selectedPeriodMin}m`;
+      elSelPeriod.style.color = getCSS("--fg");
+      return;
+    }
+    if (state.bestPeriodMin != null){
+      elSelPeriod.textContent = `Auto (${state.bestPeriodMin}m)`;
+      elSelPeriod.style.color = getCSS("--muted");
+      return;
+    }
+    elSelPeriod.textContent = "Auto";
+    elSelPeriod.style.color = getCSS("--muted");
+  }
+
+  // ---------------- Render pipeline ----------------
+  function regenerate(){
+    state.ticker = elTicker.value;
+    state.days = Number(elDays.value);
+    state.tfMinutes = Number(elTf.value);
+    state.showDetrend = !!elToggleDetrend.checked;
+    state.detrendHours = Number(elDetrendHours.value) || 2;
+    state.showScan = !!elToggleScan.checked;
+    state.scanWindow = Number(elScanWindow.value) || 780;
+
+    state.seed = (state.seed + 99991) >>> 0;
+    state.days1m = generateDays({days: state.days, seed: state.seed});
+
+    const flat = flattenDays(state.days1m);
+    state.flat1m = flat.flat;
+    state.dayStarts1m = flat.dayStartIdx;
+
+    renderAll();
+  }
+
+  function renderAll(){
+    if (!state.days1m) return;
+
+    const tf = Math.max(1, Math.floor(state.tfMinutes || 1));
+
+    // Resample each day then flatten
+    const daysTf = state.days1m.map(day => resampleCandles(day, tf));
+    const flatTf = flattenDays(daysTf);
+
+    const candles = flatTf.flat;
+    const dayStartsTf = flatTf.dayStartIdx;
+
+    updateSelPeriodLabel();
+    const selTxt = (state.selectedPeriodMin != null) ? ` • Sel ${state.selectedPeriodMin}m` : (state.bestPeriodMin != null ? ` • Sel Auto(${state.bestPeriodMin}m)` : "");
+    setStatus(`${state.ticker} • ${state.days} days • TF ${tf}m${selTxt} • seed ${state.seed}`);
+
+    renderPrice(candles, dayStartsTf);
+    renderAnalysis(candles, dayStartsTf);
+  }
+
+  function renderPrice(candlesTf, dayStartsTf){
+    const ctx = setupHiDPICanvas(cPrice);
+    const w = cPrice.getBoundingClientRect().width;
+    const h = cPrice.getBoundingClientRect().height;
+    ctx.clearRect(0,0,w,h);
+
+    // Fill full canvas background so the left gutter matches the analysis panel.
+    ctx.save();
+    ctx.fillStyle = getCSS("--panel");
+    ctx.fillRect(0,0,w,h);
+    ctx.restore();
+
+    const pad = OUTER_PAD;
+    const gutterW = GUTTER_W;
+
+    // Plot area starts after the gutter so the x-axis aligns with the residual plot below.
+    const plotRect = {
+      x: pad + gutterW,
+      y: 0,
+      w: Math.max(1, w - (pad + gutterW) - pad),
+      h: h
+    };
+
+    // Left gutter backdrop
+    ctx.save();
+    ctx.fillStyle = getCSS("--ghost");
+    ctx.fillRect(0, 0, plotRect.x, h);
+    ctx.restore();
+
+    drawCandles(ctx, candlesTf, plotRect, dayStartsTf);
+
+    // Day labels aligned to candle index within plotRect
+    {
+      const n = Math.max(1, candlesTf.length);
+      const innerPad = 8; // must match drawCandles() padding
+      const innerX = plotRect.x + innerPad;
+      const innerW = plotRect.w - innerPad*2;
+      const candleW = innerW / n;
+
+      ctx.save();
+      ctx.fillStyle = getCSS("--muted");
+      ctx.font = "11px system-ui";
+      for (let d=0; d<dayStartsTf.length; d++){
+        const idx = dayStartsTf[d];
+        const xx = innerX + idx * candleW;
+        ctx.fillText(`D${d+1}`, xx + 4, 16);
+      }
+      ctx.restore();
+    }
+
+    // Detrended overlay as a close-line (flattened)
+    // IMPORTANT: Always computed from 1-minute closes, then downsampled to match the chart TF.
+    if (state.showDetrend){
+      const tf = Math.max(1, Math.floor(state.tfMinutes || 1));
+
+      const closes1m = state.flat1m.map(k => k.c);
+      const L1m = Math.max(3, Math.round((state.detrendHours * 60))); // since series is 1-minute
+      const resid1m = detrendRollingLinear(closes1m, L1m);
+      const base1m = smaRolling(closes1m, L1m);
+      const detClose1m = resid1m.map((r,i)=>r+base1m[i]);
+
+      // Downsample to TF so it aligns with the displayed candles.
+      const detCloseTf = resampleSeriesAvg(detClose1m, tf);
+
+      // Map detCloseTf within plotRect using the SAME y-scale as the displayed candles.
+      const {minP,maxP} = extentCandles(candlesTf);
+      const pts = [];
+      const innerPad = 8; // must match drawCandles() padding
+      const innerX = plotRect.x + innerPad;
+      const innerY = plotRect.y + innerPad;
+      const innerW2 = plotRect.w - innerPad*2;
+      const innerH2 = plotRect.h - innerPad*2;
+      const span = (maxP-minP) || 1;
+      const n = Math.max(1, detCloseTf.length);
+      const step = innerW2 / Math.max(1, n);
+
+      // Align to candle centers (same indexing as drawCandles)
+      for (let i=0;i<n;i++){
+        const xx = innerX + (i + 0.5) * step;
+        const t = (detCloseTf[i]-minP)/span;
+        const yy = innerY + innerH2*(1-t);
+        pts.push({x:xx,y:yy});
+      }
+      strokePolyline(ctx, pts, getCSS("--accent"), 2);
+
+      drawText(ctx, `Detrend overlay: ${state.detrendHours}h (computed on 1m)`, plotRect.x + 10, h-10, {font:"12px system-ui", color:getCSS("--muted")});
+    }
+
+    drawText(ctx, `Price (continuous sessions)`, plotRect.x + 10, 18, {font:"700 12px system-ui", color:getCSS("--muted")});
+  }
+
+  function renderAnalysis(candlesTf, dayStartsTf){
+    const ctx = setupHiDPICanvas(cAnalysis);
+    const w = cAnalysis.getBoundingClientRect().width;
+    const h = cAnalysis.getBoundingClientRect().height;
+    ctx.clearRect(0,0,w,h);
+
+    const pad = OUTER_PAD;
+    const gutterW = GUTTER_W;
+
+    const innerX = pad + gutterW;
+    const innerY = pad;
+    const innerW = w - innerX - pad;
+    const innerH = h - pad*2;
+
+    // Split analysis panel into two aligned plots: residual (top) + cycle component (bottom)
+    const gapY = 10;
+    const topH = Math.max(120, Math.floor(innerH * 0.58));
+    const botH = Math.max(90, innerH - topH - gapY);
+
+    const residRect = {x:innerX, y:innerY, w:innerW, h:topH};
+    const cycleRect = {x:innerX, y:innerY + topH + gapY, w:innerW, h:botH};
+
+    // Residual (yellow)
+    // IMPORTANT: Always computed from 1-minute closes, then downsampled to match the chart TF.
+    const tf = Math.max(1, Math.floor(state.tfMinutes || 1));
+    const closes1m = state.flat1m.map(k => k.c);
+    const L1m = Math.max(3, Math.round((state.detrendHours * 60))); // since series is 1-minute
+    const resid1m = detrendRollingLinear(closes1m, L1m);
+    const residDisp = resampleSeriesAvg(resid1m, tf);
+
+    drawResidualLine(ctx, residDisp, residRect);
+
+    // Cycle component: bandpass-ish view of the residual at the selected (or best) period.
+    const activePeriodMin = Number(state.selectedPeriodMin) || Number(state.bestPeriodMin) || 5;
+    const bp1m = bandpassApprox(resid1m, activePeriodMin);
+    const bpDisp = resampleSeriesAvg(bp1m, tf);
+    drawCycleLine(ctx, bpDisp, cycleRect, `Cycle component (≈ ${activePeriodMin}m)`);
+
+    // Left gutter: scan histogram (based on *1-minute* closes)
+    if (state.showScan){
+      const closes1m = state.flat1m.map(k => k.c);
+      const scan = computeOscillationScanOnResidual(resid1m, state.scanWindow);
+      state.bestPeriodMin = scan.best ? scan.best.min : null;
+      const ratioTxt = (scan.bestRatio != null) ? ` • ${scan.bestRatio.toFixed(2)}×` : "";
+      const bestLabel = scan.best ? `Best: ${scan.best.label}${ratioTxt}` : "Best: (none)";
+
+      // draw gutter backdrop
+      ctx.save();
+      ctx.fillStyle = getCSS("--ghost");
+      ctx.fillRect(pad, pad, gutterW - pad, h - pad*2);
+      ctx.restore();
+
+      const hitBoxes = drawScaleBars(ctx, pad+8, pad+18, gutterW - pad - 16, scan.scores, bestLabel, state.selectedPeriodMin);
+      state.scanHitBoxes = hitBoxes;
+
+      drawText(ctx, "Click a period to set selected period", pad+8, pad+36 + 16*PERIODS.length, {font:"11px system-ui", color:getCSS("--muted")});
+
+      drawText(ctx, `Window: last ${scan.tailN}m`, pad+8, h-12, {font:"12px system-ui", color:getCSS("--muted")});
+    } else {
+      // draw empty gutter
+      ctx.save();
+      ctx.fillStyle = getCSS("--ghost");
+      ctx.fillRect(pad, pad, gutterW - pad, h - pad*2);
+      ctx.restore();
+      drawText(ctx, "(scan hidden)", pad+12, pad+22, {font:"12px system-ui", color:getCSS("--muted")});
+    }
+  }
+
+  // ---------------- Self-tests ----------------
+  function runSelfTests(){
+    try{
+      const d = generateDays({days: 3, seed: 1});
+      console.assert(d.length === 3, "test: generateDays days");
+      console.assert(d[0].length === MINUTES_PER_DAY, "test: day length");
+
+      const flat = flattenDays(d);
+      console.assert(flat.flat.length === 3*MINUTES_PER_DAY, "test: flatten length");
+      console.assert(flat.dayStartIdx.length === 3, "test: flatten starts");
+
+      const r5 = resampleCandles(d[0], 5);
+      console.assert(r5.length === Math.ceil(MINUTES_PER_DAY/5), "test: resample 5m length");
+
+      const closes = flat.flat.map(k => k.c);
+      const resid = detrendRollingLinear(closes, 30);
+      console.assert(resid.length === closes.length, "test: detrend length matches");
+
+      const r30 = detrendRollingLinear(closes, 30);
+      const scan = computeOscillationScanOnResidual(r30, 390);
+      console.assert(scan.scores.length === PERIODS.length, "test: scan scores length");
+      console.assert(scan.best && typeof scan.best.min === "number", "test: scan best exists");
+
+      const bp = bandpassApprox(r30, 5);
+      console.assert(bp.length === r30.length, "test: bandpass length");
+
+      const sAvg = resampleSeriesAvg(closes, 5);
+      console.assert(sAvg.length === Math.ceil(closes.length/5), "test: resampleSeriesAvg length");
+      console.assert(scan.scores.every(s => typeof s.norm === "number"), "test: scan norms numeric");
+    } catch(err){
+      console.warn("Self-tests error:", err);
+    }
+  }
+
+  // ---------------- Wiring ----------------
+  document.getElementById("regen").addEventListener("click", regenerate);
+  document.getElementById("ticker").addEventListener("change", () => { state.ticker = elTicker.value; renderAll(); });
+  document.getElementById("days").addEventListener("change", () => { state.days = Number(elDays.value); regenerate(); });
+  document.getElementById("tf").addEventListener("change", () => { state.tfMinutes = Number(elTf.value); renderAll(); });
+  document.getElementById("toggleDetrend").addEventListener("change", () => { state.showDetrend = !!elToggleDetrend.checked; renderAll(); });
+  document.getElementById("detrendHours").addEventListener("change", () => { state.detrendHours = Number(elDetrendHours.value) || 2; renderAll(); });
+  document.getElementById("toggleScan").addEventListener("change", () => { state.showScan = !!elToggleScan.checked; renderAll(); });
+  document.getElementById("scanWindow").addEventListener("change", () => { state.scanWindow = Number(elScanWindow.value) || 780; renderAll(); });
+
+  // Click-to-select: choose a scan period (e.g., 5m) as the *selected period* for cycle analysis.
+  // This does NOT change the detrend window.
+  cAnalysis.addEventListener("click", (ev) => {
+    if (!state.showScan || !state.scanHitBoxes || !state.scanHitBoxes.length) return;
+    const rect = cAnalysis.getBoundingClientRect();
+    const x = ev.clientX - rect.left;
+    const y = ev.clientY - rect.top;
+
+    for (const hb of state.scanHitBoxes){
+      if (x >= hb.x && x <= hb.x + hb.w && y >= hb.y && y <= hb.y + hb.h){
+        state.selectedPeriodMin = hb.min;
+        updateSelPeriodLabel();
+        renderAll();
+        break;
+      }
+    }
+  });
+
+  window.addEventListener("resize", () => renderAll());
+
+  // Initial
+  runSelfTests();
+  state.days1m = generateDays({days: state.days, seed: state.seed});
+  const flat = flattenDays(state.days1m);
+  state.flat1m = flat.flat;
+  state.dayStarts1m = flat.dayStartIdx;
+  renderAll();
+})();
+</script>
+</body>
+</html>

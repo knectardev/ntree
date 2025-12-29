@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import bisect
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Iterable, List, Optional
 
 from database import get_db_connection
@@ -11,7 +11,10 @@ from replay.types import Bar
 
 def _parse_ts(ts: str) -> datetime:
     # Accept Z or offset; if tz-less assume UTC (keeps consistent with existing code style)
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 @dataclass

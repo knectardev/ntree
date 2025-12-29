@@ -1,0 +1,1792 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Detrend + Oscillation Scan (Continuous Series Demo)</title>
+  <style>
+    :root{
+      --bg:#050505;
+      --panel:#0b0b0b;
+      --grid:#171717;
+      --fg:#eaeaea;
+      --muted:#9a9a9a;
+      --accent:#ff2bd6;
+      --up:#1fd28e;
+      --dn:#ff4b5c;
+      --line:#ffe400;
+      --ghost:#0f0f0f;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+    .wrap{display:grid;grid-template-columns:290px 1fr;min-height:100vh;}
+    .sidebar{padding:14px;border-right:1px solid #111;background:linear-gradient(#070707,#040404);}
+    .row{margin:10px 0;}
+    label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px;}
+    select,button,input{
+      width:100%;padding:9px 10px;border-radius:10px;border:1px solid #1a1a1a;background:var(--panel);color:var(--fg);
+    }
+    button{cursor:pointer;background:#0e0e0e;}
+    button:hover{border-color:#2a2a2a;}
+    .chk{display:flex;align-items:center;gap:10px;user-select:none;cursor:pointer;color:var(--fg);}
+    .chk input{width:16px;height:16px;padding:0;}
+    .hint{margin-top:14px;padding:10px;border:1px solid #141414;border-radius:12px;background:#070707;color:var(--muted);font-size:12px;}
+
+    .main{padding:14px;}
+    .titlebar{display:flex;align-items:flex-end;gap:14px;justify-content:space-between;margin-bottom:10px;}
+    .titlebar h1{margin:0;font-size:16px;font-weight:800;}
+    .sub{color:var(--muted);font-size:12px;margin-top:2px;}
+    .status{color:var(--muted);font-size:12px;}
+
+    .panel{border:1px solid #111;border-radius:16px;background:radial-gradient(1200px 700px at 30% 20%,#0b0b0b 0%,#050505 55%,#040404 100%);
+           padding:10px;}
+    canvas{width:100%;height:100%;display:block;border-radius:12px;}
+
+    /* Cap chart heights so they don't grow endlessly on tall/wide screens */
+    .chartFrame{height:min(700px, 58vh);max-height:700px;}
+    .chartFrame.analysis{height:min(700px, 36vh);max-height:700px;}
+    .sp{height:12px;}
+    .pill{
+      display:inline-flex;gap:8px;align-items:center;
+      padding:4px 10px;border:1px solid #151515;border-radius:999px;
+      background:#070707;color:var(--muted);font-size:12px;
+    }
+
+    /* --- Dial controls --- */
+    .dialRow{display:flex;gap:14px;align-items:flex-start;}
+    .dialCol{flex:1;min-width:0;}
+    .dialWrap{
+      width:100%;
+      aspect-ratio:1/1;
+      border-radius:999px;
+      background:radial-gradient(120px 120px at 35% 30%, #101010 0%, #060606 55%, #040404 100%);
+      border:1px solid #121212;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+      display:flex;align-items:center;justify-content:center;
+      overflow:hidden;
+    }
+    .dialCanvas{width:100%;height:100%;display:block;}
+    .dialValue{color:var(--fg);font-weight:800;margin-left:8px;}
+    .dialHelp{color:var(--muted);font-size:11px;margin-top:6px;}
+    .hiddenInput{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;}
+
+  
+    .tooltip{
+      position:fixed;
+      z-index:9999;
+      pointer-events:none;
+      background:rgba(12,12,12,0.92);
+      border:1px solid rgba(255,255,255,0.12);
+      color:var(--fg);
+      padding:8px 10px;
+      border-radius:10px;
+      font-size:12px;
+      line-height:1.25;
+      box-shadow:0 10px 30px rgba(0,0,0,0.45);
+      max-width:260px;
+      white-space:pre-line;
+    }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="sidebar">
+    <div class="row">
+      <div style="font-weight:800;">Continuous detrend + oscillation scan</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:4px;">(Archived the weekday-matrix framing)</div>
+    </div>
+
+    <div class="row">
+      <label for="ticker">Ticker</label>
+      <select id="ticker">
+        <option>QQQ</option>
+        <option>AAPL</option>
+        <option>SPY</option>
+        <option>TSLA</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="days">Trading days</label>
+      <select id="days">
+        <option value="5">5</option>
+        <option value="10" selected>10</option>
+        <option value="20">20</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="tf">Chart candle (minutes) <span style="color:var(--muted);font-weight:500;">(display only)</span></label>
+      <select id="tf">
+        <option value="1">1</option>
+        <option value="5" selected>5</option>
+        <option value="15">15</option>
+        <option value="30">30</option>
+      </select>
+      <div style="color:var(--muted);font-size:11px;margin-top:6px;">Candles are rendered at this resolution. Detrend + scan always use 1‑minute data.</div>
+    </div>
+
+    <div class="row">
+      <button id="regen">Regenerate random data</button>
+    </div>
+
+    <div class="row">
+      <label class="chk"><input id="toggleDetrend" type="checkbox" checked /> <span>Show detrended overlay</span></label>
+    </div>
+
+    <div class="row dialRow">
+      <div class="dialCol">
+        <label>Detrend window <span class="dialValue" id="detrendLabel">2h</span></label>
+        <div class="dialWrap">
+          <canvas class="dialCanvas" id="detrendDial" width="220" height="220"></canvas>
+        </div>
+        <input id="detrendHours" class="hiddenInput" type="number" min="0.01" step="0.01" value="2" />
+        <div class="dialHelp">Trend-removal horizon (bigger = remove slower drift).</div>
+      </div>
+
+      <div class="dialCol">
+        <label>Scan window <span class="dialValue" id="scanLabel">780m</span></label>
+        <div class="dialWrap">
+          <canvas class="dialCanvas" id="scanDial" width="220" height="220"></canvas>
+        </div>
+        <input id="scanWindow" class="hiddenInput" type="number" min="120" step="30" value="780" />
+        <div class="dialHelp">Recent minutes used to score periods (bigger = more stable).</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <label class="chk"><input id="toggleScan" type="checkbox" checked /> <span>Show oscillation scan</span></label>
+      <label class="chk" style="margin-left:18px;"><input id="toggleStability" type="checkbox" checked /> <span>Show stability</span></label>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span class="pill">Selected period: <b id="selPeriod">Auto</b></span>
+        <span style="color:var(--muted);font-size:11px;">Click a bar to set the selected period (used for the cycle component).</span>
+      </div>
+    </div>
+
+
+    <div class="row" style="margin-top:10px;">
+      <label class="chk"><input id="toggleGate" type="checkbox" checked /> <span>Enable signal gate</span></label>
+      <div class="gate" style="margin-top:8px;padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">
+        <div style="color:var(--muted);font-size:11px;margin-bottom:8px;">Gate marks which turning points are “eligible” vs suppressed.</div>
+
+        <div style="font-size:12px;color:var(--muted);margin:6px 0 4px;">Stability</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <label style="font-size:12px;color:var(--muted);">Dominance ≥
+            <input id="gateDomMin" type="number" min="0" max="100" step="1" value="60" style="width:70px;margin-left:6px;" />%
+          </label>
+          <label style="font-size:12px;color:var(--muted);">Separation ≥
+            <input id="gateSepMin" type="number" min="1" max="10" step="0.05" value="1.40" style="width:70px;margin-left:6px;" />×
+          </label>
+        </div>
+
+        <div style="font-size:12px;color:var(--muted);margin:10px 0 4px;">Regime</div>
+        <label class="chk" style="margin:0;"><input id="gateReqRange" type="checkbox" checked /> <span>Require ranging</span></label>
+        <div style="margin-left:22px;margin-top:6px;">
+          <label style="font-size:12px;color:var(--muted);">max |trend slope| ≤
+            <input id="gateSlopeMax" type="number" min="0.05" max="5" step="0.05" value="0.25" style="width:70px;margin-left:6px;" /> σ/hr
+          </label>
+        </div>
+
+        <div style="font-size:12px;color:var(--muted);margin:10px 0 4px;">Volatility</div>
+        <label class="chk" style="margin:0;"><input id="gateReqLowVol" type="checkbox" checked /> <span>Suppress high noise</span></label>
+        <div style="margin-left:22px;margin-top:6px;">
+          <label style="font-size:12px;color:var(--muted);">residual vol ≤
+            <input id="gateVolMult" type="number" min="0.5" max="3" step="0.05" value="1.20" style="width:70px;margin-left:6px;" />× median
+          </label>
+        </div>
+      </div>
+    </div>
+
+
+
+    <div class="row">
+      <label class="chk"><input id="toggleTurns" type="checkbox" checked /> <span>Show cycle turning points</span></label>
+      <div style="color:var(--muted);font-size:11px;margin-top:6px;">Marks peaks/troughs of the selected cycle component on the price chart (timing candidates).</div>
+    </div>
+    <div class="hint">
+      <div style="color:var(--accent);margin-bottom:6px;">What this does</div>
+      <div><b>Top</b>: continuous candles across N trading days (random walk).</div>
+      <div><b>Detrend overlay (magenta)</b>: computed from 1‑minute closes, then downsampled to match the chart candle resolution.</div>
+      <div><b>Residual (yellow)</b>: detrended close (1‑minute), then downsampled for display.</div>
+      <div><b>Oscillation scan</b>: scores candidate periods on the last <i>Scan window</i> minutes of 1‑minute data.</div>
+      <div style="margin-top:8px;color:var(--muted);"><b>Detrend window</b> = trend-removal horizon (bigger = remove slower drift).<br/>
+      <b>Scan window</b> = how many recent minutes are used when scoring the periods (bigger = more stable, less reactive).</div>
+    </div>
+
+    <div class="hint" style="margin-top:10px;">
+      <div style="color:var(--accent);margin-bottom:6px;">Open question</div>
+      <div>When you later switch to real data, do you want the scan to treat <b>overnight</b> as continuous time, or <b>session-only</b> (RTH concatenated)?</div>
+      <div style="margin-top:6px;">Right now this demo is <b>session-only</b> (390 minutes/day).</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="titlebar">
+      <div>
+        <h1>Detrend + Oscillation Scan (Continuous Series Demo)</h1>
+        <div class="sub">rolling linear detrend • simple period scan (energy × zero-crossing regularity)</div>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="panel">
+      <div class="chartFrame price"><canvas id="price"></canvas></div>
+      <div class="sp"></div>
+      <div class="chartFrame analysis"><canvas id="analysis"></canvas></div>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  // ---------------- Core constants ----------------
+  const MINUTES_PER_DAY = 390; // RTH-only
+  const OUTER_PAD = 10;
+  const GUTTER_W = 260; // keep price + residual aligned on the same x-axis
+
+  const PERIODS = [
+    {label:"1m",  min:1},
+    {label:"5m",  min:5},
+    {label:"30m", min:30},
+    {label:"1h",  min:60},
+    {label:"2h",  min:120},
+    {label:"4h",  min:240},
+    {label:"12h", min:720},
+    {label:"24h", min:1440}
+  ];
+
+  // ---------------- Utilities ----------------
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+  const clamp01 = (x)=>Math.max(0, Math.min(1, x));
+
+  // ---------------- Dial control ----------------
+  // Renders a circular dial on a canvas and wires pointer interactions.
+  // Angle is mapped over a 270° sweep for a "hardware knob" feel.
+  function createDial(opts){
+    const canvas = opts.canvas;
+    const min = Number(opts.min);
+    const max = Number(opts.max);
+    const step = Number(opts.step || 1);
+    const format = opts.format || (v => String(v));
+    const onChange = opts.onChange || (()=>{});
+
+    // 270° sweep centered at bottom (like many audio knobs)
+    const START = (-225) * Math.PI/180; // radians
+    const END   = (  45) * Math.PI/180; // radians
+    const SWEEP = END - START;
+
+    const ctx = canvas.getContext("2d");
+
+    function snap(v){
+      const s = step > 0 ? step : 1;
+      return Math.round(v / s) * s;
+    }
+
+    function valueToAngle(v){
+      const t = (clamp(v, min, max) - min) / (max - min || 1);
+      return START + t * SWEEP;
+    }
+
+    function angleToValue(a){
+      // clamp angle to sweep
+      let t = (a - START) / (SWEEP || 1);
+      t = clamp01(t);
+      const v = min + t * (max - min);
+      return snap(v);
+    }
+
+    function draw(v){
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const size = Math.max(1, Math.floor(rect.width * dpr));
+      if (canvas.width !== size || canvas.height !== size){
+        canvas.width = size;
+        canvas.height = size;
+      }
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.scale(dpr, dpr);
+
+      const w = rect.width;
+      const h = rect.height;
+      const cx = w/2, cy = h/2;
+      const r = Math.min(w,h)*0.42;
+
+      ctx.clearRect(0,0,w,h);
+
+      // base ring
+      ctx.save();
+      ctx.lineWidth = Math.max(10, r*0.14);
+      ctx.lineCap = "round";
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, START, END, false);
+      ctx.stroke();
+
+      // value ring
+      const a = valueToAngle(v);
+      ctx.strokeStyle = getCSS("--accent");
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, START, a, false);
+      ctx.stroke();
+
+      // tick dots (subtle)
+      const ticks = 9;
+      ctx.fillStyle = "rgba(255,255,255,0.08)";
+      for(let i=0;i<=ticks;i++){
+        const tt = i / ticks;
+        const ang = START + tt*SWEEP;
+        const tx = cx + Math.cos(ang) * (r + ctx.lineWidth*0.25);
+        const ty = cy + Math.sin(ang) * (r + ctx.lineWidth*0.25);
+        ctx.beginPath();
+        ctx.arc(tx, ty, 1.5, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // knob center
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r*0.78, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // pointer
+      ctx.strokeStyle = getCSS("--accent");
+      ctx.lineWidth = 3;
+      const px = cx + Math.cos(a) * (r*0.90);
+      const py = cy + Math.sin(a) * (r*0.90);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+
+      // value text
+      ctx.fillStyle = getCSS("--fg");
+      ctx.font = "800 18px system-ui";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(format(v), cx, cy + r*0.55);
+
+      ctx.restore();
+    }
+
+    let value = snap(clamp(Number(opts.value), min, max));
+
+    function setValue(v, fire=true){
+      const nv = snap(clamp(Number(v), min, max));
+      if (nv === value) return;
+      value = nv;
+      draw(value);
+      if (fire) onChange(value);
+    }
+
+    function pointerToAngle(ev){
+      const rect = canvas.getBoundingClientRect();
+      const x = (ev.clientX - rect.left) - rect.width/2;
+      const y = (ev.clientY - rect.top)  - rect.height/2;
+      return Math.atan2(y, x);
+    }
+
+    let dragging = false;
+
+    function onPointerDown(ev){
+      dragging = true;
+      canvas.setPointerCapture(ev.pointerId);
+      const a = pointerToAngle(ev);
+      setValue(angleToValue(a), true);
+    }
+
+    function onPointerMove(ev){
+      if (!dragging) return;
+      const a = pointerToAngle(ev);
+      setValue(angleToValue(a), true);
+    }
+
+    function onPointerUp(ev){
+      dragging = false;
+      try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
+    }
+
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+
+    // accessibility: scroll wheel nudge
+    canvas.addEventListener("wheel", (ev) => {
+      ev.preventDefault();
+      const dir = ev.deltaY > 0 ? -1 : 1;
+      setValue(value + dir*step, true);
+    }, {passive:false});
+
+    // initial draw
+    draw(value);
+
+    return {
+      get value(){ return value; },
+      setValue,
+      redraw(){ draw(value); }
+    };
+  }
+
+  function mulberry32(seed){
+    let t = seed >>> 0;
+    return function(){
+      t += 0x6D2B79F5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function getCSS(varName){
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  }
+
+  function setupHiDPICanvas(canvas){
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.floor(rect.width * dpr));
+    const h = Math.max(1, Math.floor(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h){
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.scale(dpr, dpr);
+    return ctx;
+  }
+
+  function drawText(ctx, text, x, y, opts){
+    const o = opts || {};
+    ctx.save();
+    ctx.font = o.font || "12px system-ui";
+    ctx.fillStyle = o.color || getCSS("--fg");
+    ctx.textBaseline = o.baseline || "alphabetic";
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  function strokePolyline(ctx, pts, color, width){
+    if (!pts || pts.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width || 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function rms(series){
+    if (!series || !series.length) return 0;
+    let s = 0;
+    for (const v of series) s += v*v;
+    return Math.sqrt(s / series.length);
+  }
+
+
+  function mean(series){
+    if (!series || !series.length) return 0;
+    let s = 0;
+    for (const v of series) s += v;
+    return s / series.length;
+  }
+
+  function stdev(series){
+    if (!series || !series.length) return 0;
+    const m = mean(series);
+    let s = 0;
+    for (const v of series){ const d = (v - m); s += d*d; }
+    return Math.sqrt(s / series.length);
+  }
+
+  function median(arr){
+    if (!arr || !arr.length) return null;
+    const a = arr.slice().sort((x,y)=>x-y);
+    return a[Math.floor(a.length/2)];
+  }
+
+  function estimateTrendSlopeSigmaPerHr(closes1m, resid1m, detrendMinutes){
+    const w = Math.max(3, Math.floor(Number(detrendMinutes) || 180));
+    const n = closes1m.length;
+    if (n < w) return {absSigmaHr: null, sigmaHr: null, betaPerMin: null, sigma: null};
+
+    const a = n - w;
+    let sumT = 0, sumY = 0, sumTT = 0, sumTY = 0;
+    for (let j=0;j<w;j++){
+      const t = j;
+      const y = closes1m[a + j];
+      sumT += t; sumY += y; sumTT += t*t; sumTY += t*y;
+    }
+    const denom = (w*sumTT - sumT*sumT) || 1e-9;
+    const beta = (w*sumTY - sumT*sumY) / denom; // price units per minute
+
+    const residSlice = resid1m.slice(a, n);
+    const sig = stdev(residSlice) || 1e-9;
+    const sigmaHr = (beta * 60) / sig;
+    return {absSigmaHr: Math.abs(sigmaHr), sigmaHr, betaPerMin: beta, sigma: sig};
+  }
+
+  function computeGateContext(resid1m, closes1m, stability){
+    // Returns: {enabled, eligible, reasons[], metrics}
+    const enabled = !!state.gateEnabled;
+    const reasons = [];
+    if (!enabled) return {enabled:false, eligible:true, reasons:[], metrics:{}};
+
+    // If scan is off, we can still gate regime/vol, but stability pieces won't be available.
+    const domNeed = (Number(state.gateDomMinPct) || 0) / 100;
+    const sepNeed = Number(state.gateSepMin) || 0;
+
+    const metrics = {};
+
+    if (stability && typeof stability.dominance === "number"){
+      metrics.dominance = stability.dominance;
+      if (stability.dominance < domNeed){
+        reasons.push(`dominance ${(stability.dominance*100).toFixed(0)}% < ${Math.round(domNeed*100)}%`);
+      }
+    } else {
+      // only require dominance if scan is enabled
+      if (state.showScan){
+        reasons.push("dominance unavailable");
+      }
+    }
+
+    if (stability && typeof stability.medRatio === "number"){
+      metrics.sep = stability.medRatio;
+      if (stability.medRatio < sepNeed){
+        reasons.push(`sep ${stability.medRatio.toFixed(2)}× < ${sepNeed.toFixed(2)}×`);
+      }
+    } else {
+      if (state.showScan){
+        reasons.push("sep unavailable");
+      }
+    }
+
+    // Regime: ranging via slope (in σ/hr, using residual σ over detrend window)
+    const detrendMinutes = Math.round((Number(state.detrendHours) || 2) * 60);
+    const slope = estimateTrendSlopeSigmaPerHr(closes1m, resid1m, detrendMinutes);
+    metrics.absSlopeSigmaHr = slope.absSigmaHr;
+    if (state.gateReqRange && slope.absSigmaHr != null){
+      const maxSlope = Number(state.gateSlopeMaxSigmaHr) || 0;
+      if (slope.absSigmaHr > maxSlope){
+        reasons.push(`|slope| ${slope.absSigmaHr.toFixed(2)}σ/hr > ${maxSlope.toFixed(2)}σ/hr`);
+      }
+    }
+
+    // Volatility: current residual vol vs median vol across stability windows (or fallback to overall median across rolling chunks)
+    if (state.gateReqLowVol){
+      const winLen = Math.max(30, Math.floor(Number(state.scanWindow) || 780));
+      const residNow = resid1m.slice(Math.max(0, resid1m.length - winLen));
+      const volNow = stdev(residNow);
+      metrics.volNow = volNow;
+
+      let medVol = stability ? stability.medVol : null;
+      metrics.medVol = medVol;
+
+      if (medVol != null){
+        const mult = Number(state.gateVolMult) || 1;
+        if (volNow > mult * medVol){
+          reasons.push(`vol ${(volNow/medVol).toFixed(2)}× > ${mult.toFixed(2)}× median`);
+        }
+      } else {
+        // if no median available, don't block—just report
+        metrics.medVol = null;
+      }
+    }
+
+    const eligible = (reasons.length === 0);
+    return {enabled:true, eligible, reasons, metrics};
+  }
+
+  function showTooltip(text, clientX, clientY){
+    if (!elTooltip) return;
+    elTooltip.textContent = text;
+    elTooltip.style.display = "block";
+    const pad = 12;
+
+    // Initial position near cursor
+    let x = clientX + pad;
+    let y = clientY + pad;
+
+    // Clamp to viewport
+    const r = elTooltip.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (x + r.width + 8 > vw) x = Math.max(8, clientX - r.width - pad);
+    if (y + r.height + 8 > vh) y = Math.max(8, clientY - r.height - pad);
+
+    elTooltip.style.left = `${x}px`;
+    elTooltip.style.top = `${y}px`;
+  }
+
+  function hideTooltip(){
+    if (!elTooltip) return;
+    elTooltip.style.display = "none";
+  }
+
+
+  function zeroCrossings(series){
+    if (!series || series.length < 2) return 0;
+    let z = 0;
+    let prev = series[0];
+    for (let i=1;i<series.length;i++){
+      const cur = series[i];
+      if ((prev <= 0 && cur > 0) || (prev >= 0 && cur < 0)) z++;
+      prev = cur;
+    }
+    return z;
+  }
+
+  // ---------------- Time-series ops ----------------
+  function detrendRollingLinear(series, L){
+    // Returns residuals after removing a rolling linear fit over the last L samples.
+    const n = series.length;
+    const out = new Array(n).fill(0);
+    const w = Math.max(3, Math.floor(Number(L) || 24));
+    for(let i=0;i<n;i++){
+      const a = Math.max(0, i - w + 1);
+      const b = i;
+      const m = (b - a + 1);
+      if(m < 3){ out[i] = 0; continue; }
+      let sumT = 0, sumY = 0, sumTT = 0, sumTY = 0;
+      for(let j=0;j<m;j++){
+        const t = j;
+        const y = series[a + j];
+        sumT += t; sumY += y; sumTT += t*t; sumTY += t*y;
+      }
+      const denom = (m*sumTT - sumT*sumT) || 1e-9;
+      const beta = (m*sumTY - sumT*sumY) / denom;
+      const alpha = (sumY - beta*sumT) / m;
+      const yhat = alpha + beta*(m-1);
+      out[i] = series[i] - yhat;
+    }
+    return out;
+  }
+
+  function smaRolling(series, L){
+    const n = series.length;
+    const out = new Array(n).fill(0);
+    const w = Math.max(1, Math.floor(Number(L) || 24));
+    let sum = 0;
+    for(let i=0;i<n;i++){
+      sum += series[i];
+      if(i >= w) sum -= series[i-w];
+      const denom = Math.min(i+1, w);
+      out[i] = sum / denom;
+    }
+    return out;
+  }
+
+  // ---------------- Data generation ----------------
+  function generateDays({days, seed}){
+    // days[dayIndex] = 1m candles of length MINUTES_PER_DAY
+    const rng = mulberry32(seed);
+    let price = 100 + rng()*20;
+    const out = [];
+    for (let d=0; d<days; d++){
+      const day = [];
+      for (let i=0; i<MINUTES_PER_DAY; i++){
+        const o = price;
+        const flip = rng() < 0.5 ? -1 : 1;
+        const step = flip * (0.03 + rng()*0.25); // %
+        const c = o * (1 + step/100);
+
+        const wick = (0.02 + rng()*0.18) / 100;
+        const hi = Math.max(o,c) * (1 + wick);
+        const lo = Math.min(o,c) * (1 - wick);
+        const v = 50 + rng()*150;
+
+        day.push({o,h:hi,l:lo,c,v});
+        price = c;
+      }
+      out.push(day);
+    }
+    return out;
+  }
+
+  function resampleCandles(candles1m, tfMinutes){
+    const tf = Math.max(1, Math.floor(Number(tfMinutes) || 1));
+    if (tf === 1) return candles1m.slice();
+
+    const out = [];
+    for (let i=0; i<candles1m.length; i += tf){
+      const chunk = candles1m.slice(i, i+tf);
+      if (!chunk.length) continue;
+      const o = chunk[0].o;
+      const c = chunk[chunk.length-1].c;
+      let h = -Infinity;
+      let l = Infinity;
+      let v = 0;
+      for (const k of chunk){
+        h = Math.max(h, k.h);
+        l = Math.min(l, k.l);
+        v += (k.v || 0);
+      }
+      out.push({o,h,l,c,v});
+    }
+    return out;
+  }
+
+  function resampleSeriesAvg(series, tfMinutes){
+    // Downsample numeric series to match candle TF by averaging each tf-sized bucket.
+    const tf = Math.max(1, Math.floor(Number(tfMinutes) || 1));
+    if (tf === 1) return series.slice();
+    const out = [];
+    for (let i=0; i<series.length; i += tf){
+      const end = Math.min(series.length, i + tf);
+      let sum = 0;
+      let n = 0;
+      for (let j=i; j<end; j++){ sum += series[j]; n++; }
+      out.push(n ? (sum / n) : 0);
+    }
+    return out;
+  }
+
+  function flattenDays(days){
+    const flat = [];
+    const dayStartIdx = [];
+    for (let d=0; d<days.length; d++){
+      dayStartIdx.push(flat.length);
+      for (const k of days[d]) flat.push(k);
+    }
+    return {flat, dayStartIdx};
+  }
+
+  // ---------------- Rendering helpers ----------------
+  function drawGrid(ctx, x,y,w,h){
+    ctx.save();
+    ctx.fillStyle = getCSS("--panel");
+    ctx.fillRect(x,y,w,h);
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.lineWidth = 1;
+    const gx = 6;
+    const gy = 4;
+    for (let i=1;i<gx;i++){
+      const xx = x + w*(i/gx);
+      ctx.beginPath();ctx.moveTo(xx, y);ctx.lineTo(xx, y+h);ctx.stroke();
+    }
+    for (let j=1;j<gy;j++){
+      const yy = y + h*(j/gy);
+      ctx.beginPath();ctx.moveTo(x, yy);ctx.lineTo(x+w, yy);ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function extentCandles(candles){
+    let minP = Infinity;
+    let maxP = -Infinity;
+    for (const k of candles){
+      minP = Math.min(minP, k.l, k.c, k.o);
+      maxP = Math.max(maxP, k.h, k.c, k.o);
+    }
+    if (!Number.isFinite(minP) || !Number.isFinite(maxP)) return {minP:0,maxP:1};
+    if (maxP === minP) maxP = minP + 1e-6;
+    return {minP, maxP};
+  }
+
+  function drawCandles(ctx, candles, rect, dayStarts){
+    const {x,y,w,h} = rect;
+    const pad = 8;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+
+    drawGrid(ctx, x,y,w,h);
+    if (!candles || !candles.length) return;
+
+    const hits = [];
+
+    const {minP, maxP} = extentCandles(candles);
+    const span = (maxP - minP) || 1;
+    const n = candles.length;
+    const candleW = innerW / n;
+    const bodyW = Math.max(1, candleW*0.62);
+
+    function yMap(p){
+      const t = (p - minP) / span;
+      return innerY + innerH*(1 - t);
+    }
+
+    // Day separators
+    if (Array.isArray(dayStarts) && dayStarts.length){
+      ctx.save();
+      ctx.strokeStyle = getCSS("--grid");
+      ctx.lineWidth = 1;
+      for (let di=0; di<dayStarts.length; di++){
+        const idx = dayStarts[di];
+        if (idx <= 0) continue;
+        const xx = innerX + idx * candleW;
+        ctx.beginPath();ctx.moveTo(xx, innerY);ctx.lineTo(xx, innerY+innerH);ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    for (let i=0;i<n;i++){
+      const k = candles[i];
+      const cx = innerX + i*candleW + candleW/2;
+      const yO = yMap(k.o);
+      const yC = yMap(k.c);
+      const yH = yMap(k.h);
+      const yL = yMap(k.l);
+      const up = k.c >= k.o;
+
+      ctx.strokeStyle = up ? getCSS("--up") : getCSS("--dn");
+      ctx.fillStyle = up ? getCSS("--up") : getCSS("--dn");
+
+      ctx.beginPath();
+      ctx.moveTo(cx, yH);
+      ctx.lineTo(cx, yL);
+      ctx.stroke();
+
+      const top = Math.min(yO,yC);
+      const bot = Math.max(yO,yC);
+      const bh = Math.max(1, bot-top);
+      ctx.fillRect(cx - bodyW/2, top, bodyW, bh);
+    }
+  }
+
+
+  // ---------------- Cycle turning points (peaks/troughs) ----------------
+  function detectTurningPoints(series, minSep=3){
+    // Returns {peaks:[i...], troughs:[i...]} indices in the provided series.
+    // Simple local-extrema detection with optional minimum separation.
+    const peaks = [];
+    const troughs = [];
+    if (!series || series.length < 3) return {peaks, troughs};
+
+    let lastPeak = -Infinity;
+    let lastTrough = -Infinity;
+
+    for (let i=1;i<series.length-1;i++){
+      const a = series[i-1], b = series[i], c = series[i+1];
+      if (!(Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c))) continue;
+
+      if (b > a && b > c){
+        if (i - lastPeak >= minSep){
+          peaks.push(i);
+          lastPeak = i;
+        }
+      } else if (b < a && b < c){
+        if (i - lastTrough >= minSep){
+          troughs.push(i);
+          lastTrough = i;
+        }
+      }
+    }
+    return {peaks, troughs};
+  }
+
+  function drawTurningMarkers(ctx, rect, candles, peakIdxs, troughIdxs, gate){
+    const {x,y,w,h} = rect;
+    const pad = 8;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+    if (!candles || !candles.length) return;
+
+    const {minP, maxP} = extentCandles(candles);
+    const span = (maxP - minP) || 1;
+    const n = candles.length;
+    const candleW = innerW / n;
+
+    function yMap(p){
+      const t = (p - minP) / span;
+      return innerY + innerH*(1 - t);
+    }
+
+    function drawMarker(i, kind){
+      if (i < 0 || i >= n) return;
+      const k = candles[i];
+      const cx = innerX + i*candleW + candleW/2;
+      const yy = yMap(k.c);
+
+      const eligible = (!gate || !gate.enabled) ? true : !!gate.eligible;
+      ctx.save();
+      ctx.globalAlpha = eligible ? 0.85 : 0.25;
+      ctx.strokeStyle = eligible ? getCSS("--accent") : getCSS("--muted");
+      ctx.fillStyle = eligible ? getCSS("--accent") : getCSS("--muted");
+      ctx.lineWidth = 1;
+      const r = Math.max(2, Math.min(5, candleW*0.18));
+      // subtle vertical tick
+      ctx.beginPath();
+      ctx.moveTo(cx, yy - (kind==="peak" ? 10 : -10));
+      ctx.lineTo(cx, yy);
+      ctx.stroke();
+
+      // small caret
+      ctx.beginPath();
+      if (kind === "peak"){
+        ctx.moveTo(cx - r, yy - 10);
+        ctx.lineTo(cx, yy - 14);
+        ctx.lineTo(cx + r, yy - 10);
+      } else {
+        ctx.moveTo(cx - r, yy + 10);
+        ctx.lineTo(cx, yy + 14);
+        ctx.lineTo(cx + r, yy + 10);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      hits.push({x: cx, y: yy, kind, eligible, reasons: (gate && gate.reasons ? gate.reasons.slice() : []), metrics: (gate && gate.metrics ? {...gate.metrics} : {})});
+    }
+
+    for (const i of peakIdxs) drawMarker(i, "peak");
+    for (const i of troughIdxs) drawMarker(i, "trough");
+
+    // Used for tooltip hit-testing (in canvas pixel space)
+    state._markerHits = hits;
+  }
+
+  function candlesToClosePoints(candles, rect, minP, maxP){
+    const {x,y,w,h} = rect;
+    const pad = 8;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+    if (!candles || !candles.length) return [];
+
+    const span = (maxP - minP) || 1;
+    const n = candles.length;
+    const step = innerW / Math.max(1,(n-1));
+
+    const pts = [];
+    for (let i=0;i<n;i++){
+      const xx = innerX + i*step;
+      const t = (candles[i].c - minP) / span;
+      const yy = innerY + innerH*(1-t);
+      pts.push({x:xx,y:yy});
+    }
+    return pts;
+  }
+
+  function drawResidualLine(ctx, resid, rect){
+    const {x,y,w,h} = rect;
+    const pad = 8;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+
+    drawGrid(ctx, x,y,w,h);
+    if (!resid || !resid.length) return;
+
+    let minV = Infinity, maxV = -Infinity;
+    for (const v of resid){ minV = Math.min(minV, v); maxV = Math.max(maxV, v); }
+    if (!Number.isFinite(minV) || !Number.isFinite(maxV)){ minV = -1; maxV = 1; }
+    if (maxV === minV){ maxV = minV + 1e-6; }
+
+    const span = (maxV - minV) || 1;
+    const n = resid.length;
+
+    // zero line
+    const zt = (0 - minV) / span;
+    const zy = innerY + innerH*(1-zt);
+    ctx.save();
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.beginPath();ctx.moveTo(innerX, zy);ctx.lineTo(innerX+innerW, zy);ctx.stroke();
+    ctx.restore();
+
+    const pts = [];
+    for (let i=0;i<n;i++){
+      const xx = innerX + (i/(n-1)) * innerW;
+      const t = (resid[i] - minV) / span;
+      const yy = innerY + innerH*(1-t);
+      pts.push({x:xx,y:yy});
+    }
+    strokePolyline(ctx, pts, getCSS("--line"), 2);
+
+    drawText(ctx, "Residual (detrended close)", x+10, y+18, {font:"700 12px system-ui", color:getCSS("--muted")});
+  }
+
+  function drawCycleLine(ctx, series, rect, label){
+    const {x,y,w,h} = rect;
+    const pad = 8;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+
+    drawGrid(ctx, x,y,w,h);
+    if (!series || !series.length) return;
+
+    let minV = Infinity, maxV = -Infinity;
+    for (const v of series){ minV = Math.min(minV, v); maxV = Math.max(maxV, v); }
+    if (!Number.isFinite(minV) || !Number.isFinite(maxV)){ minV = -1; maxV = 1; }
+    if (maxV === minV){ maxV = minV + 1e-6; }
+
+    const span = (maxV - minV) || 1;
+    const n = series.length;
+
+    // zero line
+    const zt = (0 - minV) / span;
+    const zy = innerY + innerH*(1-zt);
+    ctx.save();
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.beginPath();ctx.moveTo(innerX, zy);ctx.lineTo(innerX+innerW, zy);ctx.stroke();
+    ctx.restore();
+
+    const pts = [];
+    for (let i=0;i<n;i++){
+      const xx = innerX + (i/(n-1)) * innerW;
+      const t = (series[i] - minV) / span;
+      const yy = innerY + innerH*(1-t);
+      pts.push({x:xx,y:yy});
+    }
+    strokePolyline(ctx, pts, getCSS("--accent"), 2);
+
+    drawText(ctx, label || "Cycle component", x+10, y+18, {font:"700 12px system-ui", color:getCSS("--muted")});
+  }
+
+  // ---------------- Oscillation scan ----------------
+  function ema(series, L){
+    const n = series.length;
+    const out = new Array(n).fill(0);
+    const len = Math.max(1, Math.floor(Number(L) || 1));
+    const a = 2 / (len + 1);
+    let prev = series[0] || 0;
+    out[0] = prev;
+    for (let i=1;i<n;i++){
+      const v = series[i];
+      prev = a*v + (1-a)*prev;
+      out[i] = prev;
+    }
+    return out;
+  }
+
+  function bandpassApprox(series, periodMin){
+    // Very simple “band-pass-ish” component using EMA difference.
+    // Not meant to be perfect; meant to be interpretable in this prototype.
+    const P = Math.max(2, Math.round(Number(periodMin) || 5));
+    const fast = Math.max(2, Math.round(P/3));
+    const slow = Math.max(fast+1, Math.round(P));
+    const eFast = ema(series, fast);
+    const eSlow = ema(series, slow);
+    const out = new Array(series.length);
+    for (let i=0;i<series.length;i++) out[i] = eFast[i] - eSlow[i];
+    return out;
+  }
+
+  function computeOscillationScanOnResidual(resid1m, scanWindowMinutes){
+    const N = resid1m.length;
+    const tailN = clamp(Math.floor(Number(scanWindowMinutes) || 780), 120, N);
+
+    const scores = PERIODS.map(per => {
+      const bp = bandpassApprox(resid1m, per.min);
+      const tail = bp.slice(bp.length - tailN);
+
+      const energy = rms(tail);
+      const zc = zeroCrossings(tail);
+      const expected = Math.max(1, Math.round((tail.length / per.min) * 2));
+      const regularity = clamp01(1 - (Math.abs(zc - expected) / expected));
+
+      const raw = energy * regularity;
+      return {...per, raw, norm: 0, energy, regularity};
+    });
+
+    let maxRaw = 0;
+    for (const s of scores){ maxRaw = Math.max(maxRaw, s.raw || 0); }
+    for (const s of scores){ s.norm = (maxRaw > 0) ? (s.raw / maxRaw) : 0; }
+
+    let best = null;
+    for (const s of scores){ if (!best || s.raw > best.raw) best = s; }
+
+    // ratio to runner-up (simple “confidence” proxy)
+    const sorted = scores.slice().sort((a,b)=>b.raw-a.raw);
+    const bestRatio = (sorted.length >= 2 && sorted[1].raw > 0) ? (sorted[0].raw / sorted[1].raw) : null;
+
+    return {scores, best, bestRatio, maxRaw, tailN};
+  }
+
+  function computePeriodStability(resid1m, scanWindowMinutes, K=12, stepMinutes=60){
+    // Measures whether the “best period” result is stable across recent overlapping windows.
+    const N = resid1m.length;
+    const winLen = clamp(Math.floor(Number(scanWindowMinutes)||780), 120, N);
+    const step = clamp(Math.floor(Number(stepMinutes)||60), 5, winLen);
+
+    const windows = [];
+    for (let end = N; (end - winLen) >= 0 && windows.length < K; end -= step){
+      const slice = resid1m.slice(end - winLen, end);
+      const scan = computeOscillationScanOnResidual(slice, winLen);
+      windows.unshift({
+        bestMin: scan.best ? scan.best.min : null,
+        bestLabel: scan.best ? scan.best.label : null,
+        bestRatio: (scan.bestRatio != null ? scan.bestRatio : null),
+        bestRaw: scan.best ? scan.best.raw : null,
+        vol: stdev(slice)
+      });
+    }
+
+    const counts = {};
+    for (const w of windows){
+      if (w.bestMin == null) continue;
+      const k = String(w.bestMin);
+      counts[k] = (counts[k] || 0) + 1;
+    }
+
+    let dominantMin = null;
+    let dominantCount = 0;
+    for (const k in counts){
+      if (counts[k] > dominantCount){ dominantCount = counts[k]; dominantMin = Number(k); }
+    }
+
+    let flipCount = 0;
+    for (let i=1; i<windows.length; i++){
+      const a = windows[i-1].bestMin;
+      const b = windows[i].bestMin;
+      if (a == null || b == null) continue;
+      if (Number(a) !== Number(b)) flipCount += 1;
+    }
+
+    const ratios = windows.map(w => w.bestRatio).filter(v => v != null && isFinite(v));
+    ratios.sort((a,b)=>a-b);
+    const medRatio = ratios.length ? ratios[Math.floor(ratios.length/2)] : null;
+
+    const vols = windows.map(w => w.vol).filter(v => v != null && isFinite(v));
+    vols.sort((a,b)=>a-b);
+    const medVol = vols.length ? vols[Math.floor(vols.length/2)] : null;
+
+    const dominance = (windows.length && dominantCount) ? (dominantCount / windows.length) : null;
+
+    return {windows, counts, dominantMin, dominantCount, dominance, flipCount, medRatio, medVol, winLen, step};
+  }
+
+  function drawStabilityPanel(ctx, x, y, w, stability, selectedMin){
+    const txt = getCSS("--muted");
+    const fg = getCSS("--fg");
+    const fill = getCSS("--accent");
+    const ghost = getCSS("--grid");
+
+    drawText(ctx, "Stability (recent windows)", x, y, {font:"12px system-ui", color:txt});
+    const domLabel = (stability.dominantMin != null) ? fmtPeriodLabel(stability.dominantMin) : "(none)";
+    const domPct = (stability.dominance != null) ? Math.round(stability.dominance*100) : null;
+    const sepTxt = (stability.medRatio != null) ? `${stability.medRatio.toFixed(2)}×` : "n/a";
+    const winTxt = `${stability.windows.length}×${stability.winLen}m`;
+    const summary = `Dominant: ${domLabel}${domPct!=null?` (${domPct}%)`:""} • flips: ${stability.flipCount} • sep: ${sepTxt} • ${winTxt}`;
+    drawText(ctx, summary, x, y+14, {font:"11px system-ui", color:fg});
+
+    // timeline blocks
+    const blocks = stability.windows;
+    const by = y + 28;
+    const bh = 8;
+    const gap = 2;
+    const bw = Math.max(2, Math.floor((w - (blocks.length-1)*gap) / Math.max(1, blocks.length)));
+    let xx = x;
+    for (let i=0; i<blocks.length; i++){
+      const b = blocks[i];
+      const isDom = (stability.dominantMin != null && b.bestMin != null && Number(b.bestMin) === Number(stability.dominantMin));
+      const isSel = (selectedMin != null && b.bestMin != null && Number(b.bestMin) === Number(selectedMin));
+      ctx.save();
+      ctx.fillStyle = isDom ? fill : ghost;
+      ctx.fillRect(xx, by, bw, bh);
+      if (isSel){
+        ctx.strokeStyle = fg;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(xx-1, by-1, bw+2, bh+2);
+      }
+      ctx.restore();
+      xx += bw + gap;
+    }
+
+    return {h: 40};
+  }
+
+  function fmtPeriodLabel(min){
+    // Try to map to the PERIODS label if present, else format minutes.
+    const p = PERIODS.find(p => Number(p.min) === Number(min));
+    if (p && p.label) return p.label;
+    if (min >= 60){
+      const h = min / 60;
+      if (Math.abs(h - Math.round(h)) < 1e-6) return `${Math.round(h)}h`;
+      return `${h.toFixed(1)}h`;
+    }
+    return `${min}m`;
+  }
+
+  function drawScaleBars(ctx, x, y, w, scores, bestLabel, selectedMin){
+    // Renders the scan bars and returns hit-boxes so the gutter can be clickable.
+    const rowH = 12;
+    const gap = 4;
+    const labelW = 34;
+    const barH = 7;
+
+    const bg = getCSS("--grid");
+    const fill = getCSS("--accent");
+    const txt = getCSS("--muted");
+    const fg = getCSS("--fg");
+
+    drawText(ctx, "Oscillation scan (detrended)", x, y, {font:"12px system-ui", color:txt});
+    if (bestLabel){
+      const bestX = x + Math.max(120, Math.min(195, w - 110));
+      drawText(ctx, bestLabel, bestX, y, {font:"700 12px system-ui", color:fg});
+    }
+
+    let yy = y + 14;
+    const barW = Math.max(40, w - labelW - 10);
+
+    const hitBoxes = [];
+
+    for (const s of scores){
+      const isBest = (bestLabel && s.label && bestLabel.includes(s.label));
+      const isSelected = (selectedMin != null && Number(selectedMin) === Number(s.min));
+
+      drawText(ctx, s.label, x, yy, {
+        font: (isSelected || isBest) ? "700 11px system-ui" : "11px system-ui",
+        color: isSelected ? fg : (isBest ? fg : txt),
+        baseline:"alphabetic"
+      });
+
+      const bx = x + labelW;
+      const by = yy - barH + 2;
+      ctx.save();
+      ctx.fillStyle = bg;
+      ctx.fillRect(bx, by, barW, barH);
+
+      const frac = clamp01(s.norm || 0);
+      ctx.fillStyle = (s.raw == null) ? bg : fill;
+      ctx.fillRect(bx, by, Math.max(0, barW * frac), barH);
+
+      // Selected outline
+      if (isSelected){
+        ctx.strokeStyle = fill;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx - 2, by - 2, barW + 4, barH + 4);
+      }
+      ctx.restore();
+
+      // Clickable row hit box (label + bar)
+      hitBoxes.push({
+        min: s.min,
+        label: s.label,
+        x: x,
+        y: yy - rowH + 2,
+        w: labelW + barW + 10,
+        h: rowH + gap
+      });
+
+      yy += rowH + gap;
+    }
+
+    return hitBoxes;
+  }
+
+  // ---------------- DOM + state ----------------
+  const elTicker = document.getElementById("ticker");
+  const elDays = document.getElementById("days");
+  const elTf = document.getElementById("tf");
+  const elStatus = document.getElementById("status");
+  const elToggleDetrend = document.getElementById("toggleDetrend");
+  const elDetrendHours = document.getElementById("detrendHours");
+  const elToggleScan = document.getElementById("toggleScan");
+  const elToggleStability = document.getElementById("toggleStability");
+  const elToggleTurns = document.getElementById("toggleTurns");
+  const elToggleGate = document.getElementById("toggleGate");
+  const elGateDomMin = document.getElementById("gateDomMin");
+  const elGateSepMin = document.getElementById("gateSepMin");
+  const elGateReqRange = document.getElementById("gateReqRange");
+  const elGateSlopeMax = document.getElementById("gateSlopeMax");
+  const elGateReqLowVol = document.getElementById("gateReqLowVol");
+  const elGateVolMult = document.getElementById("gateVolMult");
+  const elTooltip = document.getElementById("tooltip");
+  const elScanWindow = document.getElementById("scanWindow");
+  const elSelPeriod = document.getElementById("selPeriod");
+  const elDetrendLabel = document.getElementById("detrendLabel");
+  const elScanLabel = document.getElementById("scanLabel");
+
+  const cDetrendDial = document.getElementById("detrendDial");
+  const cScanDial = document.getElementById("scanDial");
+
+  const cPrice = document.getElementById("price");
+  const cAnalysis = document.getElementById("analysis");
+
+  let state = {
+    ticker: elTicker.value,
+    days: Number(elDays.value),
+    tfMinutes: Number(elTf.value),
+    seed: 1337,
+    showDetrend: !!elToggleDetrend.checked,
+    detrendHours: Number(elDetrendHours.value) || 2,
+    showScan: !!elToggleScan.checked,
+    showStability: (elToggleStability ? !!elToggleStability.checked : true),
+    showTurns: (elToggleTurns ? !!elToggleTurns.checked : true),
+    gateEnabled: (elToggleGate ? !!elToggleGate.checked : true),
+    gateDomMinPct: Number(elGateDomMin ? elGateDomMin.value : 60) || 60,
+    gateSepMin: Number(elGateSepMin ? elGateSepMin.value : 1.4) || 1.4,
+    gateReqRange: (elGateReqRange ? !!elGateReqRange.checked : true),
+    gateSlopeMaxSigmaHr: Number(elGateSlopeMax ? elGateSlopeMax.value : 0.25) || 0.25,
+    gateReqLowVol: (elGateReqLowVol ? !!elGateReqLowVol.checked : true),
+    gateVolMult: Number(elGateVolMult ? elGateVolMult.value : 1.2) || 1.2,
+    _markerHits: [],
+    scanWindow: Number(elScanWindow.value) || 780,
+
+    // If set, clicking the scan bars will set the detrend window to this period (minutes).
+    selectedPeriodMin: null,
+    bestPeriodMin: null,
+
+    days1m: null,
+    flat1m: null,
+    dayStarts1m: null,
+
+    // Populated each render when scan is visible
+    scanHitBoxes: []
+  };
+
+  // Dial instances (initialized after DOM is ready inside this IIFE)
+  let detrendDial = null;
+  let scanDial = null;
+
+  function updateDialLabels(){
+    if (elDetrendLabel) elDetrendLabel.textContent = `${(Number(state.detrendHours)||0).toFixed( (Number(state.detrendHours)||0) < 1 ? 2 : (Number(state.detrendHours)||0) < 10 ? 1 : 0 ).replace(/\.0$/,'')}h`;
+    if (elScanLabel) elScanLabel.textContent = `${Math.round(Number(state.scanWindow)||0)}m`;
+  }
+
+  function initDials(){
+    if (cDetrendDial && !detrendDial){
+      detrendDial = createDial({
+        canvas: cDetrendDial,
+        min: 0.25,  // 15 minutes
+        max: 12,    // 12 hours
+        step: 0.25, // 15 min steps
+        value: state.detrendHours,
+        format: (v) => `${v.toFixed(v < 1 ? 2 : (v < 10 ? 1 : 0)).replace(/\.0$/,'')}h`,
+        onChange: (v) => {
+          state.detrendHours = Number(v);
+          elDetrendHours.value = String(v);
+          updateDialLabels();
+          renderAll();
+        }
+      });
+    }
+
+    if (cScanDial && !scanDial){
+      scanDial = createDial({
+        canvas: cScanDial,
+        min: 120,
+        max: 1560, // ~4 RTH days
+        step: 30,
+        value: state.scanWindow,
+        format: (v) => `${Math.round(v)}m`,
+        onChange: (v) => {
+          state.scanWindow = Number(v);
+          elScanWindow.value = String(v);
+          updateDialLabels();
+          renderAll();
+        }
+      });
+    }
+
+    updateDialLabels();
+  }
+
+  function setStatus(msg){
+    elStatus.textContent = msg;
+  }
+
+  function updateSelPeriodLabel(){
+    if (!elSelPeriod) return;
+    if (state.selectedPeriodMin != null){
+      elSelPeriod.textContent = `${state.selectedPeriodMin}m`;
+      elSelPeriod.style.color = getCSS("--fg");
+      return;
+    }
+    if (state.bestPeriodMin != null){
+      elSelPeriod.textContent = `Auto (${state.bestPeriodMin}m)`;
+      elSelPeriod.style.color = getCSS("--muted");
+      return;
+    }
+    elSelPeriod.textContent = "Auto";
+    elSelPeriod.style.color = getCSS("--muted");
+  }
+
+  // ---------------- Render pipeline ----------------
+  function regenerate(){
+    state.ticker = elTicker.value;
+    state.days = Number(elDays.value);
+    state.tfMinutes = Number(elTf.value);
+    state.showDetrend = !!elToggleDetrend.checked;
+    state.detrendHours = Number(elDetrendHours.value) || 2;
+    state.showScan = !!elToggleScan.checked;
+    if (elToggleTurns) state.showTurns = !!elToggleTurns.checked;
+    state.scanWindow = Number(elScanWindow.value) || 780;
+
+    if (detrendDial) detrendDial.setValue(state.detrendHours, false);
+    if (scanDial) scanDial.setValue(state.scanWindow, false);
+    updateDialLabels();
+
+    state.seed = (state.seed + 99991) >>> 0;
+    state.days1m = generateDays({days: state.days, seed: state.seed});
+
+    const flat = flattenDays(state.days1m);
+    state.flat1m = flat.flat;
+    state.dayStarts1m = flat.dayStartIdx;
+
+    renderAll();
+  }
+
+  function renderAll(){
+    if (!state.days1m) return;
+
+    const tf = Math.max(1, Math.floor(state.tfMinutes || 1));
+
+    // Resample each day then flatten
+    const daysTf = state.days1m.map(day => resampleCandles(day, tf));
+    const flatTf = flattenDays(daysTf);
+
+    const candles = flatTf.flat;
+    const dayStartsTf = flatTf.dayStartIdx;
+
+    updateSelPeriodLabel();
+    const selTxt = (state.selectedPeriodMin != null) ? ` • Sel ${state.selectedPeriodMin}m` : (state.bestPeriodMin != null ? ` • Sel Auto(${state.bestPeriodMin}m)` : "");
+    setStatus(`${state.ticker} • ${state.days} days • TF ${tf}m${selTxt} • seed ${state.seed}`);
+
+    renderPrice(candles, dayStartsTf);
+    renderAnalysis(candles, dayStartsTf);
+  }
+
+  function renderPrice(candlesTf, dayStartsTf){
+    const ctx = setupHiDPICanvas(cPrice);
+    const w = cPrice.getBoundingClientRect().width;
+    const h = cPrice.getBoundingClientRect().height;
+    ctx.clearRect(0,0,w,h);
+
+    // Fill full canvas background so the left gutter matches the analysis panel.
+    ctx.save();
+    ctx.fillStyle = getCSS("--panel");
+    ctx.fillRect(0,0,w,h);
+    ctx.restore();
+
+    const pad = OUTER_PAD;
+    const gutterW = GUTTER_W;
+
+    // Plot area starts after the gutter so the x-axis aligns with the residual plot below.
+    const plotRect = {
+      x: pad + gutterW,
+      y: 0,
+      w: Math.max(1, w - (pad + gutterW) - pad),
+      h: h
+    };
+
+    // Left gutter backdrop
+    ctx.save();
+    ctx.fillStyle = getCSS("--ghost");
+    ctx.fillRect(0, 0, plotRect.x, h);
+    ctx.restore();
+
+    drawCandles(ctx, candlesTf, plotRect, dayStartsTf);
+
+    // Optional: mark cycle turning points (peaks/troughs) on the price chart.
+    if (state.showTurns){
+      const tf = Math.max(1, Math.floor(state.tfMinutes || 1));
+      const closes1m = state.flat1m.map(k => k.c);
+      const L1m = Math.max(3, Math.round((state.detrendHours * 60)));
+      const resid1m = detrendRollingLinear(closes1m, L1m);
+
+      const activePeriodMin = Number(state.selectedPeriodMin) || Number(state.bestPeriodMin) || 5;
+      const bp1m = bandpassApprox(resid1m, activePeriodMin);
+
+      // Detect turning points on the 1m cycle and map them onto TF candles.
+      const minSep1m = Math.max(3, Math.floor(activePeriodMin * 0.15)); // avoid marker spam
+      const tp = detectTurningPoints(bp1m, minSep1m);
+
+      const peaksTf = tp.peaks.map(i => Math.floor(i / tf));
+      const troughsTf = tp.troughs.map(i => Math.floor(i / tf));
+
+      // De-dupe (multiple 1m extrema can land on the same TF candle)
+      const uniq = (arr) => Array.from(new Set(arr)).filter(i => i >= 0 && i < candlesTf.length);
+
+      // Signal gate context (eligibility) — applies to all turning points on screen.
+      const stability = (state.showScan ? computePeriodStability(resid1m, state.scanWindow, 12, 60) : null);
+      const gate = computeGateContext(resid1m, closes1m, stability);
+      state._lastGate = gate;
+
+      drawTurningMarkers(ctx, plotRect, candlesTf, uniq(peaksTf), uniq(troughsTf), gate);
+
+    }
+
+
+    // Day labels aligned to candle index within plotRect
+    {
+      const n = Math.max(1, candlesTf.length);
+      const innerPad = 8; // must match drawCandles() padding
+      const innerX = plotRect.x + innerPad;
+      const innerW = plotRect.w - innerPad*2;
+      const candleW = innerW / n;
+
+      ctx.save();
+      ctx.fillStyle = getCSS("--muted");
+      ctx.font = "11px system-ui";
+      for (let d=0; d<dayStartsTf.length; d++){
+        const idx = dayStartsTf[d];
+        const xx = innerX + idx * candleW;
+        ctx.fillText(`D${d+1}`, xx + 4, 16);
+      }
+      ctx.restore();
+    }
+
+    // Detrended overlay as a close-line (flattened)
+    // IMPORTANT: Always computed from 1-minute closes, then downsampled to match the chart TF.
+    if (state.showDetrend){
+      const tf = Math.max(1, Math.floor(state.tfMinutes || 1));
+
+      const closes1m = state.flat1m.map(k => k.c);
+      const L1m = Math.max(3, Math.round((state.detrendHours * 60))); // since series is 1-minute
+      const resid1m = detrendRollingLinear(closes1m, L1m);
+      const base1m = smaRolling(closes1m, L1m);
+      const detClose1m = resid1m.map((r,i)=>r+base1m[i]);
+
+      // Downsample to TF so it aligns with the displayed candles.
+      const detCloseTf = resampleSeriesAvg(detClose1m, tf);
+
+      // Map detCloseTf within plotRect using the SAME y-scale as the displayed candles.
+      const {minP,maxP} = extentCandles(candlesTf);
+      const pts = [];
+      const innerPad = 8; // must match drawCandles() padding
+      const innerX = plotRect.x + innerPad;
+      const innerY = plotRect.y + innerPad;
+      const innerW2 = plotRect.w - innerPad*2;
+      const innerH2 = plotRect.h - innerPad*2;
+      const span = (maxP-minP) || 1;
+      const n = Math.max(1, detCloseTf.length);
+      const step = innerW2 / Math.max(1, n);
+
+      // Align to candle centers (same indexing as drawCandles)
+      for (let i=0;i<n;i++){
+        const xx = innerX + (i + 0.5) * step;
+        const t = (detCloseTf[i]-minP)/span;
+        const yy = innerY + innerH2*(1-t);
+        pts.push({x:xx,y:yy});
+      }
+      strokePolyline(ctx, pts, getCSS("--accent"), 2);
+
+      drawText(ctx, `Detrend overlay: ${state.detrendHours}h (computed on 1m)`, plotRect.x + 10, h-10, {font:"12px system-ui", color:getCSS("--muted")});
+    }
+
+    drawText(ctx, `Price (continuous sessions)`, plotRect.x + 10, 18, {font:"700 12px system-ui", color:getCSS("--muted")});
+  }
+
+  function renderAnalysis(candlesTf, dayStartsTf){
+    const ctx = setupHiDPICanvas(cAnalysis);
+    const w = cAnalysis.getBoundingClientRect().width;
+    const h = cAnalysis.getBoundingClientRect().height;
+    ctx.clearRect(0,0,w,h);
+
+    const pad = OUTER_PAD;
+    const gutterW = GUTTER_W;
+
+    const innerX = pad + gutterW;
+    const innerY = pad;
+    const innerW = w - innerX - pad;
+    const innerH = h - pad*2;
+
+    // Split analysis panel into two aligned plots: residual (top) + cycle component (bottom)
+    const gapY = 10;
+    const topH = Math.max(120, Math.floor(innerH * 0.58));
+    const botH = Math.max(90, innerH - topH - gapY);
+
+    const residRect = {x:innerX, y:innerY, w:innerW, h:topH};
+    const cycleRect = {x:innerX, y:innerY + topH + gapY, w:innerW, h:botH};
+
+    // Residual (yellow)
+    // IMPORTANT: Always computed from 1-minute closes, then downsampled to match the chart TF.
+    const tf = Math.max(1, Math.floor(state.tfMinutes || 1));
+    const closes1m = state.flat1m.map(k => k.c);
+    const L1m = Math.max(3, Math.round((state.detrendHours * 60))); // since series is 1-minute
+    const resid1m = detrendRollingLinear(closes1m, L1m);
+    const residDisp = resampleSeriesAvg(resid1m, tf);
+
+    drawResidualLine(ctx, residDisp, residRect);
+
+    // Cycle component: bandpass-ish view of the residual at the selected (or best) period.
+    const activePeriodMin = Number(state.selectedPeriodMin) || Number(state.bestPeriodMin) || 5;
+    const bp1m = bandpassApprox(resid1m, activePeriodMin);
+    const bpDisp = resampleSeriesAvg(bp1m, tf);
+    drawCycleLine(ctx, bpDisp, cycleRect, `Cycle component (≈ ${activePeriodMin}m)`);
+
+    // Left gutter: scan histogram (based on *1-minute* closes)
+    if (state.showScan){
+      const closes1m = state.flat1m.map(k => k.c);
+      const scan = computeOscillationScanOnResidual(resid1m, state.scanWindow);
+      state.bestPeriodMin = scan.best ? scan.best.min : null;
+      const ratioTxt = (scan.bestRatio != null) ? ` • ${scan.bestRatio.toFixed(2)}×` : "";
+      const bestLabel = scan.best ? `Best: ${scan.best.label}${ratioTxt}` : "Best: (none)";
+
+      // draw gutter backdrop
+      ctx.save();
+      ctx.fillStyle = getCSS("--ghost");
+      ctx.fillRect(pad, pad, gutterW - pad, h - pad*2);
+      ctx.restore();
+
+      const hitBoxes = drawScaleBars(ctx, pad+8, pad+18, gutterW - pad - 16, scan.scores, bestLabel, state.selectedPeriodMin);
+      state.scanHitBoxes = hitBoxes;
+
+      if (state.showStability){
+        const stab = computePeriodStability(resid1m, state.scanWindow, 12, 60);
+        state.stability = stab;
+        const lastHB = (hitBoxes && hitBoxes.length) ? hitBoxes[hitBoxes.length-1] : {y:pad+18,h:0};
+        let stabY = lastHB.y + lastHB.h + 18;
+        // Keep stability panel within the gutter area.
+        stabY = Math.min(stabY, h - pad - 60);
+        drawStabilityPanel(ctx, pad+8, stabY, gutterW - pad - 16, stab, state.selectedPeriodMin);
+      }
+
+      drawText(ctx, "Click a period to set selected period", pad+8, pad+36 + 16*PERIODS.length, {font:"11px system-ui", color:getCSS("--muted")});
+
+      drawText(ctx, `Window: last ${scan.tailN}m`, pad+8, h-12, {font:"12px system-ui", color:getCSS("--muted")});
+    } else {
+      // draw empty gutter
+      ctx.save();
+      ctx.fillStyle = getCSS("--ghost");
+      ctx.fillRect(pad, pad, gutterW - pad, h - pad*2);
+      ctx.restore();
+      drawText(ctx, "(scan hidden)", pad+12, pad+22, {font:"12px system-ui", color:getCSS("--muted")});
+    }
+  }
+
+  // ---------------- Self-tests ----------------
+  function runSelfTests(){
+    try{
+      const d = generateDays({days: 3, seed: 1});
+      console.assert(d.length === 3, "test: generateDays days");
+      console.assert(d[0].length === MINUTES_PER_DAY, "test: day length");
+
+      const flat = flattenDays(d);
+      console.assert(flat.flat.length === 3*MINUTES_PER_DAY, "test: flatten length");
+      console.assert(flat.dayStartIdx.length === 3, "test: flatten starts");
+
+      const r5 = resampleCandles(d[0], 5);
+      console.assert(r5.length === Math.ceil(MINUTES_PER_DAY/5), "test: resample 5m length");
+
+      const closes = flat.flat.map(k => k.c);
+      const resid = detrendRollingLinear(closes, 30);
+      console.assert(resid.length === closes.length, "test: detrend length matches");
+
+      const r30 = detrendRollingLinear(closes, 30);
+      const scan = computeOscillationScanOnResidual(r30, 390);
+      console.assert(scan.scores.length === PERIODS.length, "test: scan scores length");
+      console.assert(scan.best && typeof scan.best.min === "number", "test: scan best exists");
+
+      const bp = bandpassApprox(r30, 5);
+      console.assert(bp.length === r30.length, "test: bandpass length");
+
+      const sAvg = resampleSeriesAvg(closes, 5);
+      console.assert(sAvg.length === Math.ceil(closes.length/5), "test: resampleSeriesAvg length");
+      console.assert(scan.scores.every(s => typeof s.norm === "number"), "test: scan norms numeric");
+    } catch(err){
+      console.warn("Self-tests error:", err);
+    }
+  }
+
+  // ---------------- Wiring ----------------
+  document.getElementById("regen").addEventListener("click", regenerate);
+  document.getElementById("ticker").addEventListener("change", () => { state.ticker = elTicker.value; renderAll(); });
+  document.getElementById("days").addEventListener("change", () => { state.days = Number(elDays.value); regenerate(); });
+  document.getElementById("tf").addEventListener("change", () => { state.tfMinutes = Number(elTf.value); renderAll(); });
+  document.getElementById("toggleDetrend").addEventListener("change", () => { state.showDetrend = !!elToggleDetrend.checked; renderAll(); });
+  document.getElementById("detrendHours").addEventListener("change", () => { state.detrendHours = Number(elDetrendHours.value) || 2; renderAll(); });
+  document.getElementById("toggleScan").addEventListener("change", () => { state.showScan = !!elToggleScan.checked; renderAll(); });
+  if (document.getElementById("toggleStability")) document.getElementById("toggleStability").addEventListener("change", () => { state.showStability = !!elToggleStability.checked; renderAll(); });
+  if (document.getElementById("toggleTurns")) document.getElementById("toggleTurns").addEventListener("change", () => { state.showTurns = !!document.getElementById("toggleTurns").checked; renderAll(); });
+  
+  if (document.getElementById("toggleGate")) document.getElementById("toggleGate").addEventListener("change", () => { state.gateEnabled = !!elToggleGate.checked; renderAll(); });
+  if (document.getElementById("gateDomMin")) document.getElementById("gateDomMin").addEventListener("input", () => { state.gateDomMinPct = Number(elGateDomMin.value) || 60; renderAll(); });
+  if (document.getElementById("gateSepMin")) document.getElementById("gateSepMin").addEventListener("input", () => { state.gateSepMin = Number(elGateSepMin.value) || 1.4; renderAll(); });
+  if (document.getElementById("gateReqRange")) document.getElementById("gateReqRange").addEventListener("change", () => { state.gateReqRange = !!elGateReqRange.checked; renderAll(); });
+  if (document.getElementById("gateSlopeMax")) document.getElementById("gateSlopeMax").addEventListener("input", () => { state.gateSlopeMaxSigmaHr = Number(elGateSlopeMax.value) || 0.25; renderAll(); });
+  if (document.getElementById("gateReqLowVol")) document.getElementById("gateReqLowVol").addEventListener("change", () => { state.gateReqLowVol = !!elGateReqLowVol.checked; renderAll(); });
+  if (document.getElementById("gateVolMult")) document.getElementById("gateVolMult").addEventListener("input", () => { state.gateVolMult = Number(elGateVolMult.value) || 1.2; renderAll(); });
+document.getElementById("scanWindow").addEventListener("change", () => { state.scanWindow = Number(elScanWindow.value) || 780; renderAll(); });
+
+  // Click-to-select: choose a scan period (e.g., 5m) as the *selected period* for cycle analysis.
+  // This does NOT change the detrend window.
+  cAnalysis.addEventListener("click", (ev) => {
+    if (!state.showScan || !state.scanHitBoxes || !state.scanHitBoxes.length) return;
+    const rect = cAnalysis.getBoundingClientRect();
+    const x = ev.clientX - rect.left;
+    const y = ev.clientY - rect.top;
+
+    for (const hb of state.scanHitBoxes){
+      if (x >= hb.x && x <= hb.x + hb.w && y >= hb.y && y <= hb.y + hb.h){
+        state.selectedPeriodMin = hb.min;
+        updateSelPeriodLabel();
+        renderAll();
+        break;
+      }
+    }
+  });
+
+  window.addEventListener("resize", () => { if(detrendDial) detrendDial.redraw(); if(scanDial) scanDial.redraw(); renderAll(); });
+
+  // Marker tooltip (turning points)
+  cPrice.addEventListener("mousemove", (e) => {
+    const hits = state._markerHits || [];
+    if (!state.showTurns || !hits.length){ hideTooltip(); return; }
+
+    const r = cPrice.getBoundingClientRect();
+    const mx = e.clientX - r.left;
+    const my = e.clientY - r.top;
+
+    // Find nearest hit within radius
+    let best = null;
+    let bestD2 = 1e9;
+    const R = 10;
+    const R2 = R*R;
+    for (const h of hits){
+      const dx = mx - h.x;
+      const dy = my - h.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bestD2 && d2 <= R2){ bestD2 = d2; best = h; }
+    }
+    if (!best){ hideTooltip(); return; }
+
+    let text = "";
+    if (state.gateEnabled){
+      if (best.eligible){
+        text = "Eligible turning point";
+      } else {
+        const lines = ["Suppressed:"].concat(best.reasons.map(s => "– " + s));
+        text = lines.join("\n");
+      }
+      if (best.metrics && best.metrics.absSlopeSigmaHr != null){
+        text += `\n\n|slope|: ${best.metrics.absSlopeSigmaHr.toFixed(2)}σ/hr`;
+      }
+      if (best.metrics && best.metrics.dominance != null){
+        text += `\nDominance: ${(best.metrics.dominance*100).toFixed(0)}%`;
+      }
+      if (best.metrics && best.metrics.sep != null){
+        text += `\nSep: ${best.metrics.sep.toFixed(2)}×`;
+      }
+      if (best.metrics && best.metrics.volNow != null && best.metrics.medVol != null){
+        text += `\nVol: ${(best.metrics.volNow/best.metrics.medVol).toFixed(2)}× median`;
+      }
+    } else {
+      text = (best.kind === "peak") ? "Cycle peak" : "Cycle trough";
+    }
+
+    showTooltip(text, e.clientX, e.clientY);
+  });
+
+  cPrice.addEventListener("mouseleave", () => hideTooltip());
+
+
+  // Initial
+  runSelfTests();
+  initDials();
+  state.days1m = generateDays({days: state.days, seed: state.seed});
+  const flat = flattenDays(state.days1m);
+  state.flat1m = flat.flat;
+  state.dayStarts1m = flat.dayStartIdx;
+  renderAll();
+})();
+</script>
+
+  <div id="tooltip" class="tooltip" style="display:none"></div>
+</body>
+</html>
