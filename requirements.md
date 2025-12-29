@@ -314,6 +314,7 @@ The practice-field replay system is used by `demo_static.html` and provides a de
 ### High-level behavior (requirements)
 
 - **Follow-latest / fixed rolling window**: playback is always right-aligned; users do not pan/zoom into deep history while playing.
+- **Start uses current UI settings**: pressing Play/Reset starts replay using the **currently selected** UI parameters (span preset + bar size + toggles). Replay start does **not** internally reset these values; defaults come from persisted UI config / initial UI state.
 - **Small per-step payloads**: the replay frontend uses an **opt-in delta protocol** so `/replay/step` returns only *what changed*.
 - **Server-authoritative overlays** (current): EMA(9/21/50) and session VWAP are computed on the server and delivered as **append points**.
 - **Resync safety net**: the server can include a full snapshot periodically (and the client can request it on mismatch).
@@ -428,12 +429,19 @@ Gap handling (important):
 `demo_static.html` uses a buffered queue + RAF loop. In delta mode:
 
 - `replayStart()` sends `delta_mode: true`.
+- `replayStart()` derives replay session parameters from **current UI state**:
+  - `disp_tf_sec` from `state.windowSec`
+  - `initial_history_bars` from `state.viewSpanMs` (or `SPAN_PRESETS[state.spanPreset]`)
 - `_replayFetchBatch()` sends `delta_only: true` and `return_deltas: true` when batching.
 - The queue holds **delta items** (not full states). `_applyReplayDelta()` applies:
   - `drop` + `append_bars` to `state.dataFull`
   - HA derived series incrementally (and rebuilds if lengths drift)
   - overlays append points (server-authoritative)
   - periodic resync (`state` included) handled by `_renderReplayState(state)`
+
+Bar size changes during replay:
+
+- Changing bar size while replay is active **restarts the replay session** using the newly selected `state.windowSec` (so the change takes effect immediately without mid-session resampling).
 
 Session filters (Pre-Market / After-Hours / Closed):
 
@@ -454,6 +462,7 @@ Session filters (Pre-Market / After-Hours / Closed):
 **Frontend invariants**
 
 - Do not use `return_states` batching in delta mode (big parse/GC spikes).
+- Do not hard-lock span presets or bar size during replay; the user must be able to change them (bar size change may restart replay).
 - `_applyReplayDelta()` must keep derived series aligned:
   - `state.dataFull.length` stable (rolling window)
   - `state.ha.length === state.dataFull.length` when HA enabled
