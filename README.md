@@ -93,10 +93,17 @@ setx NTREE_DB_PATH "C:\path\to\your\stock_data.db"
 - `GET /backtest-config` - Backtest config UI
 - `GET /api/backtest-configs` / `POST /api/backtest-configs` / `DELETE /api/backtest-configs/<id>`
 - `GET /api/backtests` / `POST /api/backtests` / `GET /api/backtests/<id>` / `POST /api/backtests/<id>/run` / `DELETE /api/backtests/<id>`
+- Replay (practice-field):
+  - `POST /replay/start`
+  - `POST /replay/step`
+  - `POST /replay/order/place`
+  - `POST /replay/flatten`
+  - `POST /replay/end`
 
 ## Notes
 
 - Credentials: currently hard-coded in `app.py` and `ingest_data.py` (see Setup).
 - Data is stored in SQLite database `stock_data.db` (or `NTREE_DB_PATH` override).
 - The application uses Chart.js (candlesticks + zoom) for interactive visualization.
+- Replay (practice-field) uses an **opt-in delta protocol** for smooth playback (tiny `/replay/step` payloads). See `requirements.md` → **Replay (practice-field) API** for the exact contract and regression guardrails.
 

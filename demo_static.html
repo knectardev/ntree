@@ -553,17 +553,17 @@
             <span>Speed</span>
             <span class="mono" id="practiceSpeedLabel">60</span>
           </div>
-          <input id="practiceSpeed" type="range" min="30" max="150" step="1" value="60" style="width:100%;margin-top:8px;" />
+          <input id="practiceSpeed" type="range" min="30" max="100" step="1" value="60" style="width:100%;margin-top:8px;" />
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
             <span>Slow (30)</span>
-            <span>Fast (150)</span>
+            <span>Fast (100)</span>
           </div>
         </div>
         <div class="sideDivider"></div>
         <div class="formGroup" aria-label="Trade controls">
           <label class="fieldLabel" for="practiceQty">Order size</label>
           <div style="display:flex;flex-direction:column;gap:8px;">
-            <input id="practiceQty" type="range" min="0" max="5" step="1" value="0"
+            <input id="practiceQty" type="range" min="0" max="5" step="1" value="1"
                    list="practiceQtyMarks"
                    style="width:100%; accent-color: rgba(90,150,255,.92);" />
             <datalist id="practiceQtyMarks">
@@ -2366,14 +2366,11 @@
       var slack = 6 * 60 * 60 * 1000; // 6h
       var keys = SPAN_PRESET_ORDER.slice();
       var enabled = {};
-      var isReplay = !!(state && state.replay && state.replay.active);
       for(var i=0;i<keys.length;i++){
         var k = keys[i];
         var need = Number(SPAN_PRESETS[k]) || 0;
         var ok = (need <= 0) ? true : ((datasetSpan + slack) >= need);
-        // Replay requirement: simulator is locked to a 1M training window.
-        // Hide/disable other presets to avoid misleading UI.
-        if(isReplay) ok = (String(k) === '1m');
+        // Replay: we set a default span preset on start, but do NOT hard-lock the UI.
         enabled[k] = !!ok;
         // Update DOM controls if present.
         var input = document.querySelector('input[type="radio"][name="spanPreset"][value="' + k + '"]');
@@ -2488,19 +2485,7 @@
   function setSpanPreset(v, opts){
     var o = opts || {};
     var key = normalizeSpanPreset(v);
-    // Replay requirement: simulator is locked to 1M. Ignore other presets while replay is active.
-    try{
-      if(state && state.replay && state.replay.active){
-        key = '1m';
-        state.spanPreset = '1m';
-        state.viewSpanMs = Number(SPAN_PRESETS['1m']) || DEFAULT_INIT_SPAN_MS;
-        syncSpanPresetUi();
-        updateSpanPresetAvailability();
-        if(!o.skipUrl) updateUrlBarSize();
-        if(!o.skipSave) scheduleSaveUiConfig();
-        return;
-      }
-    } catch(_eReplayLock){}
+    // Replay: do NOT hard-lock span preset while active; allow user changes.
     // If dataset bounds are known and this preset is not available, fall back to the largest available.
     try{
       updateSpanPresetAvailability();
@@ -5154,7 +5139,7 @@
         _setPracticeStatus('Restarting replay with new bar size…');
         // Start a brand-new session using current UI settings (including state.windowSec as disp_tf_sec).
         // This is the simplest way to "change resolution" in replay without introducing mid-session resampling.
-        replayStart({ autoPlay: wasPlaying });
+        replayStart({ autoPlay: wasPlaying, preserveUi: true });
         return;
       }
     } catch(_eReplayW){}
@@ -5353,7 +5338,7 @@
   function _practiceSpeedBpm(){
     try{
       var v = ui.practiceSpeed ? Number(ui.practiceSpeed.value) : NaN;
-      if(!Number.isFinite(v) || v <= 0) v = 60;
+      if(!Number.isFinite(v) || v <= 0) v = 100;
       return clamp(Math.floor(v), 30, 150);
     } catch(_e){
       return 60;
@@ -6762,15 +6747,8 @@
     var symbol = String(getSymbol() || '').trim();
     if(!symbol) symbol = 'SPY';
 
-    // Replay requirement: simulator displays ~1 month of data (training window),
-    // regardless of the chart's normal browsing span presets.
-    try{
-      state.spanPreset = '1m';
-      state.viewSpanMs = Number(SPAN_PRESETS['1m']) || (30*24*60*60*1000);
-      syncSpanPresetUi();
-      // Keep URL in sync so refresh doesn't surprise the user.
-      updateUrlBarSize();
-    } catch(_eForceSpan){}
+    // Replay start should use the user's *current* settings (span preset + bar size),
+    // not reset them. Defaults should be established by UI config / initial UI state, not here.
 
     var dispTf = clamp(Math.floor(Number(state.windowSec) || 60), 60, 86400);
     var payload = {
@@ -6783,8 +6761,17 @@
       // Opt-in delta protocol for replay (keeps payloads tiny per step).
       delta_mode: true
     };
-    // Display history: one month of display buckets (plus small slack).
-    var targetSpanMs = Number(SPAN_PRESETS['1m']) || (30*24*60*60*1000);
+    // Display history: derive from current requested x-axis span (plus small slack).
+    // Prefer explicit state.viewSpanMs (set by the span preset UI), then fall back to span preset mapping.
+    var targetSpanMs = Number(state && state.viewSpanMs);
+    if(!Number.isFinite(targetSpanMs) || targetSpanMs <= 0){
+      try{
+        var sp = String(state && state.spanPreset ? state.spanPreset : '1d');
+        targetSpanMs = Number(SPAN_PRESETS[sp]) || (24*60*60*1000);
+      } catch(_eSp){
+        targetSpanMs = (24*60*60*1000);
+      }
+    }
     var dispMs = Math.max(60_000, Math.floor(dispTf) * 1000);
     var wantBars = Math.ceil(targetSpanMs / dispMs) + 5; // +slack so "6M" isn't borderline
     // Cap to keep payload sizes reasonable.

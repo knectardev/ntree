@@ -307,6 +307,169 @@ Response:
 
 ---
 
+## Replay (practice-field) API
+
+The practice-field replay system is used by `demo_static.html` and provides a deterministic “game loop” over historical bars.
+
+### High-level behavior (requirements)
+
+- **Follow-latest / fixed rolling window**: playback is always right-aligned; users do not pan/zoom into deep history while playing.
+- **Small per-step payloads**: the replay frontend uses an **opt-in delta protocol** so `/replay/step` returns only *what changed*.
+- **Server-authoritative overlays** (current): EMA(9/21/50) and session VWAP are computed on the server and delivered as **append points**.
+- **Resync safety net**: the server can include a full snapshot periodically (and the client can request it on mismatch).
+- **No fake price action**: delta stepping does **not** fabricate flat candles for closed windows; instead it **fast-forwards** over empty windows until a real bar exists.
+
+### Endpoints
+
+- **POST `/replay/start`**
+- **POST `/replay/step`**
+- **POST `/replay/order/place`**
+- **POST `/replay/flatten`**
+- **POST `/replay/end`**
+
+Replay sessions are in-memory (server restart clears them). Replay events are persisted to SQLite for history/analytics.
+
+---
+
+### POST `/replay/start`
+
+Request JSON (most-used fields):
+
+- **`symbol`**: ticker, required (e.g. `SPY`, `QQQ`)
+- **`exec_tf_sec`**: execution timeframe, seconds (v1 uses `60`)
+- **`disp_tf_sec`**: display timeframe, seconds (e.g. `60`, `300`, `14400`)
+- **`seed`**: optional; controls deterministic random anchor selection
+- **`snap_to_disp_boundary`**: bool; align start to display bucket boundary
+- **`initial_history_bars`**: how many display bars to include in the rolling window
+- **`min_future_disp_bars`**, **`min_anchor_age_days`**: anchor selection constraints
+- **`delta_mode`**: bool (opt-in). When true, start returns a snapshot compatible with delta-only stepping.
+
+Response:
+
+```json
+{
+  "session_id": "...",
+  "state": { /* snapshot payload */ }
+}
+```
+
+Snapshot payloads:
+
+- **Legacy snapshot**: `ReplaySession.get_state_payload()` (full window, rebuilt each call)
+- **Delta snapshot (opt-in)**: `ReplaySession.get_state_payload_delta()` (fixed window semantics; matches delta stepping)
+
+---
+
+### POST `/replay/step`
+
+This endpoint supports **two modes**:
+
+#### 1) Legacy snapshot mode (default)
+
+Request:
+- `session_id`
+- `disp_steps` (default 1)
+- optional `return_states: true` to request multiple snapshots (legacy buffering; **not used in delta mode**)
+
+Response:
+- `{"state": <snapshot>, "delta": {}}` or `{"state": <last>, "states": [<snapshots...>], "delta": {}}`
+
+#### 2) Delta-only mode (opt-in, used by `demo_static.html`)
+
+Request fields:
+
+- **`session_id`**: required
+- **`disp_steps`**: number of display steps to advance (>= 1)
+- **`delta_only: true`** (or `mode: "delta"`)
+- **`return_deltas: true`**: return an array of deltas (one per step). Safe to buffer since payloads are small.
+- **`resync_every`**: integer; include a full snapshot every N emitted deltas (safety net)
+- **`force_state: true`**: force include a full snapshot on this call (client-triggered resync)
+
+Single-delta response shape:
+
+```json
+{
+  "ok": true,
+  "delta": {
+    "drop": 1,
+    "append_bars": [
+      { "ts": "2025-01-01T12:00:00Z", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 123 }
+    ],
+    "overlays_append": {
+      "ema": { "9": [ { "ts": "...", "v": 1.23 } ], "21": [ ... ], "50": [ ... ] },
+      "vwap": [ { "ts": "...", "v": 1.11 } ]
+    }
+  },
+  "position": { "qty": 0, "avg_price": 0, "realized_pnl": 0, "unrealized_pnl": 0 },
+  "orders": [ /* small list */ ],
+  "meta": { "disp_window_end": "...Z", "delta_step": 42, "disp_tf_sec": 300 },
+  "state": { /* optional: full resync snapshot */ }
+}
+```
+
+Batch response shape:
+
+```json
+{
+  "deltas": [ /* array of per-step delta items */ ],
+  "state": { /* optional: last included resync snapshot */ }
+}
+```
+
+Gap handling (important):
+
+- Delta stepping **fast-forwards** over empty display windows (no underlying exec bars) until it finds a real bar to append.
+- This keeps playback cadence steady without fabricating candles during closed hours.
+
+---
+
+## Replay delta protocol — frontend contract (demo_static.html)
+
+`demo_static.html` uses a buffered queue + RAF loop. In delta mode:
+
+- `replayStart()` sends `delta_mode: true`.
+- `_replayFetchBatch()` sends `delta_only: true` and `return_deltas: true` when batching.
+- The queue holds **delta items** (not full states). `_applyReplayDelta()` applies:
+  - `drop` + `append_bars` to `state.dataFull`
+  - HA derived series incrementally (and rebuilds if lengths drift)
+  - overlays append points (server-authoritative)
+  - periodic resync (`state` included) handled by `_renderReplayState(state)`
+
+Session filters (Pre-Market / After-Hours / Closed):
+
+- Delta mode maintains an authoritative `state.dataFull` rolling window.
+- If session filters are not “show all”, the frontend uses `applySessionFilter()` to build the filtered view and to keep HA/overlays correct.
+
+---
+
+## Replay regression guardrails (do not break)
+
+**Backend invariants**
+
+- `delta_only` must remain **opt-in**; legacy snapshot behavior must remain unchanged.
+- Timestamps must be **UTC-aware**. (DB ISO strings may be tz-less; code forces tz-less to UTC.)
+- Delta stepping must not rebuild the full rolling window each tick.
+- Empty windows must not create fake price action (fast-forward instead).
+
+**Frontend invariants**
+
+- Do not use `return_states` batching in delta mode (big parse/GC spikes).
+- `_applyReplayDelta()` must keep derived series aligned:
+  - `state.dataFull.length` stable (rolling window)
+  - `state.ha.length === state.dataFull.length` when HA enabled
+  - overlay series lengths aligned (or resync rebuild)
+- On mismatch detection, set `_forceResync` and request `force_state: true`.
+
+**Quick manual check (before/after changes)**
+
+- Start replay in `demo_static.html` and confirm:
+  - `/replay/step` payloads are small (Network tab)
+  - cadence matches BPM slider
+  - candles render normally in Standard and Heikin Ashi
+  - toggling session filters while playing doesn’t corrupt candles/overlays (may fall back to filter recompute path)
+
+---
+
 ## Strategies (current)
 
 Strategies live in `strategies/` and are registered in `strategies.STRATEGY_REGISTRY`.
