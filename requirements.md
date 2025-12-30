@@ -178,6 +178,140 @@ Persistence helper:
     - The UI will **auto-pick** a reasonable `bar_s` (Auto W) and will also **enforce** a minimum `bar_s` to stay within `max_bars` (default `5000`).
     - Minimum bar size is **1 minute** in the Alpaca-only setup.
 
+### Oscillation Signal Analysis (Static Web Page)
+
+**Location**: `osc/index.html` (standalone static page, no server required)
+
+A comprehensive signal processing tool for identifying repeating rhythms in price data using detrending, oscillation scanning, and sine wave fitting techniques.
+
+#### Core Functionality
+
+**Purpose**: Identifies when price behaves like a repeating rhythm at a specific timescale. Explicitly does **not** predict direction, timing, or profitability.
+
+**Data Processing Pipeline**:
+1. **Detrending**: Rolling linear detrending removes slow drift using a configurable window (default: 2.0 hours)
+2. **Oscillation Scanning**: Tests candidate periods (minutes) to find the best repeating rhythm
+3. **Stability Analysis**: Tracks rhythm consistency across overlapping time windows
+4. **Signal Gating**: Filters weak/unreliable detections based on stability, regime, and volatility metrics
+5. **Sine Wave Fitting**: Fits best-fit sine waves to selected rhythms for visualization and correlation analysis
+
+#### Key Features
+
+**Interactive Controls**:
+- **Ticker Selection**: QQQ, AAPL, SPY, TSLA (synthetic data generation)
+- **Trading Days**: 1, 2, 3, 5 (default), 10, 20 days of data
+- **Smoothing Strength Dial**: Controls detrend aggressiveness (0.25h - 8.0h)
+- **Lookback Window Dial**: Controls scan window size (120m - 10 days)
+- **Rhythm Search Configuration**:
+  - Min/Max period range (default: 5-180 minutes)
+  - Step count or linear step size
+  - Log spacing option for period distribution
+- **Noise Baseline**: Calibrates metrics against random-walk noise (400 runs default)
+- **Search Presets**: Quick configurations for daily patterns, short-term jitters, long-term trends
+
+**Visualization Panels**:
+1. **Original Data & Slow Trends**: Shows raw price with detrend overlay (optional)
+2. **Cleaned Signal + Selected Rhythm**: 
+   - Detrended signal (yellow)
+   - Bandpassed rhythm component (pink/cyan)
+   - Best-fit sine wave overlay (dashed, optional, enabled by default)
+   - Cycle turning points (optional)
+   - Variance explained badge (High/Medium/Low)
+3. **Pattern Finder**: Bar chart showing candidate period scores with coherence and energy metrics
+4. **Rhythm Stability**: Tracks agreement, clarity, and changes across recent windows
+
+#### Advanced Metrics & Analysis
+
+**Insight Summary** (refined language, multi-dimensional):
+- **Structural Stability**: "highly stable" / "moderately stable" / "unstable" (based on clarity, consistency, repeatability)
+- **Amplitude Contribution**: Percentage of total cleaned signal movement with contextual descriptions:
+  - < 5%: "subtle but persistent oscillation rather than a dominant driver"
+  - 5-20%: "moderate oscillatory component"
+  - ≥ 20%: "dominant oscillatory pattern"
+- **Clarity**: Best score ÷ second-best score (with context notes)
+- **Repeatability**: Coherence metric (0-1)
+- **Consistency**: Dominance percentage across recent windows
+- **Noise Baseline**: Percentile rank vs random price behavior
+- **Sine Fit Quality**:
+  - **Pearson Correlation**: r coefficient between cleaned signal and fitted sine wave (-1 to +1)
+  - **Explained Motion**: r² × 100% within oscillatory portion
+  - **Rhythm Coherence**: Normalized projection power (||projection||² / ||signal||²), range 0-1
+- **Why This Matters**: Contextual explanation based on stability level
+
+**Signal Gate** (optional filtering):
+- **Stability Requirements**:
+  - Dominance threshold (default: ≥60%)
+  - Separation threshold (default: ≥1.25×)
+- **Regime Requirements**:
+  - Maximum slope (default: ≤0.9 σ/hr)
+  - Require ranging mode (optional)
+- **Volatility Requirements**:
+  - Noise multiplier threshold (default: ≤1.30)
+  - Suppress high noise option
+
+#### Technical Implementation
+
+**Architecture**: Modular JavaScript (no build step, classic script loading)
+- **Core Modules**:
+  - `scan.js`: Oscillation scanning, period stability, sine fitting, correlation
+  - `detrend.js`: Rolling linear detrending
+  - `baseline.js`: Noise baseline generation and calibration
+  - `gate.js`: Signal gating logic and UI
+  - `insight.js`: Insight summary computation and formatting
+- **Rendering Modules**:
+  - `render/price.js`: Original price chart with trends
+  - `render/analysis.js`: Cleaned signal, rhythm, sine fit visualization
+  - `render/scanPanel.js`: Pattern Finder bar chart
+  - `render/consistency.js`: Rhythm stability tracking
+- **UI Modules**:
+  - `ui/dials.js`: Interactive dial controls
+  - `ui/tooltips.js`: Hover tooltip system
+
+**Key Algorithms**:
+- **Detrending**: Rolling linear regression over configurable window
+- **Bandpass Approximation**: EMA-based bandpass filter (fast EMA - slow EMA)
+- **Oscillation Scoring**: `energy × coherence` where:
+  - Energy = RMS of bandpassed signal
+  - Coherence = autocorrelation at period lag (max 0, ignores anti-phase)
+- **Period Stability**: Re-runs scan on overlapping windows, tracks:
+  - Dominance: fraction of windows with same winning period
+  - Separation: median best/second-best ratio
+  - Flip count: frequency of period changes
+- **Sine Wave Fitting**: Least-squares fit using sin/cos basis functions
+- **Pearson Correlation**: Standard correlation coefficient between signal and fitted sine
+- **Rhythm Coherence**: Normalized projection power = (RMS_sine)² / (RMS_signal)²
+
+**Data Resolution**: All analysis uses 1-minute resolution data (no resampling)
+
+#### Recent Enhancements (2024)
+
+1. **Sine Fit Correlation Metrics**:
+   - Added Pearson correlation between detrended signal and best-fit sine wave
+   - Added "Explained motion" metric (r² × 100%)
+   - Added "Rhythm coherence" (normalized projection power, 0-1)
+
+2. **Insight Summary Language Refinement**:
+   - Replaced ambiguous "strong" with structural descriptors ("highly stable")
+   - Clarified variance share as "contribution" with amplitude context
+   - Enhanced metric labels with contextual notes
+   - Improved "Why this matters" explanations
+
+3. **Label Improvements**:
+   - Changed "Rhythm strength" to "Variance explained" to avoid multi-dimensional confusion
+   - Better alignment between structural stability and energetic amplitude metrics
+
+4. **UI Enhancements**:
+   - Best-fit wave checkbox enabled by default
+   - HTML-formatted insight summary with proper line breaks and bold labels
+   - Improved visual hierarchy and readability
+
+#### Usage Notes
+
+- **Standalone Operation**: No server required, works as static HTML file
+- **Synthetic Data**: Currently generates synthetic price series (not connected to real market data)
+- **Performance**: All computation runs client-side in JavaScript
+- **Browser Compatibility**: Modern browsers with Canvas API support
+
 ### Backtest configuration page
 
 - **GET `/backtest-config`**

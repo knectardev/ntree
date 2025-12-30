@@ -271,6 +271,38 @@
             <canvas id="analysis"></canvas>
           </div>
 
+          <details class="insightBox" id="spectrumDetails" style="margin-top:10px;">
+            <summary style="display:flex;align-items:center;gap:10px;">
+              <span class="legendDot" style="background:var(--accent2);"></span>
+              <span>Projection Spectrum (diagnostic)</span>
+              <span class="tip" data-tip="
+Shows how much each candidate period contributes when fitted as a sine wave to the detrended tail window.
+This is a targeted decomposition (not a full FFT).
+Use as a sanity check and exploration aid — not a trading signal.
+">i</span>
+            </summary>
+
+            <div class="chart" style="height:220px; margin-top:10px;" id="spectrumPanel">
+              <canvas id="spectrum"></canvas>
+            </div>
+
+            <div class="row tiny" style="margin-top:6px;display:flex;gap:16px;flex-wrap:wrap;">
+              <label class="chk">
+                <input id="spectrumTopOnly" type="checkbox" checked />
+                <span>Show top components only</span>
+              </label>
+
+              <label class="chk">
+                <input id="spectrumOverlayRecon" type="checkbox" />
+                <span>Overlay reconstruction on rhythm</span>
+              </label>
+
+              <span style="color:var(--muted);">
+                Bars = standalone var share • Δ = incremental gain • Cum = cumulative explained variance
+              </span>
+            </div>
+          </details>
+
           <details class="insightBox" id="pfDetails">
             <summary style="display:flex;align-items:center;gap:10px;">
               <span class="legendDot" style="background:var(--accent);"></span>
@@ -316,6 +348,7 @@ Stable rhythms show high agreement, clear separation, and few changes. Unstable 
   <script src="./src/insight.js"></script>
   <script src="./src/render/price.js"></script>
   <script src="./src/render/analysis.js"></script>
+  <script src="./src/render/spectrum.js"></script>
   <script src="./src/render/scanPanel.js"></script>
   <script src="./src/render/consistency.js"></script>
   <script src="./src/state.js"></script>

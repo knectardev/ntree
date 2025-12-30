@@ -177,6 +177,7 @@
     const innerH = h - pad*2;
 
     const gapY = 10;
+    // 2-stack layout (restore main story). Projection spectrum is a diagnostic inset inside the rhythm panel.
     const topH = Math.max(120, Math.floor(innerH * 0.58));
     const botH = Math.max(90, innerH - topH - gapY);
 
@@ -206,6 +207,20 @@
     let sineFit = null;
     if (state.showSineFit && activePeriodMin != null) {
       sineFit = OSC.scan.fitSineAtPeriod(resid1m, activePeriodMin, 1);
+    }
+
+    // Projection spectrum (Fourier-like decomposition) - compute ONCE per analysis recompute and cache on state.
+    // This is intentionally not an FFT; it's a period-grid projection spectrum tied directly to reconstructed curves.
+    let fourier = null;
+    const k = Math.max(1, Math.floor(Number(state.fourierK) || 5));
+    const periodsKey = `${state.scanMinPeriod}|${state.scanMaxPeriod}|${state.scanStepPeriod}|${state.scanLogSpacing ? 1 : 0}`;
+    const fourierKey = `projSpec:v1|N=${closes1m.length}|win=${Math.floor(Number(state.scanWindow)||0)}|detr=${Number(state.detrendHours||0).toFixed(4)}|K=${k}|grid=${periodsKey}`;
+    if (state._fourierCacheKey === fourierKey && state._fourierCacheData) {
+      fourier = state._fourierCacheData;
+    } else if (OSC.scan && OSC.scan.computeFourierDecompositionOnResidual) {
+      fourier = OSC.scan.computeFourierDecompositionOnResidual(resid1m, state.scanWindow, state.periods, k, 1);
+      state._fourierCacheKey = fourierKey;
+      state._fourierCacheData = fourier;
     }
 
     // Draw grid
@@ -267,13 +282,50 @@
 
     const residScale = drawSeries(residRect, residTf, getCSS("--warn"));
     const cycleColor = (state.selectedPeriodMin != null) ? getCSS("--accent2") : getCSS("--accent");
-    const cycleScale = drawSeries(cycleRect, cycleTf, cycleColor);
+    // When the Top-K overlay is enabled, dim the base rhythm line so the diagnostic overlay is readable.
+    const cycleAlpha = state.showFourierOverlay ? 0.55 : 1.0;
+    const cycleScale = drawSeries(cycleRect, cycleTf, cycleColor, { alpha: cycleAlpha });
+
+    // Optional overlay: top-K sine sum from projection spectrum (tail window only) on the SELECTED RHYTHM panel.
+    // Make it readable: normalize amplitude to the cycle panel's tail RMS, use a distinct color/thickness.
+    if (state.showFourierOverlay && fourier && fourier.reconSum && fourier.tailN) {
+      const tailN = Math.min(fourier.tailN, cycleTf.length);
+      const start = cycleTf.length - tailN;
+      const series = fourier.reconSum;
+      if (start >= 0 && series.length >= tailN) {
+        const tailCycle = cycleTf.slice(start);
+        const rmsCycle = OSC.scan.rms(tailCycle) || 0;
+        const rmsRecon = OSC.scan.rms(series.slice(0, tailN)) || 0;
+        const scale = (rmsRecon > 1e-12) ? (rmsCycle / rmsRecon) : 1;
+
+        ctx.save();
+        ctx.strokeStyle = colorWithAlpha(getCSS("--good"), 0.85);
+        ctx.lineWidth = 2.25;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        for (let i=0; i<tailN; i++){
+          const idx = start + i;
+          const x = cycleRect.x + idx*cycleScale.xStep + cycleScale.xStep*0.5;
+          const y = cycleScale.yScale(series[i] * scale);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.restore();
+
+        drawText(ctx, "Top‑K reconstruction (tail)", cycleRect.x + 8, cycleRect.y + 18,
+          {font:"10px system-ui", color:"rgba(232,238,252,0.60)"});
+      }
+    }
 
     // Draw best-fit sine wave overlay if enabled
     if (sineFit && sineFit.fit) {
       const sineColor = getCSS("--accent2");
-      drawSeries(cycleRect, sineFit.fit, sineColor, { dashed: true, alpha: 0.6, lineWidth: 1.5, showGuides: false });
+      const a = state.showFourierOverlay ? 0.28 : 0.6;
+      drawSeries(cycleRect, sineFit.fit, sineColor, { dashed: true, alpha: a, lineWidth: 1.25, showGuides: false });
     }
+
+    // Projection Spectrum inset removed (now rendered in the expanded diagnostic panel below the chart).
 
     // Optional amplitude cue (badge). Uses noise percentile when available; otherwise uses
     // the variance share proxy from the current window.

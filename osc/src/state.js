@@ -19,6 +19,7 @@
       showDetrend: elements.toggleDetrend ? !!elements.toggleDetrend.checked : true,
       showTurns: elements.toggleTurns ? !!elements.toggleTurns.checked : false,
       showSineFit: elements.toggleSineFit ? !!elements.toggleSineFit.checked : true,
+      showFourierOverlay: elements.spectrumOverlayRecon ? !!elements.spectrumOverlayRecon.checked : (elements.toggleFourierOverlay ? !!elements.toggleFourierOverlay.checked : false),
       gateEnabled: elements.toggleGate ? !!elements.toggleGate.checked : true,
 
       detrendHours: elements.detrendHours ? Number(elements.detrendHours.value) || 2.0 : 2.0,
@@ -39,7 +40,15 @@
       scanHitboxesAnalysis: [],
       scanHitboxesScan: [],
       hoverPeriodMin: null,
-      hoverLabel: null
+      hoverLabel: null,
+
+      spectrumTopOnly: elements.spectrumTopOnly ? !!elements.spectrumTopOnly.checked : true,
+      spectrumHitboxes: [],
+
+      // Projection spectrum (sine projection) settings + cache
+      fourierK: 5,
+      _fourierCacheKey: null,
+      _fourierCacheData: null
     };
   }
 
@@ -49,6 +58,9 @@
     if (elements.toggleDetrend) state.showDetrend = !!elements.toggleDetrend.checked;
     if (elements.toggleTurns) state.showTurns = !!elements.toggleTurns.checked;
     if (elements.toggleSineFit) state.showSineFit = !!elements.toggleSineFit.checked;
+    if (elements.spectrumTopOnly) state.spectrumTopOnly = !!elements.spectrumTopOnly.checked;
+    if (elements.spectrumOverlayRecon) state.showFourierOverlay = !!elements.spectrumOverlayRecon.checked;
+    else if (elements.toggleFourierOverlay) state.showFourierOverlay = !!elements.toggleFourierOverlay.checked;
     if (elements.toggleGate) state.gateEnabled = !!elements.toggleGate.checked;
     if (elements.detrendHours) state.detrendHours = Number(elements.detrendHours.value) || state.detrendHours;
     if (elements.scanWindow) state.scanWindow = Number(elements.scanWindow.value) || state.scanWindow;

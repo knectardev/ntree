@@ -20,6 +20,7 @@
     toggleDetrend: document.getElementById("toggleDetrend"),
     toggleTurns: document.getElementById("toggleTurns"),
     toggleSineFit: document.getElementById("toggleSineFit"),
+    toggleFourierOverlay: document.getElementById("toggleFourierOverlay"), // legacy (removed from sidebar; kept for safety)
     toggleGate: document.getElementById("toggleGate"),
     gateDom: document.getElementById("gateDom"),
     gateSep: document.getElementById("gateSep"),
@@ -59,6 +60,11 @@
     gateChecks: document.getElementById("gateChecks"),
     cPrice: document.getElementById("price"),
     cAnalysis: document.getElementById("analysis"),
+    spectrumDetails: document.getElementById("spectrumDetails"),
+    spectrumPanel: document.getElementById("spectrumPanel"),
+    spectrumTopOnly: document.getElementById("spectrumTopOnly"),
+    spectrumOverlayRecon: document.getElementById("spectrumOverlayRecon"),
+    cSpectrum: document.getElementById("spectrum"),
     cScan: document.getElementById("scan"),
     cConsistency: document.getElementById("consistency"),
     scanPanel: document.getElementById("scanPanel"),
@@ -141,6 +147,10 @@
 
     if (OSC.render.analysis && elements.cAnalysis) {
       OSC.render.analysis(elements.cAnalysis, state, elements);
+    }
+
+    if (OSC.render.spectrum && elements.cSpectrum && (!elements.spectrumDetails || elements.spectrumDetails.open)) {
+      OSC.render.spectrum(elements.cSpectrum, state, elements);
     }
 
     if (OSC.render.scanPanel && elements.cScan && (!elements.pfDetails || elements.pfDetails.open)) {
@@ -294,7 +304,11 @@
   if (elements.toggleDetrend) elements.toggleDetrend.addEventListener("change", () => { applyFromUI(); renderAll(); });
   if (elements.toggleTurns) elements.toggleTurns.addEventListener("change", () => { applyFromUI(); renderAll(); });
   if (elements.toggleSineFit) elements.toggleSineFit.addEventListener("change", () => { applyFromUI(); renderAll(); });
+  if (elements.toggleFourierOverlay) elements.toggleFourierOverlay.addEventListener("change", () => { applyFromUI(); renderAll(); });
   if (elements.toggleGate) elements.toggleGate.addEventListener("change", () => { applyFromUI(); renderAll(); });
+
+  if (elements.spectrumTopOnly) elements.spectrumTopOnly.addEventListener("change", () => { applyFromUI(); renderAll(); });
+  if (elements.spectrumOverlayRecon) elements.spectrumOverlayRecon.addEventListener("change", () => { applyFromUI(); renderAll(); });
 
   if (elements.gateDom) elements.gateDom.addEventListener("change", () => { renderAll(); });
   if (elements.gateSep) elements.gateSep.addEventListener("change", () => { renderAll(); });
@@ -330,6 +344,64 @@
       if (elements.pfDetails.open && OSC.render.scanPanel && elements.cScan){
         OSC.render.scanPanel(elements.cScan, state, elements);
       }
+    });
+  }
+
+  if (elements.spectrumDetails) {
+    elements.spectrumDetails.addEventListener("toggle", () => {
+      if (elements.spectrumDetails.open && OSC.render.spectrum && elements.cSpectrum){
+        OSC.render.spectrum(elements.cSpectrum, state, elements);
+      }
+    });
+  }
+
+  // Spectrum interactions: hover tooltip + click-to-select + right-click-to-clear
+  function spectrumHitTest(canvas, e){
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const hit = state.spectrumHitboxes || [];
+    for (let i=0; i<hit.length; i++){
+      const b = hit[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
+    }
+    return null;
+  }
+
+  if (elements.cSpectrum) {
+    elements.cSpectrum.addEventListener("mousemove", (e) => {
+      const b = spectrumHitTest(elements.cSpectrum, e);
+      if (b) {
+        state.hoverPeriodMin = b.periodMin;
+        state.hoverLabel = b.label;
+        const vs = Math.round((Number(b.varShare) || 0) * 100);
+        const r = (b.corr != null && isFinite(b.corr)) ? Number(b.corr) : 0;
+        OSC.ui.setHoverTip(true, e.clientX, e.clientY, `${b.label} • ${vs}% standalone • r=${r.toFixed(2)}`);
+      } else {
+        state.hoverPeriodMin = null;
+        state.hoverLabel = null;
+        OSC.ui.setHoverTip(false);
+      }
+    });
+
+    elements.cSpectrum.addEventListener("mouseleave", () => {
+      state.hoverPeriodMin = null;
+      state.hoverLabel = null;
+      OSC.ui.setHoverTip(false);
+    });
+
+    elements.cSpectrum.addEventListener("click", (e) => {
+      const b = spectrumHitTest(elements.cSpectrum, e);
+      if (!b) return;
+      state.selectedPeriodMin = Number(b.periodMin);
+      renderAll();
+    });
+
+    elements.cSpectrum.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      state.selectedPeriodMin = null;
+      renderAll();
     });
   }
 

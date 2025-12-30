@@ -1,6 +1,8 @@
 :root{
   --bg:#0b0e13;
   --panel:#0f1420;
+  /* Opaque fill color for in-canvas diagnostic insets (prevents ghosting across frames). */
+  --panelBg:#0f1420;
   --fg:#e8eefc;
   --muted:rgba(232,238,252,0.62);
   --grid:rgba(232,238,252,0.08);

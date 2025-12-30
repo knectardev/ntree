@@ -287,6 +287,113 @@
     return clamp(num / den, -1, 1);
   }
 
+  function mean(arr){
+    const n = arr.length;
+    if (!n) return 0;
+    let s = 0;
+    for (let i=0; i<n; i++) s += arr[i];
+    return s / n;
+  }
+
+  function variance(arr){
+    const n = arr.length;
+    if (n < 2) return 0;
+    const m = mean(arr);
+    let ss = 0;
+    for (let i=0; i<n; i++){
+      const d = arr[i] - m;
+      ss += d*d;
+    }
+    return ss / (n - 1);
+  }
+
+  function subtractMean(arr){
+    const m = mean(arr);
+    const out = new Array(arr.length);
+    for (let i=0; i<arr.length; i++) out[i] = arr[i] - m;
+    return out;
+  }
+
+  /**
+   * Projection spectrum / Fourier-like decomposition using sine projection (reuses fitSineAtPeriod).
+   *
+   * This is intentionally NOT an FFT. It produces a spectrum-like curve across the candidate
+   * period grid (period -> variance share) that is directly tied to the reconstructed sine curves.
+   *
+   * Returns:
+   *  - spectrum: per-candidate metrics (period, amp, phase, corr, varShare)
+   *  - top: top-K components by varShare
+   *  - recon: reconstructed curve per top component (tail window only)
+   *  - reconSum: sum of top recon curves (tail window only)
+   *  - cumExplained: cumulative explained variance after subtracting top components sequentially
+   */
+  function computeFourierDecompositionOnResidual(resid1m, scanWindowMinutes, periods, K=5, sampleRateMin=1){
+    const N = resid1m.length;
+    if (!N) return null;
+
+    const tailN = clamp(Math.floor(Number(scanWindowMinutes) || 780), 120, N);
+    const periodsSafe = (periods && periods.length)
+      ? periods
+      : buildCandidatePeriods(DEFAULT_SCAN_MIN_PERIOD, DEFAULT_SCAN_MAX_PERIOD, DEFAULT_SCAN_STEP, false);
+
+    const tail = resid1m.slice(N - tailN);
+    const tail0 = subtractMean(tail); // recommended: mean-remove for stable projection
+    const varTail = variance(tail0) || 1e-9;
+
+    const spectrum = periodsSafe.map(per => {
+      const fitObj = fitSineAtPeriod(tail0, per.min, sampleRateMin);
+      if (!fitObj || !fitObj.fit) {
+        return { label: per.label, min: per.min, amp: 0, phase: 0, corr: 0, varShare: 0 };
+      }
+
+      const fit = fitObj.fit;
+      const varFit = variance(fit);
+      const varShare = clamp(varFit / varTail, 0, 1);
+      const corr = pearsonCorrelation(tail0, fit);
+
+      return { label: per.label, min: per.min, amp: fitObj.amp, phase: fitObj.phase, corr, varShare };
+    });
+
+    const sorted = spectrum
+      .slice()
+      .sort((a,b)=> (b.varShare - a.varShare) || (Math.abs(b.corr) - Math.abs(a.corr)));
+
+    const top = [];
+    for (let i=0; i<sorted.length && top.length < Math.max(1, Math.floor(Number(K)||5)); i++){
+      // Skip tiny / degenerate contributions
+      if (!sorted[i] || !isFinite(sorted[i].varShare) || sorted[i].varShare <= 0) continue;
+      top.push(sorted[i]);
+    }
+
+    const recon = [];
+    for (let i=0; i<top.length; i++){
+      const t = top[i];
+      const fitObj = fitSineAtPeriod(tail0, t.min, sampleRateMin);
+      recon.push((fitObj && fitObj.fit) ? fitObj.fit : new Array(tailN).fill(0));
+    }
+
+    const reconSum = new Array(tailN).fill(0);
+    for (let k=0; k<recon.length; k++){
+      const f = recon[k];
+      for (let i=0; i<tailN; i++) reconSum[i] += f[i];
+    }
+
+    // Cumulative explained variance (prevents "top 5 add to 170%" confusion)
+    const cumExplained = [];
+    if (top.length){
+      const resid = tail0.slice(); // working residual
+      for (let k=0; k<recon.length; k++){
+        const f = recon[k];
+        for (let i=0; i<tailN; i++) resid[i] -= f[i];
+        const vE = variance(resid) || 0;
+        const ce = clamp(1 - (vE / varTail), 0, 1);
+        cumExplained.push(ce);
+      }
+    }
+
+    return { tailN, spectrum, top, recon, reconSum, cumExplained };
+  }
+
   OSC.scan = {
     ema,
     bandpassApprox,
@@ -298,6 +405,7 @@
     buildCandidatePeriods,
     computeOscillationScanOnResidual,
     computePeriodStability,
+    computeFourierDecompositionOnResidual,
     findTurningPoints,
     fitSineAtPeriod,
     pearsonCorrelation

@@ -1,175 +1,187 @@
-I'd like to add a Fast Fourier Transform curve analysis chart below the lower detrended "selected rhthym on the Detrend + Oscillation Scan (continuous demo) prototype - The goal is display the top calculated contributing sine wave curves and their respective contributions.
+Would this add value in your system?
+✅ Yes — but only for one specific purpose
 
+It adds value if the question is:
 
-A solid way to do this in your prototype is to treat the detrended / cleaned signal as the input, compute an FFT-based spectrum, pick the top spectral peaks, then reconstruct those components as sine curves and show both (a) the spectrum and (b) the reconstructed components + their “contribution” metrics.
+“Is this rhythm structural or merely episodic?”
 
-Here’s what I’d recommend as the “best approach” for your UI + math, given your goal (“top contributing sine wave curves and their respective contributions”):
+That is not something your current global sine fit can fully answer.
 
-1) What to FFT (so it matches your current story)
+Your current metrics tell you:
 
-FFT input = the same series you’re scanning for rhythms, i.e. your “cleaned/detrended” residual at 1-minute resolution (or whatever your base resolution is).
-If you FFT the raw price, the low-frequency drift dominates and your peak list becomes “trend + noise”.
+stability across windows
 
-Practical: use the exact post-detrend series you already show in the lower panel (or a slightly smoothed version if you want a cleaner spectrum).
+average coherence
 
-2) Compute a stable spectrum (avoid misleading peaks)
+total energy contribution
 
-Do this, always:
+They do not tell you:
 
-Windowing: Hann (Hanning) window before FFT to reduce spectral leakage.
+when the rhythm is active
 
-Mean remove: subtract mean of the detrended series (should be near zero anyway).
+whether it switches off/on
 
-rFFT: use real FFT (only positive frequencies).
+whether phase resets occur
 
-Power spectrum: magnitude² (or magnitude) of FFT coefficients.
+Segmentation answers those questions.
 
-Optional but very helpful for interpretability:
+“Rhythm Presence Map” (diagnostic only)
 
-Zero-pad to next power of two (better frequency interpolation; doesn’t add information, but makes peaks easier to locate).
+For the already-selected period:
 
-Band-limit the search to your “meaningful” rhythm range (e.g., 5m–2d) so you don’t surface micro-noise or near-DC.
+slide a short window
 
-3) Peak picking → “top contributing sine waves”
+compute local amplitude / correlation
 
-From the power spectrum:
+mark:
 
-Find local maxima (with a minimum spacing so you don’t pick the same peak’s sidelobes).
+strong presence
 
-Rank by power (or by “explained motion” after reconstruction; see below).
+weak presence
 
-Keep top K (start with K=3..7). More than that gets visually muddy fast.
+phase breaks
 
-Convert each frequency bin f_k to:
+Visually:
 
-Period: T_k = 1 / f_k (in minutes/hours/days)
+opacity modulation
 
-Amplitude: from FFT magnitude (scaled correctly for your window)
+dashed vs solid segments
 
-Phase: from FFT complex angle
+subtle background bands
 
-Then reconstruct each component as:
+Crucially:
 
-x_k(t) = A_k * sin(2π f_k t + φ_k)
-(or cosine form—either is fine as long as consistent)
+no new period selection
 
-4) Define “contribution” in a way that won’t betray you later
+no automatic regime switching
 
-You want something that users will trust when the signal is messy/nonstationary. Two good metrics:
+no additional scores feeding selection
 
-A) Variance explained (simple, stable)
+Just: where does this rhythm breathe?
 
-For each component x_k(t):
 
-contrib_k = Var(x_k) / Var(x_input)
-(Or compute on the same window you FFT’d.)
 
-This is easy to explain: “this sine accounts for X% of residual variance.”
+Nice — this is the perfect insertion point. You already have:
 
-B) Incremental explained variance (better when components overlap)
+cycleTf (your bandpass-ish rhythm series)
 
-Sort peaks by power, then add them cumulatively:
+sineFit.fit (global sine fit at the selected period)
 
-x̂_m(t) = Σ_{k=1..m} x_k(t)
+drawSeries() for plotting
 
-cum_explained_m = 1 - Var(x_input - x̂_m)/Var(x_input)
+Here’s the clean way to add a “Local presence” mode without clutter:
 
-Then show both:
+Goal
 
-per-component contribution
+Keep cycleTf as the main line, and add a presence strip (and optionally a gated/thickened rhythm line) driven by a local coherence score.
 
-cumulative contribution as you add top components
+1) Add a local-presence computation (fast + simple)
 
-This prevents double-counting when peaks are close or harmonically related.
+In scan.js (pure functions), add:
 
-5) What to actually draw in the new “FFT curve analysis” panel
+computeLocalSinePresence(series, periodMin, windowCycles=2.5, step=1)
 
-I’d do a 2-part panel:
+returns presence[] aligned with series length, values 0..1 (use r mapped to 0..1 or varShare)
 
-Panel A — Spectrum (Periodogram)
+Practical choice: use correlation r because it’s intuitive and already in your system.
 
-X-axis: Period (log scale is often better: 5m … 2d)
+Presence mapping:
 
-Y-axis: Power (or normalized power)
+presence = clamp((r - r0) / (r1 - r0), 0, 1)
 
-Highlight top K peaks (vertical markers + labels like “1.5h”, “1d”, etc.)
+where r0=0.2, r1=0.7 (tunable)
 
-Panel B — Reconstructed components
+Also: compute it on the tail window to avoid huge CPU cost.
 
-Two good display modes (pick one, or add a toggle):
+2) Render it as a strip in the rhythm panel (minimal clutter)
 
-Mode 1: Overlay on the detrended signal
+Add right after drawSeries(cycleRect, cycleTf, ...):
 
-Plot x_input(t) faint
+// Local presence strip (diagnostic mode)
+if (state.rhythmFitMode === "local_presence" && activePeriodMin != null) {
+  const pres = state._localPresence; // cached per activePeriodMin + scanWindow
+  if (pres && pres.length) {
+    drawPresenceStrip(cycleRect, pres);
+  }
+}
 
-Plot x̂_K(t) (sum of top K sines) bold
+Presence strip drawing logic (simple)
 
-Optional: allow toggling individual components on/off
+Draw a thin bar along the bottom of cycleRect
 
-Mode 2: Small multiples (cleanest)
+For each x pixel (or each sample), set opacity based on presence
 
-One row per component:
+Visually it reads: bright = rhythm present; dim = absent
 
-sine curve x_k(t)
+3) Optional: make the rhythm line “thicken” only where present
 
-label: T_k, amplitude, and contribution %
+This is the more dramatic (and cool) version, but still honest:
 
-Small multiples are usually the least confusing, and it matches your existing “selected rhythm” concept.
+draw normal cycleTf faint
 
-6) A key gotcha: FFT is “global” across the window
+draw a second pass where presence is high with higher alpha/lineWidth
 
-Your current oscillator finder sounds like it’s already grappling with stability/consistency. FFT will happily show a peak even if it only existed for part of the window.
+Where your snippet fits
 
-So I’d add one of these (lightweight) reliability checks:
+You already have:
 
-Segment consistency: split the window into 3–5 chunks, compute FFT per chunk, and measure how often the same peak shows up (within tolerance). That becomes your “consistency %” for FFT peaks too.
+const cycleScale = drawSeries(cycleRect, cycleTf, cycleColor, { alpha: cycleAlpha });
 
-Or a rolling STFT / spectrogram later (cool, but heavier).
+if (sineFit && sineFit.fit) {
+  const sineColor = getCSS("--accent2");
+  const a = state.showFourierOverlay ? 0.28 : 0.6;
+  drawSeries(cycleRect, sineFit.fit, sineColor, { dashed: true, alpha: a, lineWidth: 1.25, showGuides: false });
+}
 
-Even just “peak present in ≥3/5 segments” will prevent embarrassing peaks.
 
-7) Implementation sketch (matches a JS prototype well)
+Here’s the minimal change that keeps your current behavior and adds the new mode:
 
-Pipeline per analysis window:
+const cycleScale = drawSeries(cycleRect, cycleTf, cycleColor, { alpha: cycleAlpha });
 
-x = detrended_series (float array)
+// New: local presence overlay (strip + optional gated highlight)
+if (state.rhythmFitMode === "local_presence" && state.localPresence && state.localPresence.length) {
+  drawPresenceStrip(cycleRect, state.localPresence);
 
-x = x - mean(x)
+  if (state.localPresenceHighlight) {
+    // draw a "gated" highlight version of the rhythm where presence is strong
+    drawSeriesGatedByPresence(cycleRect, cycleTf, cycleColor, state.localPresence, {
+      alpha: 0.9,
+      lineWidth: 2.0,
+      threshold: state.localPresenceThresh || 0.55
+    });
+  }
+}
 
-w = hann(N); xw = x * w
+// Keep your existing global sine fit mode
+if (state.rhythmFitMode !== "off" && sineFit && sineFit.fit) {
+  const sineColor = getCSS("--accent2");
+  const a = state.showFourierOverlay ? 0.28 : 0.6;
+  const dashed = (state.rhythmFitMode === "global_sine");
+  drawSeries(cycleRect, sineFit.fit, sineColor, { dashed, alpha: a, lineWidth: 1.25, showGuides: false });
+}
 
-X = rfft(xw)
+Caching requirement (so you don’t jank)
 
-P = abs(X)^2
+Don’t compute local presence inside render.
 
-peaks = findPeaks(P, minDistanceBins, threshold)
+Cache state.localPresence when any of these change:
 
-For each peak bin:
+selected/active period
 
-f = binToFreq(bin) (cycles/min if your sampling is 1/min)
+scan window length (tailN)
 
-A, φ = amplitudePhaseFromFFT(X[bin], windowScale)
+detrend lookback
 
-reconstruct x_k(t)
+the underlying resid1m tail identity (last timestamp / length)
 
-compute contrib_k
+This is the same caching logic you already had to add for projection spectrum.
 
-Sort by contrib_k or P
+Recommended UX default
 
-Render spectrum + components + table
+Add a dropdown: Fit mode: Global sine / Local presence / Off
 
-8) UI details that will make it feel “right” in your prototype
+Default to Global sine (what you already have)
 
-Put the panel title as something like:
-“FFT Decomposition (Top Sine Components)”
+Local presence is opt-in “diagnostic mode”
 
-Add a small legend:
-
-“Input: detrended residual, Hann window, window length: N bars”
-
-Show a compact table next to the spectrum:
-
-Period | Amplitude | Phase | Contribution | Segment Consistency
-
-This table becomes your “trust anchor.”
-
+That keeps things from feeling cluttered.
