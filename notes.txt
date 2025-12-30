@@ -1,157 +1,213 @@
-Yes — this section is doing something important, but right now it’s written in a way that only makes sense if you already understand the internals. This is a classic case where renaming + a single good tooltip will dramatically improve comprehension.
+Best fit "sine wave" 
 
-I’ll give you:
+Yes — adding a “best-fit sine” overlay can make the result way more legible for humans, as long as you’re careful about what it means.
 
-A better section name
+When it helps
 
-Plain-English replacements for the labels
+You’ve picked a period (say 19m) and want an intuitive “this is the rhythm” visual.
 
-One clear tooltip that explains the whole thing at once
+It gives a clean reference for phase (peaks/troughs timing), not just “energy.”
 
-(Optional) a micro-legend that makes it readable at a glance
+What it should be (so it stays honest)
 
-1. Better section name (most important)
-Current
+Think of it as a projection of the cleaned signal onto that period:
 
-Consistency
+Fit y(t) ≈ A*sin(ωt) + B*cos(ωt) over the current lookback window (or rolling).
 
-This is vague and abstract.
+Convert to amplitude/phase: amp = sqrt(A^2 + B^2), phase = atan2(B, A)
 
-Recommended
+Plot fit(t) = amp * sin(ωt + phase) as a third line.
 
-Rhythm stability over time
+That’s essentially the same core math as Goertzel/DFT-at-one-frequency, just visualized as a wave.
 
-or, slightly shorter:
+UI/UX recommendations
 
-Rhythm stability
+Add a checkbox: “Show best-fit wave” (off by default).
 
-This immediately tells the user:
+Label it clearly: “Best-fit wave (visual guide)”
 
-we are checking the same rhythm
+Show tiny stats near it:
 
-across time
+Amplitude (relative to cleaned signal stdev)
 
-for reliability
+Explained variance (R²) or simpler: “Explains ~X% of cleaned motion”
 
-2. Rename the internal labels (without changing the math)
-Current line
+Phase offset (optional, but useful for timing)
 
-Stability • dominant: 14m • dominance: 56% • flips: 1
+Avoid the main pitfall
 
-Recommended rewrite
+If you only show one sine, users may assume the market “is” that sine. To prevent overtrust:
 
-Most common rhythm: 14m
-Agreement: 56%
-Changes detected: 1
+Fade it / dashed stroke, and tooltip:
 
-Each term maps cleanly to what you already compute:
+“This is the single-frequency component at the selected rhythm. Real data can include multiple rhythms + noise.”
 
-Old term	New term	Why
-dominant	Most common rhythm	“Dominant” sounds political/technical
-dominance	Agreement	Humans instantly get “agreement”
-flips	Changes detected	Explains what a “flip” means
-Current second line
+Where to render it
 
-median separation: 1.04 • median resid σ: 0.450
+Best place is exactly where you’re looking: in “Cleaned signal + selected rhythm”, as a third overlay:
 
-Recommended rewrite
+Yellow: cleaned signal
 
-Clarity vs alternatives: 1.04×
-Typical noise level: 0.45
+Pink: extracted cycle component (your current)
 
-This keeps accuracy but removes jargon:
+New: best-fit sine (smooth reference wave)
 
-“separation” → “clarity”
+If you want it even more helpful: add an option “Fit locally (rolling)” so the phase can drift over time (markets do that).
 
-“resid σ” → “noise level”
+If you want, I can sketch the minimal diff: a fitSineAtPeriod() helper + a new draw layer in the cleaned-signal panel.
 
-3. One explanatory tooltip that explains the entire section
 
-This is the key part.
+Great — here’s a minimal, LLM-friendly diff plan that adds a best-fit sine wave without blowing up the code or semantics.
 
-Tooltip title
+I’ll keep this to what to add + where, not a full rehash.
 
-How rhythm stability is measured
+1. What this sine wave is (1 sentence to anchor it)
 
-Tooltip body (suggested text)
+A single-frequency projection of the cleaned signal at the selected rhythm, used only as a visual reference for phase and regularity.
 
-This checks whether the same rhythm keeps winning over time.
+This framing matters for UX + future ML use.
 
-We repeatedly re-run the Pattern Finder on overlapping recent windows and track:
+2. Add one small helper (pure math, isolated)
 
-• Agreement — how often the same rhythm wins
-• Clarity — how much better it is than the runner-up
-• Changes — how often a different rhythm takes over
+Place this near your oscillation scan helpers, not in rendering code.
 
-Stable rhythms show high agreement, clear separation, and few changes.
-Unstable or noisy markets cause frequent changes and low agreement.
+function fitSineAtPeriod(series, periodMin, sampleRateMin = 1) {
+  const N = series.length;
+  if (!periodMin || N < 5) return null;
 
-This tooltip:
+  const omega = 2 * Math.PI / (periodMin / sampleRateMin);
 
-explains why this exists
+  let sinSum = 0, cosSum = 0;
+  for (let i = 0; i < N; i++) {
+    const t = i;
+    sinSum += series[i] * Math.sin(omega * t);
+    cosSum += series[i] * Math.cos(omega * t);
+  }
 
-explains how it works
+  const A = (2 / N) * sinSum;
+  const B = (2 / N) * cosSum;
 
-explains how to interpret it
+  const amp = Math.sqrt(A*A + B*B);
+  const phase = Math.atan2(B, A);
 
-does not require math knowledge
+  const fit = new Array(N);
+  for (let i = 0; i < N; i++) {
+    fit[i] = amp * Math.sin(omega * i + phase);
+  }
 
-4. Make the bar visualization self-explanatory (small tweak)
+  return { fit, amp, phase };
+}
 
-Right now:
 
-▓▓▓▓▓▓ recent windows →
+Why this is good:
 
-That’s not obvious to a non-technical user.
+No dependencies
 
-Recommended micro-label
+O(N)
 
-Change to:
+Same math family as Goertzel / single-bin DFT
 
-Agreement across recent windows →
+Easy to unit-test later
 
-Or even:
+3. Wire it into the analysis pipeline (2 lines)
 
-How often this rhythm repeats consistently →
+In your “Cleaned signal + selected rhythm” computation block, right after you compute:
 
-That one phrase makes the bars readable without explanation.
+resid1m
 
-Optional: a one-line verdict (very effective)
+activePeriodMin
 
-Under the section header, add a short sentence that updates dynamically:
+Add:
 
-🟢 Rhythm is stable over time
+let sineFit = null;
+if (activePeriodMin != null) {
+  sineFit = fitSineAtPeriod(resid1m, activePeriodMin, 1);
+}
 
-🟡 Rhythm appears intermittently
 
-🔴 Rhythm is inconsistent
+That’s it for data flow.
 
-This mirrors the Insight Summary and reinforces the mental model.
+4. Render it as a visual guide, not a signal
 
-Final “clean” version (how it would read)
+In the same panel where you already draw:
 
-Rhythm stability
+cleaned signal (yellow)
 
-Most common rhythm: 14m
-Agreement: 56%  Changes detected: 1
-Clarity vs alternatives: 1.04×  Typical noise level: 0.45
+extracted cycle (pink)
 
-▓▓▓▓▓▓ Agreement across recent windows →
+Add one more draw pass, with clear visual hierarchy:
 
-Tooltip: (as written above)
+if (sineFit) {
+  drawSeries(
+    cycleRect,
+    sineFit.fitTf ?? sineFit.fit, // reuse your TF mapping logic
+    getCSS("--accent2"),
+    "Best-fit wave (visual guide)",
+    { dashed: true, alpha: 0.6 }
+  );
+}
 
-Why this works
 
-Uses plain language
+Styling guidance:
 
-Explains intent, not mechanics
+Dashed
 
-Matches the mental model you’re building elsewhere (“rhythm”, “agreement”, “clarity”)
+Slightly transparent
 
-Keeps the tool powerful without intimidating users
+Never thicker than the cleaned signal
 
-If you want, next I can:
+This prevents “market = sine wave” misinterpretation.
 
-help you align the numeric thresholds with words like Low / Medium / High, or
+5. One checkbox + tooltip (important UX guardrail)
 
-rewrite the Insight Summary text so it reuses the same vocabulary for consistency across the UI.
+Add near your existing toggles:
+
+<label class="chk">
+  <input id="toggleSineFit" type="checkbox" />
+  Show best-fit wave
+</label>
+
+
+Tooltip text (recommended):
+
+Shows the single repeating wave that best matches the selected rhythm.
+This is a visual reference — real data can contain multiple rhythms and noise.
+
+6. Optional but HIGH-VALUE micro-metric (1 line)
+
+If you want immediate interpretability:
+
+const explained = sineFit
+  ? (sineFit.amp / rms(resid1m)).toFixed(2)
+  : null;
+
+
+Display as:
+
+Explains ~0.42× of cleaned motion
+
+That’s far more intuitive than raw amplitude.
+
+7. Why this addition is worth it (design sanity check)
+
+This sine wave:
+
+✅ Helps humans see phase alignment
+
+✅ Helps explain why a rhythm wins
+
+❌ Does NOT introduce a new decision rule
+
+❌ Does NOT replace your scan or gate logic
+
+It’s a lens, not another lever.
+
+Recommendation
+
+Add it off by default, label it clearly as a visual guide, and you’ll get clarity without overfitting or UI bloat.
+
+If you want, next step could be:
+
+rolling/local sine fit (phase drift)
+
+or showing residual minus sine as a “what’s left unexplained” layer

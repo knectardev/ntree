@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Detrend + Oscillation Scan (Continuous Series Demo)</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="hoverTip" id="hoverTip"></div>
+  <header>
+    <div>
+      <h1>Detrend + Oscillation Scan (continuous demo)</h1>
+      <div class="sub">Synthetic series • detrend (rolling linear) • scan candidate periods • stability & signal gate</div>
+    </div>
+    <div class="status" id="status"></div>
+  </header>
+
+  <div class="wrap">
+    <aside class="panel">
+      <div class="controls">
+        <div class="row">
+          <div style="font-weight:800;">Continuous detrend + oscillation scan</div>
+        </div>
+
+        <details class="insightBox" style="margin-top:10px;">
+          <summary>ⓘ About this tool</summary>
+          <div class="tiny" style="margin-top:8px;">
+            <div style="font-weight:700;color:rgba(232,238,252,0.82);">What this tool does</div>
+            <div style="margin-top:4px;">Identifies when price behaves like a repeating rhythm at a specific timescale.</div>
+            <div style="margin-top:8px;font-weight:700;color:rgba(232,238,252,0.82);">What it does <span style="text-decoration:underline;">not</span> do</div>
+            <div style="margin-top:4px;">Does not predict direction, timing, or profitability.</div>
+            <div style="margin-top:8px;">Being explicit about limits helps prevent misuse and builds trust.</div>
+          </div>
+        </details>
+
+        <div class="row">
+          <label for="ticker">Ticker</label>
+          <select id="ticker">
+            <option>QQQ</option>
+            <option>AAPL</option>
+            <option>SPY</option>
+            <option>TSLA</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="days">Trading days</label>
+          <select id="days">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
+            <option value="20">20</option>
+          </select>
+
+          <button id="regen">Regenerate random data</button>
+        </div>
+
+        <div class="dialRow">
+          <div class="dialCol">
+            <label>
+              Smoothing strength <span class="dialValue" id="detrendLabel">2.0h</span>
+              <span class="tip" data-tip="Controls how much slow drift we remove before searching for repeating rhythms. Bigger = removes slower background movement, leaving a cleaner wiggle to scan.">i</span>
+            </label>
+            <div class="dialWrap">
+              <canvas class="dialCanvas" id="detrendDial" width="220" height="220"></canvas>
+            </div>
+            <input id="detrendHours" class="hiddenInput" type="number" min="0.25" step="0.25" value="2.0" />
+            <div class="dialHelp">How aggressively we ignore slow drift before scanning for rhythms.</div>
+          </div>
+
+          <div class="dialCol">
+            <label>Lookback window <span class="dialValue" id="scanLabel">780m</span></label>
+            <div class="dialWrap">
+              <canvas class="dialCanvas" id="scanDial" width="220" height="220"></canvas>
+            </div>
+            <input id="scanWindow" class="hiddenInput" type="number" min="120" step="30" value="780" />
+            <div class="dialHelp">How far back we look to score which rhythm repeats best.</div>
+          </div>
+        </div>
+
+        <details class="insightBox" style="margin-top:10px;">
+          <summary>Advanced settings</summary>
+          <div class="row" style="margin-top:10px;">
+            <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;width:100%;">
+              <div style="flex:1 1 260px;min-width:240px;">
+                <div style="font-weight:700;margin-bottom:4px;">
+                  Rhythm search
+                  <span class="tip" data-tip="We test many candidate repeat times P (minutes). Each bar's score uses: energy × coherence(P). Coherence ≈ how repeatable the pattern is at that lag.">i</span>
+                </div>
+                <div style="color:var(--muted);font-size:11px;line-height:1.25;">
+                  Controls which repeat times are tested by the Pattern Finder (minutes). Linear step or log spacing.
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);">
+                  Min
+                  <input id="scanMinPeriod" type="number" min="1" step="1" value="5"
+                    style="width:84px;padding:6px 8px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--fg);" />
+                </label>
+
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);">
+                  Max
+                  <input id="scanMaxPeriod" type="number" min="1" step="1" value="180"
+                    style="width:84px;padding:6px 8px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--fg);" />
+                </label>
+
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);">
+                  <span id="scanStepLabel">Count</span>
+                  <input id="scanStepPeriod" type="number" min="1" step="1" value="15"
+                    style="width:84px;padding:6px 8px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--fg);" />
+                </label>
+
+                <label class="chk" style="margin-top:18px;">
+                  <input id="scanLogSpacing" type="checkbox" checked />
+                  <span>Log spacing</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:10px;">
+            <div style="width:100%;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div style="font-weight:700;">Noise baseline</div>
+                <span class="tip" data-tip="Calibrates scan metrics against pure random-walk noise using the same settings (detrend window, scan window, candidate periods). Shows percentile vs noise so thresholds are grounded.">i</span>
+              </div>
+              <div class="row" style="margin-top:8px;">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                  Runs
+                  <input id="baselineRuns" type="number" min="20" step="10" value="400" style="width:92px;" />
+                </label>
+                <button id="baselineRunBtn">Build baseline</button>
+                <button id="baselineClearBtn">Clear</button>
+                <span class="pill" id="baselineStatus" style="margin-left:auto;">Baseline: none</span>
+              </div>
+              <div class="tiny" id="baselineSummary" style="margin-top:6px;"></div>
+            </div>
+          </div>
+        </details>
+
+        <details class="insightBox" style="margin-top:10px;">
+          <summary>
+            Search presets
+            <span class="tip" data-tip="Quick starting points for common rhythm searches. You can tweak any setting afterwards.">i</span>
+          </summary>
+          <div class="row" style="margin-top:10px;gap:8px;">
+            <button id="presetDaily">Daily patterns</button>
+            <button id="presetShort">Short-term jitters</button>
+            <button id="presetLong">Long-term trends</button>
+          </div>
+        </details>
+
+        <div class="row" style="margin-top:10px;">
+          <div style="width:100%;" class="insightBox">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="light bad" id="insightLight"></span>
+              <div style="font-weight:800;">Insight summary</div>
+              <span class="tip" data-tip="Plain-English summary of the current best rhythm and how confident the detection is.">i</span>
+            </div>
+            <div class="tiny" id="insightText" style="margin-top:8px;"></div>
+            <div class="tiny" id="insightWhy" style="margin-top:6px;"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%;">
+            <span class="pill">
+              Displayed rhythm (scan still tests all): <b id="selPeriod">Auto</b>
+              <span class="tip" data-tip="Clicking a rhythm only changes what is visualized (the wave + turning points). The Pattern Finder always tests all candidates.">i</span>
+            </span>
+            <span style="color:var(--muted);font-size:11px;">Hover or click a bar in the Pattern Finder to analyze that rhythm. Right-click to clear selection.</span>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <label class="chk"><input id="toggleGate" type="checkbox" checked /> <span>Filter weak signals</span></label>
+          <div class="gate" style="margin-top:8px;padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">
+            <div style="color:var(--muted);font-size:11px;margin-bottom:6px;">Gate marks which turning points are “eligible” vs suppressed.</div>
+
+            <div class="gateVerdict" id="gateVerdict">
+              <span class="light bad" id="gateVerdictLight"></span>
+              <div>
+                <div class="title" id="gateVerdictTitle">🔴 No reliable rhythm detected</div>
+                <div class="reason" id="gateVerdictReason">Reason: —</div>
+              </div>
+            </div>
+
+            <div class="gateChecks" id="gateChecks"></div>
+
+            <details class="insightBox" style="margin-top:10px;">
+              <summary>Advanced gate thresholds</summary>
+
+              <div style="font-size:12px;color:var(--muted);margin:6px 0 4px;">
+                Stability
+                <span class="tip" data-tip="Stability summarizes whether the scan picks the same dominant period across recent windows. Dominance=how often the same period wins. Separation=best score ÷ second-best score (how distinct the winner is).">i</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                  Dominance ≥ <span class="tip" data-tip="Dominance is the fraction of recent windows where the same period is best. Higher = more repeatable regime.">i</span>
+                  <input id="gateDom" type="number" min="0" max="1" step="0.05" value="0.60" />
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                  Separation ≥ <span class="tip" data-tip="Separation is bestScore ÷ secondBestScore (median over windows). Higher = a clearer winner; low separation means many periods fit similarly (usually noisy/ambiguous).">i</span>
+                  <input id="gateSep" type="number" min="1" step="0.05" value="1.25" />
+                </label>
+              </div>
+
+              <div style="font-size:12px;color:var(--muted);margin:10px 0 4px;">Regime</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                  |Slope| ≤ σ/hr
+                  <input id="gateSlope" type="number" min="0" step="0.1" value="0.9" />
+                </label>
+                <label class="chk" style="margin-top:18px;"><input id="gateRequireRange" type="checkbox" checked /> <span>Require ranging</span></label>
+              </div>
+
+              <div style="font-size:12px;color:var(--muted);margin:10px 0 4px;">Volatility</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                  Noise mult ≤
+                  <input id="gateVol" type="number" min="0" step="0.05" value="1.30" />
+                </label>
+                <label class="chk" style="margin-top:18px;"><input id="gateSuppressHighVol" type="checkbox" checked /> <span>Suppress high noise</span></label>
+              </div>
+
+            </details>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <label class="chk"><input id="toggleDetrend" type="checkbox" checked /> <span>Show detrended overlay</span></label>
+          <label class="chk" style="margin-left:18px;"><input id="toggleTurns" type="checkbox" /> <span>Show cycle turning points</span></label>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <label class="chk">
+            <input id="toggleSineFit" type="checkbox" />
+            <span>Show best-fit wave</span>
+            <span class="tip" data-tip="Shows the single repeating wave that best matches the selected rhythm. This is a visual reference — real data can contain multiple rhythms and noise.">i</span>
+          </label>
+        </div>
+
+        <div class="tiny">
+          <div class="badge">Note</div>
+          <div style="margin-top:6px;">All analysis and visualization uses 1‑minute resolution data.</div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="panel">
+      <div class="main">
+        <div class="canvasRow">
+          <div class="chart" style="height:340px;">
+            <div class="chartTitle">
+              <span class="legendDot" style="background:var(--accent2);"></span>
+              <span>Original data & slow trends</span>
+            </div>
+            <canvas id="price"></canvas>
+          </div>
+
+          <div class="chart" style="height:320px;">
+            <div class="chartTitle">
+              <span class="legendDot" style="background:var(--warn);"></span>
+              <span>Cleaned signal + selected rhythm</span>
+              <span style="color:var(--muted);font-size:11px;font-weight:normal;margin-left:8px;">(Rendered at full 1-minute resolution)</span>
+            </div>
+            <canvas id="analysis"></canvas>
+          </div>
+
+          <details class="insightBox" id="pfDetails">
+            <summary style="display:flex;align-items:center;gap:10px;">
+              <span class="legendDot" style="background:var(--accent);"></span>
+              <span>Pattern Finder</span>
+            </summary>
+
+            <div class="chart" style="height:220px; margin-top:10px;" id="scanPanel">
+              <canvas id="scan"></canvas>
+            </div>
+          </details>
+
+          <div class="chart" style="height:140px; margin-top:10px;" id="consistencyPanel">
+            <div class="chartTitle">
+              <span class="legendDot" style="background:var(--accent);"></span>
+              <span>Rhythm stability</span>
+              <span class="tip" data-tip="This checks whether the same rhythm keeps winning over time.
+
+We repeatedly re-run the Pattern Finder on overlapping recent windows and track:
+
+• Agreement — how often the same rhythm wins
+• Clarity — how much better it is than the runner-up
+• Changes — how often a different rhythm takes over
+
+Stable rhythms show high agreement, clear separation, and few changes. Unstable or noisy markets cause frequent changes and low agreement.">i</span>
+            </div>
+            <canvas id="consistency"></canvas>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- No build step: classic scripts loaded in dependency order -->
+  <script src="./src/config.js"></script>
+  <script src="./src/utils.js"></script>
+  <script src="./src/ui/dials.js"></script>
+  <script src="./src/ui/tooltips.js"></script>
+  <script src="./src/synth.js"></script>
+  <script src="./src/detrend.js"></script>
+  <script src="./src/scan.js"></script>
+  <script src="./src/baseline.js"></script>
+  <script src="./src/gate.js"></script>
+  <script src="./src/insight.js"></script>
+  <script src="./src/render/price.js"></script>
+  <script src="./src/render/analysis.js"></script>
+  <script src="./src/render/scanPanel.js"></script>
+  <script src="./src/render/consistency.js"></script>
+  <script src="./src/state.js"></script>
+  <script src="./src/main.js"></script>
+</body>
+</html>
+
+

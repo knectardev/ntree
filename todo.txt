@@ -1,5 +1,11 @@
 todos
 
+oscillator 
+> Consistency section (at bottom) updates 
+> Yellow line 1 minute resolution issues
+> Vertical line across charts (with tooltip)
+
+
 
 Game - 
 
