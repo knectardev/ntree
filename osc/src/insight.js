@@ -9,7 +9,7 @@
   'use strict';
 
   const { clamp } = OSC.utils;
-  const { rms, percentileRank, bandpassApprox } = OSC.scan;
+  const { rms, percentileRank, bandpassApprox, fitSineAtPeriod, pearsonCorrelation } = OSC.scan;
 
   function computeInsight(scan, stab, resid1m, activePeriodMin, state, elements, baseline){
     if (!elements || !elements.insightText || !elements.insightLight) return;
@@ -48,6 +48,20 @@
     const selTxt = (state.selectedPeriodMin != null) ? "You selected" : "Auto found";
     const confTxt = good ? "Strong" : (mid ? "Moderate" : "Weak");
 
+    // Compute sine fit correlation if we have an active period
+    // Use tail window for consistency with other metrics
+    let sineCorr = null;
+    let explainedMotion = null;
+    if (activePeriodMin != null && resid1m && resid1m.length >= 5) {
+      const sineFit = fitSineAtPeriod(resid1m, activePeriodMin, 1);
+      if (sineFit && sineFit.fit) {
+        // Use tail window for correlation to match other metrics
+        const tailSineFit = sineFit.fit.slice(sineFit.fit.length - tailN);
+        sineCorr = pearsonCorrelation(tailResid, tailSineFit);
+        explainedMotion = Math.round(Math.max(0, Math.min(100, sineCorr * sineCorr * 100)));
+      }
+    }
+
     const bits = [];
     bits.push(`${selTxt} a ${confTxt.toLowerCase()} repeating rhythm around ${perLbl}.`);
     bits.push(`This rhythm explains ~${sharePct}% of the cleaned signal's movement (within the lookback window).`);
@@ -55,6 +69,10 @@
     bits.push(`Repeatability: ${coh.toFixed(2)}.`);
     if (dom != null) bits.push(`Consistency: ${Math.round(dom*100)}%.`);
     if (pRaw != null) bits.push(`Stronger than ${pRaw}% of random price behavior (score).`);
+    if (sineCorr != null) {
+      bits.push(`Pearson Sine fit correlation: r = ${sineCorr.toFixed(2)}.`);
+      bits.push(`Explained motion: ${explainedMotion}% of cleaned signal.`);
+    }
 
     elements.insightText.textContent = bits.join(" ");
     if (elements.insightWhy){

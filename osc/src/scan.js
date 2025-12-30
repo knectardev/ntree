@@ -255,6 +255,38 @@
     return { fit, amp, phase };
   }
 
+  /**
+   * Compute Pearson correlation coefficient between two series.
+   * Returns correlation in range [-1, 1].
+   * @param {number[]} x - First series
+   * @param {number[]} y - Second series (must have same length as x)
+   * @returns {number} - Pearson correlation coefficient
+   */
+  function pearsonCorrelation(x, y){
+    const n = Math.min(x.length, y.length);
+    if (n < 2) return 0;
+
+    let meanX = 0, meanY = 0;
+    for (let i = 0; i < n; i++){
+      meanX += x[i];
+      meanY += y[i];
+    }
+    meanX /= n;
+    meanY /= n;
+
+    let num = 0, denX = 0, denY = 0;
+    for (let i = 0; i < n; i++){
+      const dx = x[i] - meanX;
+      const dy = y[i] - meanY;
+      num += dx * dy;
+      denX += dx * dx;
+      denY += dy * dy;
+    }
+
+    const den = Math.sqrt(denX * denY) || 1e-9;
+    return clamp(num / den, -1, 1);
+  }
+
   OSC.scan = {
     ema,
     bandpassApprox,
@@ -267,7 +299,8 @@
     computeOscillationScanOnResidual,
     computePeriodStability,
     findTurningPoints,
-    fitSineAtPeriod
+    fitSineAtPeriod,
+    pearsonCorrelation
   };
 
 })(window.OSC || (window.OSC = {}));
