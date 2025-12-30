@@ -1,213 +1,42 @@
-Best fit "sine wave" 
+R-like coefficient for how well the sine wave fits the selected rhythm
 
-Yes — adding a “best-fit sine” overlay can make the result way more legible for humans, as long as you’re careful about what it means.
+Part 1. 
 
-When it helps
+Pearson correlation between the detrended signal and the fitted sine wave
 
-You’ve picked a period (say 19m) and want an intuitive “this is the rhythm” visual.
+If:
 
-It gives a clean reference for phase (peaks/troughs timing), not just “energy.”
+x(t) = cleaned signal
 
-What it should be (so it stays honest)
+s(t) = best-fit sine at the selected period
 
-Think of it as a projection of the cleaned signal onto that period:
+Then:
 
-Fit y(t) ≈ A*sin(ωt) + B*cos(ωt) over the current lookback window (or rolling).
+r = corr(x, s)
 
-Convert to amplitude/phase: amp = sqrt(A^2 + B^2), phase = atan2(B, A)
 
-Plot fit(t) = amp * sin(ωt + phase) as a third line.
+Properties:
 
-That’s essentially the same core math as Goertzel/DFT-at-one-frequency, just visualized as a wave.
+Range: –1 to +1
 
-UI/UX recommendations
+Directly interpretable
 
-Add a checkbox: “Show best-fit wave” (off by default).
+Very familiar to users
 
-Label it clearly: “Best-fit wave (visual guide)”
+Sign tells phase alignment, magnitude tells strength
 
-Show tiny stats near it:
+UI label:
 
-Amplitude (relative to cleaned signal stdev)
+Sine fit correlation: r = 0.63
 
-Explained variance (R²) or simpler: “Explains ~X% of cleaned motion”
+This is the closest thing to an “R coefficient.”
 
-Phase offset (optional, but useful for timing)
 
-Avoid the main pitfall
 
-If you only show one sine, users may assume the market “is” that sine. To prevent overtrust:
 
-Fade it / dashed stroke, and tooltip:
+Add these lines to the Insight Summary:
 
-“This is the single-frequency component at the selected rhythm. Real data can include multiple rhythms + noise.”
+Pearson Sine fit correlation: r = 0.62
+Explained motion: 38% of cleaned signal
 
-Where to render it
 
-Best place is exactly where you’re looking: in “Cleaned signal + selected rhythm”, as a third overlay:
-
-Yellow: cleaned signal
-
-Pink: extracted cycle component (your current)
-
-New: best-fit sine (smooth reference wave)
-
-If you want it even more helpful: add an option “Fit locally (rolling)” so the phase can drift over time (markets do that).
-
-If you want, I can sketch the minimal diff: a fitSineAtPeriod() helper + a new draw layer in the cleaned-signal panel.
-
-
-Great — here’s a minimal, LLM-friendly diff plan that adds a best-fit sine wave without blowing up the code or semantics.
-
-I’ll keep this to what to add + where, not a full rehash.
-
-1. What this sine wave is (1 sentence to anchor it)
-
-A single-frequency projection of the cleaned signal at the selected rhythm, used only as a visual reference for phase and regularity.
-
-This framing matters for UX + future ML use.
-
-2. Add one small helper (pure math, isolated)
-
-Place this near your oscillation scan helpers, not in rendering code.
-
-function fitSineAtPeriod(series, periodMin, sampleRateMin = 1) {
-  const N = series.length;
-  if (!periodMin || N < 5) return null;
-
-  const omega = 2 * Math.PI / (periodMin / sampleRateMin);
-
-  let sinSum = 0, cosSum = 0;
-  for (let i = 0; i < N; i++) {
-    const t = i;
-    sinSum += series[i] * Math.sin(omega * t);
-    cosSum += series[i] * Math.cos(omega * t);
-  }
-
-  const A = (2 / N) * sinSum;
-  const B = (2 / N) * cosSum;
-
-  const amp = Math.sqrt(A*A + B*B);
-  const phase = Math.atan2(B, A);
-
-  const fit = new Array(N);
-  for (let i = 0; i < N; i++) {
-    fit[i] = amp * Math.sin(omega * i + phase);
-  }
-
-  return { fit, amp, phase };
-}
-
-
-Why this is good:
-
-No dependencies
-
-O(N)
-
-Same math family as Goertzel / single-bin DFT
-
-Easy to unit-test later
-
-3. Wire it into the analysis pipeline (2 lines)
-
-In your “Cleaned signal + selected rhythm” computation block, right after you compute:
-
-resid1m
-
-activePeriodMin
-
-Add:
-
-let sineFit = null;
-if (activePeriodMin != null) {
-  sineFit = fitSineAtPeriod(resid1m, activePeriodMin, 1);
-}
-
-
-That’s it for data flow.
-
-4. Render it as a visual guide, not a signal
-
-In the same panel where you already draw:
-
-cleaned signal (yellow)
-
-extracted cycle (pink)
-
-Add one more draw pass, with clear visual hierarchy:
-
-if (sineFit) {
-  drawSeries(
-    cycleRect,
-    sineFit.fitTf ?? sineFit.fit, // reuse your TF mapping logic
-    getCSS("--accent2"),
-    "Best-fit wave (visual guide)",
-    { dashed: true, alpha: 0.6 }
-  );
-}
-
-
-Styling guidance:
-
-Dashed
-
-Slightly transparent
-
-Never thicker than the cleaned signal
-
-This prevents “market = sine wave” misinterpretation.
-
-5. One checkbox + tooltip (important UX guardrail)
-
-Add near your existing toggles:
-
-<label class="chk">
-  <input id="toggleSineFit" type="checkbox" />
-  Show best-fit wave
-</label>
-
-
-Tooltip text (recommended):
-
-Shows the single repeating wave that best matches the selected rhythm.
-This is a visual reference — real data can contain multiple rhythms and noise.
-
-6. Optional but HIGH-VALUE micro-metric (1 line)
-
-If you want immediate interpretability:
-
-const explained = sineFit
-  ? (sineFit.amp / rms(resid1m)).toFixed(2)
-  : null;
-
-
-Display as:
-
-Explains ~0.42× of cleaned motion
-
-That’s far more intuitive than raw amplitude.
-
-7. Why this addition is worth it (design sanity check)
-
-This sine wave:
-
-✅ Helps humans see phase alignment
-
-✅ Helps explain why a rhythm wins
-
-❌ Does NOT introduce a new decision rule
-
-❌ Does NOT replace your scan or gate logic
-
-It’s a lens, not another lever.
-
-Recommendation
-
-Add it off by default, label it clearly as a visual guide, and you’ll get clarity without overfitting or UI bloat.
-
-If you want, next step could be:
-
-rolling/local sine fit (phase drift)
-
-or showing residual minus sine as a “what’s left unexplained” layer

@@ -1,55 +1,45 @@
-> Yellow line 1 minute resolution issues
 
-Why this is especially confusing in your UI
 
-Because:
+Part 2, which will be even better (for oscillations): normalized projection power
 
-The yellow line is not price
+This is more “signal-processing correct” and less noise-sensitive:
 
-It is not computed at the candle resolution
+coherence = ||projection of x onto sine||² / ||x||²
 
-But it looks like it’s tied to the candle selector
 
-So users (correctly!) infer a contradiction.
+(We already halfway doing this in spirit with your energy / dominance scores.
+Energy (and the per-period scan “score”). This happens inside:
+computeOscillationScanOnResidual(resid1m, scanWindowMinutes, periods) 
+Dominance (your stability panel + gate’s “dominance >= …” idea)
+This happens inside:
+computePeriodStability(resid1m, scanWindowMinutes, periods, K=12, stepMinutes=60) 
+)
 
-What you should do to fix this (UX + correctness)
-✅ 1. Decouple cleaned-signal rendering from candle size
 
-For the cleaned signal panel only:
+Properties:
 
-Always render at native 1-minute resolution
+Range: 0 → 1
 
-Do not downsample to match candle size
+Interpretable as “% of variance explained by this rhythm”
 
-Let it “float” over the price view
+Phase-agnostic if you include both sine + cosine components
 
-This makes the line visually stable across candle selections.
+UI label:
 
-Price candles can change.
-Analysis overlays should not.
+Rhythm coherence: 0.41 (41% of cleaned motion)
 
-✅ 2. Add a small, explicit label (this matters)
+This pairs beautifully with your Insight Summary.
 
-Right near the cleaned signal title, add:
+Bonus metric (optional, but very powerful)
 
-Rendered at full 1-minute resolution
+Explained variance (R²-like)
 
-or
+After fitting sine:
 
-Independent of candle display
+R² = 1 − Var(residual) / Var(signal)
 
-This instantly resolves user confusion.
+Add these lines to the Insight Summary:
 
-✅ 3. (Optional but strong) Lock the cleaned signal’s Y-scale
 
-If you normalize the cleaned signal to:
-
-±1
-
-or recent RMS
-
-and keep that scale fixed, then:
-
-amplitude comparisons become meaningful
-
-visual shape becomes more consistent across views
+Normalized projection power: 
+Rhythm coherence: 0.41 (41% of cleaned motion) 

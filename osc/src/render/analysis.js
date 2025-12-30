@@ -12,6 +12,71 @@
   const { clamp } = OSC.utils;
   const { OUTER_PAD, GUTTER_W } = OSC.config;
 
+  function drawZeroLine(ctx, rect, yScale){
+    const y0 = yScale(0);
+    if (!isFinite(y0)) return;
+    if (y0 < rect.y || y0 > rect.y + rect.h) return;
+    ctx.save();
+    ctx.strokeStyle = "rgba(232,238,252,0.14)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(rect.x, y0 + 0.5);
+    ctx.lineTo(rect.x + rect.w, y0 + 0.5);
+    ctx.stroke();
+    // label once per panel; keep short to avoid pretending this is a unit axis
+    drawText(ctx, "Center", rect.x + 6, y0 - 12, {font:"10px system-ui", color:"rgba(232,238,252,0.52)"});
+    ctx.restore();
+  }
+
+  function drawQualitativeScale(ctx, rect){
+    const x = rect.x + rect.w - 6;
+    const topY = rect.y + 6;
+    const midY = rect.y + rect.h*0.5 - 6;
+    const botY = rect.y + rect.h - 16;
+    const txt = "rgba(232,238,252,0.42)";
+    drawText(ctx, "High motion", x, topY, {font:"10px system-ui", color:txt, align:"right"});
+    drawText(ctx, "Moderate", x, midY, {font:"10px system-ui", color:txt, align:"right"});
+    drawText(ctx, "Low motion", x, botY, {font:"10px system-ui", color:txt, align:"right"});
+  }
+
+  function drawBadge(ctx, text, xRight, yTop, opts={}){
+    const padX = opts.padX !== undefined ? opts.padX : 8;
+    const padY = opts.padY !== undefined ? opts.padY : 5;
+    const r = opts.radius !== undefined ? opts.radius : 10;
+    const bg = opts.bg !== undefined ? opts.bg : "rgba(255,255,255,0.03)";
+    const border = opts.border !== undefined ? opts.border : "rgba(255,255,255,0.10)";
+    const color = opts.color !== undefined ? opts.color : getCSS("--muted");
+    const font = opts.font !== undefined ? opts.font : "11px system-ui";
+
+    ctx.save();
+    ctx.font = font;
+    const tw = ctx.measureText(text).width;
+    const wBox = Math.ceil(tw + padX*2);
+    const hBox = Math.ceil(11 + padY*2);
+    const x = Math.round(xRight - wBox);
+    const y = Math.round(yTop);
+    ctx.fillStyle = bg;
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    // rounded rect
+    const rr = Math.min(r, wBox/2, hBox/2);
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + wBox, y, x + wBox, y + hBox, rr);
+    ctx.arcTo(x + wBox, y + hBox, x, y + hBox, rr);
+    ctx.arcTo(x, y + hBox, x, y, rr);
+    ctx.arcTo(x, y, x + wBox, y, rr);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    ctx.fillText(text, x + padX, y + padY);
+    ctx.restore();
+  }
+
   function drawScaleBars(ctx, x, y, w, scores, bestLabel, activeMin, selectedMin, hoverMin, state){
     const rowH = 12;
     const labelW = 34;
@@ -172,17 +237,10 @@
       const yScale = v => rect.y + padY + (rect.h - padY*2) * (1 - (v - lo)/(hi-lo || 1e-9));
       const xStep = rect.w / Math.max(1, series.length);
 
-      // Zero line
-      const y0 = yScale(0);
-      if (isFinite(y0) && y0 >= rect.y && y0 <= rect.y + rect.h){
-        ctx.save();
-        ctx.strokeStyle = "rgba(232,238,252,0.14)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(rect.x, y0 + 0.5);
-        ctx.lineTo(rect.x + rect.w, y0 + 0.5);
-        ctx.stroke();
-        ctx.restore();
+      // Baseline + semantic vertical guide (no numeric y-axis)
+      if (options.showGuides !== false) {
+        drawZeroLine(ctx, rect, yScale);
+        drawQualitativeScale(ctx, rect);
       }
 
       // Draw line
@@ -214,7 +272,52 @@
     // Draw best-fit sine wave overlay if enabled
     if (sineFit && sineFit.fit) {
       const sineColor = getCSS("--accent2");
-      drawSeries(cycleRect, sineFit.fit, sineColor, { dashed: true, alpha: 0.6, lineWidth: 1.5 });
+      drawSeries(cycleRect, sineFit.fit, sineColor, { dashed: true, alpha: 0.6, lineWidth: 1.5, showGuides: false });
+    }
+
+    // Optional amplitude cue (badge). Uses noise percentile when available; otherwise uses
+    // the variance share proxy from the current window.
+    if (scan && scan.best && activePeriodMin != null) {
+      const baseline = OSC.baseline ? OSC.baseline.getBaseline() : null;
+      let strengthLabel = null;
+      
+      // Check if baseline is available and matches current settings
+      if (baseline && baseline.key && OSC.baseline && OSC.baseline.baselineKey) {
+        const currentBaselineKey = OSC.baseline.baselineKey(state);
+        if (baseline.key === currentBaselineKey && baseline.bestRaw) {
+          const pRaw = OSC.scan.percentileRank(baseline.bestRaw, scan.best.raw);
+          if (pRaw != null) {
+            strengthLabel = (pRaw >= 85) ? "High" : (pRaw >= 70 ? "Medium" : "Low");
+          }
+        }
+      }
+      
+      // Fallback to variance share if no baseline
+      if (!strengthLabel) {
+        const tailN = clamp(Math.floor(Number(state.scanWindow) || 780), 120, resid1m.length);
+        const tailResid = resid1m.slice(resid1m.length - tailN);
+        const bp = OSC.scan.bandpassApprox(resid1m, activePeriodMin);
+        const tailCycle = bp.slice(bp.length - tailN);
+        const rR = OSC.scan.rms(tailResid);
+        const rC = OSC.scan.rms(tailCycle);
+        const share = clamp((rC*rC) / ((rR*rR) + 1e-9), 0, 1);
+        const sharePct = Math.round(share * 100);
+        strengthLabel = (sharePct >= 40) ? "High" : (sharePct >= 20 ? "Medium" : "Low");
+      }
+      
+      const strengthVar = (strengthLabel === "High") ? "--good" : (strengthLabel === "Medium" ? "--warn" : "--bad");
+      const strengthColor = getCSS(strengthVar);
+      drawBadge(
+        ctx,
+        `Rhythm strength: ${strengthLabel}`,
+        residRect.x + residRect.w - 6,
+        residRect.y + 6,
+        {
+          bg: colorWithAlpha(strengthColor, 0.18),
+          border: colorWithAlpha(strengthColor, 0.55),
+          color: colorWithAlpha(strengthColor, 0.95)
+        }
+      );
     }
 
     // Compute stability, insight, and gate decision
