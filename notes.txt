@@ -1,129 +1,207 @@
-Would this add value in your system?
-✅ Yes — but only for one specific purpose
+Best first: “Segmented sine” (gapped dashed line)
 
-It adds value if the question is:
+What you see
 
-“Is this rhythm structural or merely episodic?”
+Keep your existing dashed sine line (global).
 
-That is not something your current global sine fit can fully answer.
+Add a second dashed line that:
 
-Your current metrics tell you:
+only draws where the local fit is good
 
-stability across windows
+disappears (gaps) where it’s not
 
-average coherence
+So it visually communicates:
 
-total energy contribution
+“This rhythm is present intermittently.”
 
-They do not tell you:
+How it works (simple)
+For the selected period 
+𝑃
+P:
 
-when the rhythm is active
+Slide a window 
+𝑊
+=
+2
+–
+4
+W=2–4 cycles (e.g., W = round(3 * P) minutes at 1-min sampling).
 
-whether it switches off/on
+In each window, fit sine (you already have fitSineAtPeriod).
 
-whether phase resets occur
+Compute a local score, e.g. r correlation between window series and window fit.
 
-Segmentation answers those questions.
+Mark indices “active” when r > threshold (and optionally varShare > min).
 
-“Rhythm Presence Map” (diagnostic only)
+Draw the sine wave only for active indices, leaving gaps elsewhere
 
-For the already-selected period:
+Option 1 is the cleanest: a “gapped” dashed sine that only draws where the rhythm is locally coherent.
 
-slide a short window
+Below is a drop-in approach that fits your current architecture (compute once, render many), and doesn’t require redesigning the UI.
 
-compute local amplitude / correlation
+What we’re building
 
-mark:
+On the Selected rhythm chart:
 
-strong presence
+keep your existing global dashed sine (sineFit.fit) if you want
 
-weak presence
+add segmentedSine[]:
 
-phase breaks
+same period as the selected rhythm
 
-Visually:
+but only drawn where the local fit is good
 
-opacity modulation
+elsewhere set to NaN so the line breaks (gaps)
 
-dashed vs solid segments
+Visually: “sine present here → breaks → reappears.”
 
-subtle background bands
+1) Add a local coherence + segmented sine builder (scan.js)
 
-Crucially:
+Add this near your other scan helpers:
 
-no new period selection
+// Returns a segmented sine array (same length as series), with NaNs where local fit is weak.
+// Uses sliding window sine fit at a fixed period, computes local r, thresholds it.
+function computeSegmentedSineOnTail(series, periodMin, opts){
+  opts = opts || {};
+  const sampleRateMin = opts.sampleRateMin || 1;
+  const cycles = opts.windowCycles != null ? opts.windowCycles : 3.0;     // 2–4 is typical
+  const rThresh = opts.rThresh != null ? opts.rThresh : 0.55;             // start here
+  const minRun = opts.minRun != null ? opts.minRun : 8;                   // min points to keep a segment
+  const smoothN = opts.smoothN != null ? opts.smoothN : 5;                // smooth local r
 
-no automatic regime switching
+  const N = series.length;
+  if (!periodMin || N < 10) return { segmented: new Array(N).fill(NaN), r: new Array(N).fill(0) };
 
-no additional scores feeding selection
+  // window length in samples: cycles * period
+  const W = Math.max(10, Math.floor((cycles * periodMin) / sampleRateMin));
+  const rArr = new Array(N).fill(0);
 
-Just: where does this rhythm breathe?
+  // compute local r using a trailing window [i-W+1..i]
+  for (let i = 0; i < N; i++){
+    const a = Math.max(0, i - W + 1);
+    const b = i + 1;
+    const win = series.slice(a, b);
 
+    const fitObj = fitSineAtPeriod(win, periodMin, sampleRateMin);
+    if (!fitObj || !fitObj.fit) { rArr[i] = 0; continue; }
 
-
-Nice — this is the perfect insertion point. You already have:
-
-cycleTf (your bandpass-ish rhythm series)
-
-sineFit.fit (global sine fit at the selected period)
-
-drawSeries() for plotting
-
-Here’s the clean way to add a “Local presence” mode without clutter:
-
-Goal
-
-Keep cycleTf as the main line, and add a presence strip (and optionally a gated/thickened rhythm line) driven by a local coherence score.
-
-1) Add a local-presence computation (fast + simple)
-
-In scan.js (pure functions), add:
-
-computeLocalSinePresence(series, periodMin, windowCycles=2.5, step=1)
-
-returns presence[] aligned with series length, values 0..1 (use r mapped to 0..1 or varShare)
-
-Practical choice: use correlation r because it’s intuitive and already in your system.
-
-Presence mapping:
-
-presence = clamp((r - r0) / (r1 - r0), 0, 1)
-
-where r0=0.2, r1=0.7 (tunable)
-
-Also: compute it on the tail window to avoid huge CPU cost.
-
-2) Render it as a strip in the rhythm panel (minimal clutter)
-
-Add right after drawSeries(cycleRect, cycleTf, ...):
-
-// Local presence strip (diagnostic mode)
-if (state.rhythmFitMode === "local_presence" && activePeriodMin != null) {
-  const pres = state._localPresence; // cached per activePeriodMin + scanWindow
-  if (pres && pres.length) {
-    drawPresenceStrip(cycleRect, pres);
+    const rr = pearsonCorrelation(win, fitObj.fit);
+    rArr[i] = (isFinite(rr) ? rr : 0);
   }
+
+  // simple smoothing (moving average) to prevent flicker
+  if (smoothN > 1){
+    const sm = new Array(N).fill(0);
+    const half = Math.floor(smoothN / 2);
+    for (let i=0; i<N; i++){
+      let s=0, c=0;
+      for (let j=i-half; j<=i+half; j++){
+        if (j<0 || j>=N) continue;
+        s += rArr[j]; c++;
+      }
+      sm[i] = c ? (s/c) : rArr[i];
+    }
+    for (let i=0; i<N; i++) rArr[i] = sm[i];
+  }
+
+  // build global sine template for the whole tail
+  const global = fitSineAtPeriod(series, periodMin, sampleRateMin);
+  const base = (global && global.fit) ? global.fit : new Array(N).fill(0);
+
+  // active mask + min-run cleanup
+  const active = new Array(N).fill(false);
+  for (let i=0; i<N; i++) active[i] = (rArr[i] >= rThresh);
+
+  // remove tiny “on” islands
+  let runStart = -1;
+  for (let i=0; i<=N; i++){
+    const on = (i < N) ? active[i] : false;
+    if (on && runStart < 0) runStart = i;
+    if (!on && runStart >= 0){
+      const runLen = i - runStart;
+      if (runLen < minRun){
+        for (let k=runStart; k<i; k++) active[k] = false;
+      }
+      runStart = -1;
+    }
+  }
+
+  // segmented sine: NaN where inactive so rendering breaks the line
+  const segmented = new Array(N);
+  for (let i=0; i<N; i++){
+    segmented[i] = active[i] ? base[i] : NaN;
+  }
+
+  return { segmented, r: rArr };
 }
 
-Presence strip drawing logic (simple)
 
-Draw a thin bar along the bottom of cycleRect
+Export it on OSC.scan with your other functions.
 
-For each x pixel (or each sample), set opacity based on presence
+2) Draw a series that supports NaN gaps (analysis.js)
 
-Visually it reads: bright = rhythm present; dim = absent
+If your current drawSeries() already breaks on NaNs, great — you’re done.
 
-3) Optional: make the rhythm line “thicken” only where present
+If it doesn’t, add a tiny helper to draw dashed line segments while skipping NaNs:
 
-This is the more dramatic (and cool) version, but still honest:
+function drawSeriesWithGaps(rect, series, color, opts){
+  opts = opts || {};
+  const alpha = opts.alpha != null ? opts.alpha : 0.7;
+  const dashed = !!opts.dashed;
+  const lineWidth = opts.lineWidth != null ? opts.lineWidth : 1.25;
 
-draw normal cycleTf faint
+  const N = series.length;
+  if (!N) return;
 
-draw a second pass where presence is high with higher alpha/lineWidth
+  // Use same scaling logic as drawSeries (you likely already have this)
+  // If you already have cycleScale from drawSeries, reuse that instead.
+  const minV = Math.min(...series.filter(v => isFinite(v)));
+  const maxV = Math.max(...series.filter(v => isFinite(v)));
+  const rng = (maxV - minV) || 1e-9;
 
-Where your snippet fits
+  function toX(i){ return rect.x + (i/(N-1)) * rect.w; }
+  function toY(v){
+    const u = (v - minV) / rng;
+    return rect.y + (1 - u) * rect.h;
+  }
 
-You already have:
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  if (dashed) ctx.setLineDash([5,4]);
+
+  let drawing = false;
+  ctx.beginPath();
+  for (let i=0; i<N; i++){
+    const v = series[i];
+    if (!isFinite(v)){
+      if (drawing){
+        ctx.stroke();
+        ctx.beginPath();
+        drawing = false;
+      }
+      continue;
+    }
+    const x = toX(i);
+    const y = toY(v);
+    if (!drawing){
+      ctx.moveTo(x, y);
+      drawing = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  if (drawing) ctx.stroke();
+  ctx.restore();
+}
+
+
+(If you don’t want to recompute scaling here, I can rewrite this to reuse cycleScale once you paste drawSeries().)
+
+) Wire it into your existing snippet (analysis.js)
+
+Right where you currently draw cycleTf and sineFit.fit, add:
 
 const cycleScale = drawSeries(cycleRect, cycleTf, cycleColor, { alpha: cycleAlpha });
 
@@ -133,55 +211,36 @@ if (sineFit && sineFit.fit) {
   drawSeries(cycleRect, sineFit.fit, sineColor, { dashed: true, alpha: a, lineWidth: 1.25, showGuides: false });
 }
 
+// NEW: segmented dashed sine (only where locally coherent)
+if (state.showSegmentedSine && activePeriodMin != null && state.segmentedSine && state.segmentedSine.length){
+  const segColor = "rgba(120, 255, 200, 1.0)"; // or getCSS("--good") if you have one
+  drawSeriesWithGaps(cycleRect, state.segmentedSine, segColor, { dashed: true, alpha: 0.85, lineWidth: 1.6 });
+}
+4) Cache computation (critical to avoid jank)
 
-Here’s the minimal change that keeps your current behavior and adds the new mode:
+Compute state.segmentedSine once per analysis recompute, not per mousemove render.
 
-const cycleScale = drawSeries(cycleRect, cycleTf, cycleColor, { alpha: cycleAlpha });
+Where you already compute sineFit / fourierObj, add:
 
-// New: local presence overlay (strip + optional gated highlight)
-if (state.rhythmFitMode === "local_presence" && state.localPresence && state.localPresence.length) {
-  drawPresenceStrip(cycleRect, state.localPresence);
+// cache key should include: activePeriodMin, scanWindow, detrendHours, closes1m.length, etc.
+if (activePeriodMin != null) {
+  const tailN = Math.min(resid1m.length, Math.floor(state.scanWindow * 60)); // or your existing tail logic
+  const tail = resid1m.slice(-tailN);
 
-  if (state.localPresenceHighlight) {
-    // draw a "gated" highlight version of the rhythm where presence is strong
-    drawSeriesGatedByPresence(cycleRect, cycleTf, cycleColor, state.localPresence, {
-      alpha: 0.9,
-      lineWidth: 2.0,
-      threshold: state.localPresenceThresh || 0.55
+  // Only recompute when key changes
+  const key = `${activePeriodMin}|${tailN}|${state.detrendHours}|${closes1m.length}`;
+  if (state._segKey !== key) {
+    const out = OSC.scan.computeSegmentedSineOnTail(tail, activePeriodMin, {
+      windowCycles: 3.0,
+      rThresh: 0.55,
+      minRun: 10,
+      smoothN: 5,
+      sampleRateMin: 1
     });
+    state.segmentedSine = out.segmented;
+    state._segKey = key;
   }
 }
 
-// Keep your existing global sine fit mode
-if (state.rhythmFitMode !== "off" && sineFit && sineFit.fit) {
-  const sineColor = getCSS("--accent2");
-  const a = state.showFourierOverlay ? 0.28 : 0.6;
-  const dashed = (state.rhythmFitMode === "global_sine");
-  drawSeries(cycleRect, sineFit.fit, sineColor, { dashed, alpha: a, lineWidth: 1.25, showGuides: false });
-}
 
-Caching requirement (so you don’t jank)
-
-Don’t compute local presence inside render.
-
-Cache state.localPresence when any of these change:
-
-selected/active period
-
-scan window length (tailN)
-
-detrend lookback
-
-the underlying resid1m tail identity (last timestamp / length)
-
-This is the same caching logic you already had to add for projection spectrum.
-
-Recommended UX default
-
-Add a dropdown: Fit mode: Global sine / Local presence / Off
-
-Default to Global sine (what you already have)
-
-Local presence is opt-in “diagnostic mode”
-
-That keeps things from feeling cluttered.
+You can later expose rThresh / windowCycles as a tiny “advanced” control, but don’t start there.

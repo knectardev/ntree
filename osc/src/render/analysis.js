@@ -146,7 +146,19 @@
 
       ctx.restore();
 
-      hit.push({x:bx, y:yy, w:bw, h:rowH, periodMin:s.min, label:s.label});
+      hit.push({
+        x: bx,
+        y: yy,
+        w: bw,
+        h: rowH,
+        periodMin: s.min,
+        label: s.label,
+        // Extra metrics for tooltips (safe to ignore elsewhere)
+        raw: s.raw,
+        energy: s.energy,
+        corr: s.corr,
+        coh: s.coh
+      });
     }
 
     drawText(ctx, "Hover or click a bar to analyze that rhythm", x, top + scores.length*rowH + 6, {font:"11px system-ui", color:txt});

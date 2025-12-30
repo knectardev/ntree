@@ -77,7 +77,18 @@
       ctx.fillRect(bx, yy+2, barW, barH);
       ctx.restore();
 
-      hit.push({x:bx, y:yy, w:bw, h:rowH, periodMin:s.min, label:s.label});
+      hit.push({
+        x: bx,
+        y: yy,
+        w: bw,
+        h: rowH,
+        periodMin: s.min,
+        label: s.label,
+        raw: s.raw,
+        energy: s.energy,
+        corr: s.corr,
+        coh: s.coh
+      });
     }
 
     state.scanHitboxes = hit;

@@ -369,6 +369,33 @@
     return null;
   }
 
+  // Pattern Finder interactions (scan bars): hover tooltip + click-to-select + right-click-to-clear
+  function scanHitTest(canvas, e, hitboxes){
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const hit = hitboxes || [];
+    for (let i=0; i<hit.length; i++){
+      const b = hit[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
+    }
+    return null;
+  }
+
+  function fmtScanTooltip(b){
+    if (!b) return "";
+    const lbl = b.label || (b.periodMin != null ? fmtPeriodLabel(b.periodMin) : "");
+    const corr = (b.corr != null && isFinite(b.corr)) ? Number(b.corr) : null;
+    const coh = (b.coh != null && isFinite(b.coh)) ? Number(b.coh) : null;
+    const energy = (b.energy != null && isFinite(b.energy)) ? Number(b.energy) : null;
+    const parts = [lbl];
+    if (energy != null) parts.push(`energy=${energy.toFixed(3)}`);
+    if (corr != null) parts.push(`r=${corr.toFixed(2)}`);
+    if (coh != null) parts.push(`coh=${coh.toFixed(2)}`);
+    return parts.join(" • ");
+  }
+
   if (elements.cSpectrum) {
     elements.cSpectrum.addEventListener("mousemove", (e) => {
       const b = spectrumHitTest(elements.cSpectrum, e);
@@ -404,6 +431,57 @@
       renderAll();
     });
   }
+
+  function wireScanCanvasInteractions(canvas, getHitboxes){
+    if (!canvas) return;
+
+    canvas.addEventListener("mousemove", (e) => {
+      const hitboxes = (typeof getHitboxes === "function") ? getHitboxes() : [];
+      const b = scanHitTest(canvas, e, hitboxes);
+      if (b) {
+        state.hoverPeriodMin = b.periodMin;
+        state.hoverLabel = b.label || null;
+        OSC.ui.setHoverTip(true, e.clientX, e.clientY, fmtScanTooltip(b));
+        // Only re-render if hover target changed (keeps cursor tracking snappy)
+        renderAll();
+      } else {
+        if (state.hoverPeriodMin != null || state.hoverLabel != null) {
+          state.hoverPeriodMin = null;
+          state.hoverLabel = null;
+          renderAll();
+        }
+        OSC.ui.setHoverTip(false);
+      }
+    });
+
+    canvas.addEventListener("mouseleave", () => {
+      if (state.hoverPeriodMin != null || state.hoverLabel != null) {
+        state.hoverPeriodMin = null;
+        state.hoverLabel = null;
+        renderAll();
+      }
+      OSC.ui.setHoverTip(false);
+    });
+
+    canvas.addEventListener("click", (e) => {
+      const hitboxes = (typeof getHitboxes === "function") ? getHitboxes() : [];
+      const b = scanHitTest(canvas, e, hitboxes);
+      if (!b) return;
+      state.selectedPeriodMin = Number(b.periodMin);
+      renderAll();
+    });
+
+    canvas.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      state.selectedPeriodMin = null;
+      renderAll();
+    });
+  }
+
+  // Wire Pattern Finder (right panel) bars
+  wireScanCanvasInteractions(elements.cScan, () => state.scanHitboxesScan || []);
+  // Wire the analysis panel's left-gutter scan bars (same behavior)
+  wireScanCanvasInteractions(elements.cAnalysis, () => state.scanHitboxesAnalysis || []);
 
   // Preset functionality
   function applyPreset(p){
