@@ -221,6 +221,28 @@
       sineFit = OSC.scan.fitSineAtPeriod(resid1m, activePeriodMin, 1);
     }
 
+    // Local match-strength (segmented sine + local r) — cached, computed on tail window only.
+    // Visual diagnostic: where does this rhythm actually match well vs fade out.
+    let segSine = null;
+    if (state.showSineFit && activePeriodMin != null && OSC.scan && OSC.scan.computeSegmentedSineOnTail) {
+      const tailN = (scan && scan.tailN) ? Math.min(scan.tailN, resid1m.length) : clamp(Math.floor(Number(state.scanWindow) || 780), 120, resid1m.length);
+      const start = resid1m.length - tailN;
+      const tail = resid1m.slice(start);
+
+      const segOpts = { windowCycles: 3.0, rThresh: 0.55, minRun: 10, smoothN: 5, sampleRateMin: 1 };
+      const segKey = `segSine:v1|N=${resid1m.length}|tailN=${tailN}|P=${Number(activePeriodMin)}|detr=${Number(state.detrendHours||0).toFixed(4)}|win=${Math.floor(Number(state.scanWindow)||0)}|seed=${Number(state.seed||0)}|rT=${segOpts.rThresh}|c=${segOpts.windowCycles}|m=${segOpts.minRun}|s=${segOpts.smoothN}`;
+      if (state._segSineCacheKey === segKey && state._segSineCacheData) {
+        segSine = state._segSineCacheData;
+      } else {
+        segSine = OSC.scan.computeSegmentedSineOnTail(tail, activePeriodMin, segOpts);
+        state._segSineCacheKey = segKey;
+        state._segSineCacheData = segSine;
+      }
+
+      // Attach alignment info for rendering on the full panel x-axis
+      if (segSine) segSine._start = start;
+    }
+
     // Projection spectrum (Fourier-like decomposition) - compute ONCE per analysis recompute and cache on state.
     // This is intentionally not an FFT; it's a period-grid projection spectrum tied directly to reconstructed curves.
     let fourier = null;
@@ -292,6 +314,68 @@
       return {yScale, xStep};
     }
 
+    // Draw a series aligned to an existing scale, breaking the line on non-finite values (NaN gaps).
+    function drawSeriesOnScaleWithGaps(rect, series, startIdx, yScale, xStep, color, options = {}){
+      if (!series || !series.length) return;
+      const alpha = options.alpha !== undefined ? options.alpha : 1.0;
+      const finalColor = (alpha < 1.0) ? colorWithAlpha(color, alpha) : color;
+      ctx.save();
+      ctx.strokeStyle = finalColor;
+      ctx.lineWidth = options.lineWidth || 1.6;
+      if (options.dashed) ctx.setLineDash([5, 4]);
+
+      let drawing = false;
+      ctx.beginPath();
+      for (let i=0; i<series.length; i++){
+        const v = series[i];
+        if (!isFinite(v)){
+          if (drawing){
+            ctx.stroke();
+            ctx.beginPath();
+            drawing = false;
+          }
+          continue;
+        }
+        const idx = startIdx + i;
+        const x = rect.x + idx*xStep + xStep*0.5;
+        const y = yScale(v);
+        if (!drawing){
+          ctx.moveTo(x, y);
+          drawing = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      if (drawing) ctx.stroke();
+      ctx.restore();
+    }
+
+    // Presence strip (bottom of rect): shows local match strength 0..1 as opacity.
+    function drawPresenceStrip(rect, rSeries, startIdx, xStep, options = {}){
+      if (!rSeries || !rSeries.length) return;
+      const hStrip = options.h != null ? options.h : 10;
+      const y = rect.y + rect.h - hStrip - 2;
+      const r0 = options.r0 != null ? options.r0 : 0.20;
+      const r1 = options.r1 != null ? options.r1 : 0.70;
+      const baseAlpha = options.baseAlpha != null ? options.baseAlpha : 0.10;
+      const maxAlpha = options.maxAlpha != null ? options.maxAlpha : 0.85;
+      const color = options.color != null ? options.color : getCSS("--good");
+
+      ctx.save();
+      for (let i=0; i<rSeries.length; i++){
+        const r = rSeries[i];
+        if (!isFinite(r)) continue;
+        const pres = clamp((r - r0) / (r1 - r0), 0, 1);
+        const a = baseAlpha + pres * (maxAlpha - baseAlpha);
+        ctx.fillStyle = colorWithAlpha(color, a);
+        const idx = startIdx + i;
+        const x = rect.x + idx*xStep;
+        // ensure at least 1px wide for visibility
+        ctx.fillRect(x, y, Math.max(1, xStep), hStrip);
+      }
+      ctx.restore();
+    }
+
     const residScale = drawSeries(residRect, residTf, getCSS("--warn"));
     const cycleColor = (state.selectedPeriodMin != null) ? getCSS("--accent2") : getCSS("--accent");
     // When the Top-K overlay is enabled, dim the base rhythm line so the diagnostic overlay is readable.
@@ -335,6 +419,24 @@
       const sineColor = getCSS("--accent2");
       const a = state.showFourierOverlay ? 0.28 : 0.6;
       drawSeries(cycleRect, sineFit.fit, sineColor, { dashed: true, alpha: a, lineWidth: 1.25, showGuides: false });
+    }
+
+    // NEW: Local match strength indicator (tail window only)
+    // - Presence strip: bright = strong local match, dim = weak
+    // - Segmented dashed sine: only drawn where match is strong (gaps elsewhere)
+    if (segSine && segSine.segmented && segSine.r && segSine._start != null) {
+      const start = segSine._start;
+      // Use a distinct color from the Top‑K reconstruction overlay (which uses --good)
+      // to avoid visual blending/confusion.
+      const segColor = getCSS("--accent2");
+      drawPresenceStrip(cycleRect, segSine.r, start, cycleScale.xStep, { color: segColor });
+      drawSeriesOnScaleWithGaps(cycleRect, segSine.segmented, start, cycleScale.yScale, cycleScale.xStep, segColor, {
+        dashed: true,
+        alpha: 0.90,
+        lineWidth: 1.7
+      });
+      drawText(ctx, "Local match strength (tail)", cycleRect.x + 8, cycleRect.y + 34,
+        {font:"10px system-ui", color:"rgba(232,238,252,0.60)"});
     }
 
     // Projection Spectrum inset removed (now rendered in the expanded diagnostic panel below the chart).

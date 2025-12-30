@@ -287,6 +287,131 @@
     return clamp(num / den, -1, 1);
   }
 
+  /**
+   * Compute correlation between a series window and its best-fit sine at a fixed period,
+   * without allocating intermediate arrays (reduces GC/jank).
+   *
+   * Window is [start, end) in series index space.
+   */
+  function sineCorrInWindow(series, start, end, periodMin, sampleRateMin=1){
+    const a = Math.max(0, Math.floor(start));
+    const b = Math.min(series.length, Math.floor(end));
+    const n = b - a;
+    if (!periodMin || n < 5) return 0;
+
+    const omega = 2 * Math.PI / (periodMin / sampleRateMin);
+
+    // Fit parameters (same math as fitSineAtPeriod) on the window.
+    let sinSum = 0, cosSum = 0;
+    for (let i=0; i<n; i++){
+      const x = series[a + i];
+      const t = i;
+      sinSum += x * Math.sin(omega * t);
+      cosSum += x * Math.cos(omega * t);
+    }
+    const A = (2 / n) * sinSum;
+    const B = (2 / n) * cosSum;
+    const amp = Math.sqrt(A*A + B*B);
+    const phase = Math.atan2(B, A);
+
+    // Pearson corr(x, y) where y is the fitted sine values.
+    let meanX = 0, meanY = 0;
+    for (let i=0; i<n; i++){
+      meanX += series[a + i];
+      meanY += amp * Math.sin(omega * i + phase);
+    }
+    meanX /= n;
+    meanY /= n;
+
+    let num = 0, denX = 0, denY = 0;
+    for (let i=0; i<n; i++){
+      const x = series[a + i] - meanX;
+      const y = (amp * Math.sin(omega * i + phase)) - meanY;
+      num += x * y;
+      denX += x * x;
+      denY += y * y;
+    }
+    const den = Math.sqrt(denX * denY) || 1e-9;
+    return clamp(num / den, -1, 1);
+  }
+
+  /**
+   * Returns a segmented sine array (same length as series), with NaNs where local fit is weak.
+   * Uses a sliding trailing window sine fit at a fixed period, computes local correlation r,
+   * smooths r to avoid flicker, and thresholds into active/inactive segments.
+   *
+   * This is meant as a diagnostic visualization (where does the rhythm "breathe"),
+   * not a scoring input.
+   */
+  function computeSegmentedSineOnTail(series, periodMin, opts){
+    opts = opts || {};
+    const sampleRateMin = opts.sampleRateMin || 1;
+    const cycles = (opts.windowCycles != null) ? Number(opts.windowCycles) : 3.0; // 2–4 typical
+    const rThresh = (opts.rThresh != null) ? Number(opts.rThresh) : 0.55;
+    const minRun = (opts.minRun != null) ? Math.max(1, Math.floor(Number(opts.minRun))) : 8;
+    const smoothN = (opts.smoothN != null) ? Math.max(1, Math.floor(Number(opts.smoothN))) : 5;
+
+    const N = series.length;
+    if (!periodMin || N < 10) return { segmented: new Array(N).fill(NaN), r: new Array(N).fill(0) };
+
+    // Window length in samples: cycles * period
+    const W = clamp(Math.floor((cycles * periodMin) / sampleRateMin), 10, N);
+    const rArr = new Array(N).fill(0);
+
+    // trailing window [i-W+1 .. i]
+    for (let i=0; i<N; i++){
+      const end = i + 1;
+      const start = Math.max(0, end - W);
+      const rr = sineCorrInWindow(series, start, end, periodMin, sampleRateMin);
+      rArr[i] = (isFinite(rr) ? rr : 0);
+    }
+
+    // simple smoothing (moving average) to prevent flicker
+    if (smoothN > 1){
+      const sm = new Array(N).fill(0);
+      const half = Math.floor(smoothN / 2);
+      for (let i=0; i<N; i++){
+        let s=0, c=0;
+        for (let j=i-half; j<=i+half; j++){
+          if (j<0 || j>=N) continue;
+          s += rArr[j]; c++;
+        }
+        sm[i] = c ? (s/c) : rArr[i];
+      }
+      for (let i=0; i<N; i++) rArr[i] = sm[i];
+    }
+
+    // build global sine template for the whole series (used as the "shape" to segment)
+    const global = fitSineAtPeriod(series, periodMin, sampleRateMin);
+    const base = (global && global.fit) ? global.fit : new Array(N).fill(0);
+
+    // active mask + min-run cleanup
+    const active = new Array(N).fill(false);
+    for (let i=0; i<N; i++) active[i] = (rArr[i] >= rThresh);
+
+    // remove tiny “on” islands
+    let runStart = -1;
+    for (let i=0; i<=N; i++){
+      const on = (i < N) ? active[i] : false;
+      if (on && runStart < 0) runStart = i;
+      if (!on && runStart >= 0){
+        const runLen = i - runStart;
+        if (runLen < minRun){
+          for (let k=runStart; k<i; k++) active[k] = false;
+        }
+        runStart = -1;
+      }
+    }
+
+    // segmented sine: NaN where inactive so rendering breaks the line
+    const segmented = new Array(N);
+    for (let i=0; i<N; i++){
+      segmented[i] = active[i] ? base[i] : NaN;
+    }
+
+    return { segmented, r: rArr };
+  }
+
   function mean(arr){
     const n = arr.length;
     if (!n) return 0;
@@ -408,7 +533,8 @@
     computeFourierDecompositionOnResidual,
     findTurningPoints,
     fitSineAtPeriod,
-    pearsonCorrelation
+    pearsonCorrelation,
+    computeSegmentedSineOnTail
   };
 
 })(window.OSC || (window.OSC = {}));

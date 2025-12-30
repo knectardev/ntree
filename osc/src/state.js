@@ -48,7 +48,11 @@
       // Projection spectrum (sine projection) settings + cache
       fourierK: 5,
       _fourierCacheKey: null,
-      _fourierCacheData: null
+      _fourierCacheData: null,
+
+      // Local match-strength (segmented sine) cache for the selected rhythm panel
+      _segSineCacheKey: null,
+      _segSineCacheData: null
     };
   }
 
