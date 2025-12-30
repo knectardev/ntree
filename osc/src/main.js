@@ -20,6 +20,7 @@
     toggleDetrend: document.getElementById("toggleDetrend"),
     toggleTurns: document.getElementById("toggleTurns"),
     toggleSineFit: document.getElementById("toggleSineFit"),
+    toggleLocalMatch: document.getElementById("toggleLocalMatch"),
     toggleFourierOverlay: document.getElementById("toggleFourierOverlay"), // legacy (removed from sidebar; kept for safety)
     toggleGate: document.getElementById("toggleGate"),
     gateDom: document.getElementById("gateDom"),
@@ -304,6 +305,7 @@
   if (elements.toggleDetrend) elements.toggleDetrend.addEventListener("change", () => { applyFromUI(); renderAll(); });
   if (elements.toggleTurns) elements.toggleTurns.addEventListener("change", () => { applyFromUI(); renderAll(); });
   if (elements.toggleSineFit) elements.toggleSineFit.addEventListener("change", () => { applyFromUI(); renderAll(); });
+  if (elements.toggleLocalMatch) elements.toggleLocalMatch.addEventListener("change", () => { applyFromUI(); renderAll(); });
   if (elements.toggleFourierOverlay) elements.toggleFourierOverlay.addEventListener("change", () => { applyFromUI(); renderAll(); });
   if (elements.toggleGate) elements.toggleGate.addEventListener("change", () => { applyFromUI(); renderAll(); });
 

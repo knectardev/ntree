@@ -19,6 +19,7 @@
       showDetrend: elements.toggleDetrend ? !!elements.toggleDetrend.checked : true,
       showTurns: elements.toggleTurns ? !!elements.toggleTurns.checked : false,
       showSineFit: elements.toggleSineFit ? !!elements.toggleSineFit.checked : true,
+      showLocalMatch: elements.toggleLocalMatch ? !!elements.toggleLocalMatch.checked : true,
       showFourierOverlay: elements.spectrumOverlayRecon ? !!elements.spectrumOverlayRecon.checked : (elements.toggleFourierOverlay ? !!elements.toggleFourierOverlay.checked : false),
       gateEnabled: elements.toggleGate ? !!elements.toggleGate.checked : true,
 
@@ -62,6 +63,7 @@
     if (elements.toggleDetrend) state.showDetrend = !!elements.toggleDetrend.checked;
     if (elements.toggleTurns) state.showTurns = !!elements.toggleTurns.checked;
     if (elements.toggleSineFit) state.showSineFit = !!elements.toggleSineFit.checked;
+    if (elements.toggleLocalMatch) state.showLocalMatch = !!elements.toggleLocalMatch.checked;
     if (elements.spectrumTopOnly) state.spectrumTopOnly = !!elements.spectrumTopOnly.checked;
     if (elements.spectrumOverlayRecon) state.showFourierOverlay = !!elements.spectrumOverlayRecon.checked;
     else if (elements.toggleFourierOverlay) state.showFourierOverlay = !!elements.toggleFourierOverlay.checked;

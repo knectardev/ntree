@@ -224,7 +224,7 @@
     // Local match-strength (segmented sine + local r) — cached, computed on tail window only.
     // Visual diagnostic: where does this rhythm actually match well vs fade out.
     let segSine = null;
-    if (state.showSineFit && activePeriodMin != null && OSC.scan && OSC.scan.computeSegmentedSineOnTail) {
+    if (state.showLocalMatch && activePeriodMin != null && OSC.scan && OSC.scan.computeSegmentedSineOnTail) {
       const tailN = (scan && scan.tailN) ? Math.min(scan.tailN, resid1m.length) : clamp(Math.floor(Number(state.scanWindow) || 780), 120, resid1m.length);
       const start = resid1m.length - tailN;
       const tail = resid1m.slice(start);
@@ -424,7 +424,7 @@
     // NEW: Local match strength indicator (tail window only)
     // - Presence strip: bright = strong local match, dim = weak
     // - Segmented dashed sine: only drawn where match is strong (gaps elsewhere)
-    if (segSine && segSine.segmented && segSine.r && segSine._start != null) {
+    if (state.showLocalMatch && segSine && segSine.segmented && segSine.r && segSine._start != null) {
       const start = segSine._start;
       // Use a distinct color from the Top‑K reconstruction overlay (which uses --good)
       // to avoid visual blending/confusion.
