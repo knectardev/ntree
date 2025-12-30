@@ -309,7 +309,7 @@
       const strengthColor = getCSS(strengthVar);
       drawBadge(
         ctx,
-        `Rhythm strength: ${strengthLabel}`,
+        `Variance explained: ${strengthLabel}`,
         residRect.x + residRect.w - 6,
         residRect.y + 6,
         {

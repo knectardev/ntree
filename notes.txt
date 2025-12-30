@@ -1,42 +1,175 @@
-R-like coefficient for how well the sine wave fits the selected rhythm
-
-Part 1. 
-
-Pearson correlation between the detrended signal and the fitted sine wave
-
-If:
-
-x(t) = cleaned signal
-
-s(t) = best-fit sine at the selected period
-
-Then:
-
-r = corr(x, s)
+I'd like to add a Fast Fourier Transform curve analysis chart below the lower detrended "selected rhthym on the Detrend + Oscillation Scan (continuous demo) prototype - The goal is display the top calculated contributing sine wave curves and their respective contributions.
 
 
-Properties:
+A solid way to do this in your prototype is to treat the detrended / cleaned signal as the input, compute an FFT-based spectrum, pick the top spectral peaks, then reconstruct those components as sine curves and show both (a) the spectrum and (b) the reconstructed components + their “contribution” metrics.
 
-Range: –1 to +1
+Here’s what I’d recommend as the “best approach” for your UI + math, given your goal (“top contributing sine wave curves and their respective contributions”):
 
-Directly interpretable
+1) What to FFT (so it matches your current story)
 
-Very familiar to users
+FFT input = the same series you’re scanning for rhythms, i.e. your “cleaned/detrended” residual at 1-minute resolution (or whatever your base resolution is).
+If you FFT the raw price, the low-frequency drift dominates and your peak list becomes “trend + noise”.
 
-Sign tells phase alignment, magnitude tells strength
+Practical: use the exact post-detrend series you already show in the lower panel (or a slightly smoothed version if you want a cleaner spectrum).
 
-UI label:
+2) Compute a stable spectrum (avoid misleading peaks)
 
-Sine fit correlation: r = 0.63
+Do this, always:
 
-This is the closest thing to an “R coefficient.”
+Windowing: Hann (Hanning) window before FFT to reduce spectral leakage.
 
+Mean remove: subtract mean of the detrended series (should be near zero anyway).
 
+rFFT: use real FFT (only positive frequencies).
 
+Power spectrum: magnitude² (or magnitude) of FFT coefficients.
 
-Add these lines to the Insight Summary:
+Optional but very helpful for interpretability:
 
-Pearson Sine fit correlation: r = 0.62
-Explained motion: 38% of cleaned signal
+Zero-pad to next power of two (better frequency interpolation; doesn’t add information, but makes peaks easier to locate).
 
+Band-limit the search to your “meaningful” rhythm range (e.g., 5m–2d) so you don’t surface micro-noise or near-DC.
+
+3) Peak picking → “top contributing sine waves”
+
+From the power spectrum:
+
+Find local maxima (with a minimum spacing so you don’t pick the same peak’s sidelobes).
+
+Rank by power (or by “explained motion” after reconstruction; see below).
+
+Keep top K (start with K=3..7). More than that gets visually muddy fast.
+
+Convert each frequency bin f_k to:
+
+Period: T_k = 1 / f_k (in minutes/hours/days)
+
+Amplitude: from FFT magnitude (scaled correctly for your window)
+
+Phase: from FFT complex angle
+
+Then reconstruct each component as:
+
+x_k(t) = A_k * sin(2π f_k t + φ_k)
+(or cosine form—either is fine as long as consistent)
+
+4) Define “contribution” in a way that won’t betray you later
+
+You want something that users will trust when the signal is messy/nonstationary. Two good metrics:
+
+A) Variance explained (simple, stable)
+
+For each component x_k(t):
+
+contrib_k = Var(x_k) / Var(x_input)
+(Or compute on the same window you FFT’d.)
+
+This is easy to explain: “this sine accounts for X% of residual variance.”
+
+B) Incremental explained variance (better when components overlap)
+
+Sort peaks by power, then add them cumulatively:
+
+x̂_m(t) = Σ_{k=1..m} x_k(t)
+
+cum_explained_m = 1 - Var(x_input - x̂_m)/Var(x_input)
+
+Then show both:
+
+per-component contribution
+
+cumulative contribution as you add top components
+
+This prevents double-counting when peaks are close or harmonically related.
+
+5) What to actually draw in the new “FFT curve analysis” panel
+
+I’d do a 2-part panel:
+
+Panel A — Spectrum (Periodogram)
+
+X-axis: Period (log scale is often better: 5m … 2d)
+
+Y-axis: Power (or normalized power)
+
+Highlight top K peaks (vertical markers + labels like “1.5h”, “1d”, etc.)
+
+Panel B — Reconstructed components
+
+Two good display modes (pick one, or add a toggle):
+
+Mode 1: Overlay on the detrended signal
+
+Plot x_input(t) faint
+
+Plot x̂_K(t) (sum of top K sines) bold
+
+Optional: allow toggling individual components on/off
+
+Mode 2: Small multiples (cleanest)
+
+One row per component:
+
+sine curve x_k(t)
+
+label: T_k, amplitude, and contribution %
+
+Small multiples are usually the least confusing, and it matches your existing “selected rhythm” concept.
+
+6) A key gotcha: FFT is “global” across the window
+
+Your current oscillator finder sounds like it’s already grappling with stability/consistency. FFT will happily show a peak even if it only existed for part of the window.
+
+So I’d add one of these (lightweight) reliability checks:
+
+Segment consistency: split the window into 3–5 chunks, compute FFT per chunk, and measure how often the same peak shows up (within tolerance). That becomes your “consistency %” for FFT peaks too.
+
+Or a rolling STFT / spectrogram later (cool, but heavier).
+
+Even just “peak present in ≥3/5 segments” will prevent embarrassing peaks.
+
+7) Implementation sketch (matches a JS prototype well)
+
+Pipeline per analysis window:
+
+x = detrended_series (float array)
+
+x = x - mean(x)
+
+w = hann(N); xw = x * w
+
+X = rfft(xw)
+
+P = abs(X)^2
+
+peaks = findPeaks(P, minDistanceBins, threshold)
+
+For each peak bin:
+
+f = binToFreq(bin) (cycles/min if your sampling is 1/min)
+
+A, φ = amplitudePhaseFromFFT(X[bin], windowScale)
+
+reconstruct x_k(t)
+
+compute contrib_k
+
+Sort by contrib_k or P
+
+Render spectrum + components + table
+
+8) UI details that will make it feel “right” in your prototype
+
+Put the panel title as something like:
+“FFT Decomposition (Top Sine Components)”
+
+Add a small legend:
+
+“Input: detrended residual, Hann window, window length: N bars”
+
+Show a compact table next to the spectrum:
+
+Period | Amplitude | Phase | Contribution | Segment Consistency
+
+This table becomes your “trust anchor.”
 

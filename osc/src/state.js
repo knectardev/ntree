@@ -18,7 +18,7 @@
       seed: 1337,
       showDetrend: elements.toggleDetrend ? !!elements.toggleDetrend.checked : true,
       showTurns: elements.toggleTurns ? !!elements.toggleTurns.checked : false,
-      showSineFit: elements.toggleSineFit ? !!elements.toggleSineFit.checked : false,
+      showSineFit: elements.toggleSineFit ? !!elements.toggleSineFit.checked : true,
       gateEnabled: elements.toggleGate ? !!elements.toggleGate.checked : true,
 
       detrendHours: elements.detrendHours ? Number(elements.detrendHours.value) || 2.0 : 2.0,

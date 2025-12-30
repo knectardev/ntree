@@ -15,7 +15,7 @@
     if (!elements || !elements.insightText || !elements.insightLight) return;
     if (!scan || !scan.best || activePeriodMin == null || !resid1m || !resid1m.length){
       elements.insightLight.className = "light bad";
-      elements.insightText.textContent = "No clear repeating rhythm detected. This often happens during strong trends or noisy conditions. Try a longer lookback window or a preset.";
+      elements.insightText.innerHTML = "No clear repeating rhythm detected. This often happens during strong trends or noisy conditions. Try a longer lookback window or a preset.";
       if (elements.insightWhy) elements.insightWhy.textContent = "Why this matters: unstable rhythms often suggest price movement is mostly random at this timescale right now.";
       return;
     }
@@ -46,12 +46,16 @@
 
     const perLbl = OSC.scan.fmtPeriodLabel(activePeriodMin);
     const selTxt = (state.selectedPeriodMin != null) ? "You selected" : "Auto found";
-    const confTxt = good ? "Strong" : (mid ? "Moderate" : "Weak");
+    
+    // Use structural descriptors that align with stability/clarity metrics, not amplitude
+    const stabilityDesc = good ? "highly stable" : (mid ? "moderately stable" : "unstable");
+    const clarityDesc = (sep != null && sep >= 1.35) ? "clearly favored" : (sep != null && sep >= 1.20) ? "somewhat favored" : null;
 
-    // Compute sine fit correlation if we have an active period
+    // Compute sine fit correlation and rhythm coherence if we have an active period
     // Use tail window for consistency with other metrics
     let sineCorr = null;
     let explainedMotion = null;
+    let rhythmCoherence = null;
     if (activePeriodMin != null && resid1m && resid1m.length >= 5) {
       const sineFit = fitSineAtPeriod(resid1m, activePeriodMin, 1);
       if (sineFit && sineFit.fit) {
@@ -59,27 +63,65 @@
         const tailSineFit = sineFit.fit.slice(sineFit.fit.length - tailN);
         sineCorr = pearsonCorrelation(tailResid, tailSineFit);
         explainedMotion = Math.round(Math.max(0, Math.min(100, sineCorr * sineCorr * 100)));
+        
+        // Compute normalized projection power (rhythm coherence)
+        // coherence = ||projection of x onto sine||² / ||x||² = (RMS of fitted sine)² / (RMS of signal)²
+        const rmsSine = rms(tailSineFit);
+        const rmsSignal = rR; // Already computed above
+        const coherenceValue = clamp((rmsSine * rmsSine) / ((rmsSignal * rmsSignal) + 1e-9), 0, 1);
+        rhythmCoherence = coherenceValue;
       }
     }
 
-    const bits = [];
-    bits.push(`${selTxt} a ${confTxt.toLowerCase()} repeating rhythm around ${perLbl}.`);
-    bits.push(`This rhythm explains ~${sharePct}% of the cleaned signal's movement (within the lookback window).`);
-    if (sep != null) bits.push(`Clarity: ${sep.toFixed(2)}×.`);
-    bits.push(`Repeatability: ${coh.toFixed(2)}.`);
-    if (dom != null) bits.push(`Consistency: ${Math.round(dom*100)}%.`);
-    if (pRaw != null) bits.push(`Stronger than ${pRaw}% of random price behavior (score).`);
+    const parts = [];
+    
+    // First paragraph: main description + variance share (together)
+    const amplitudeDesc = sharePct < 5 ? "subtle but persistent oscillation rather than a dominant driver" : 
+                          sharePct < 20 ? "moderate oscillatory component" : "dominant oscillatory pattern";
+    const firstPara = `${selTxt} a ${stabilityDesc} repeating rhythm around ${perLbl}. This rhythm contributes ~${sharePct}% of total cleaned signal movement within the lookback window, indicating a ${amplitudeDesc}.`;
+    parts.push(firstPara);
+    
+    // Metrics section - each on its own line
+    const metrics = [];
+    if (sep != null) {
+      const clarityNote = clarityDesc ? ` (${clarityDesc} over nearby alternatives)` : "";
+      metrics.push(`<strong>Clarity:</strong> ${sep.toFixed(2)}×${clarityNote}`);
+    }
+    metrics.push(`<strong>Repeatability:</strong> ${coh.toFixed(2)}`);
+    if (dom != null) {
+      const consistencyNote = dom >= 0.9 ? " (same rhythm across all recent windows)" : "";
+      metrics.push(`<strong>Consistency:</strong> ${Math.round(dom*100)}%${consistencyNote}`);
+    }
+    if (pRaw != null) {
+      metrics.push(`<strong>Noise baseline:</strong> stronger than ${pRaw}% of random price behavior`);
+    }
+    
+    if (metrics.length > 0) {
+      parts.push(metrics.join("<br>"));
+    }
+    
+    // Sine fit quality section
     if (sineCorr != null) {
-      bits.push(`Pearson Sine fit correlation: r = ${sineCorr.toFixed(2)}.`);
-      bits.push(`Explained motion: ${explainedMotion}% of cleaned signal.`);
+      const sineFitParts = [];
+      sineFitParts.push(`<strong>Sine fit quality:</strong> Pearson correlation r = ${sineCorr.toFixed(2)}.`);
+      if (explainedMotion != null && rhythmCoherence != null) {
+        const coherencePct = Math.round(rhythmCoherence * 100);
+        const coherenceDesc = rhythmCoherence < 0.15 ? "low" : rhythmCoherence < 0.35 ? "moderate" : "high";
+        sineFitParts.push(`Within the oscillatory portion of the signal, the sine explains ~${explainedMotion}% of that motion, but overall coherence is ${coherenceDesc} (${coherencePct}%).`);
+      }
+      parts.push(sineFitParts.join(" "));
+    } else if (rhythmCoherence != null) {
+      const coherencePct = Math.round(rhythmCoherence * 100);
+      parts.push(`<strong>Rhythm coherence:</strong> ${rhythmCoherence.toFixed(2)} (${coherencePct}% of cleaned motion).`);
     }
 
-    elements.insightText.textContent = bits.join(" ");
+    // Join with double line breaks for paragraph separation
+    elements.insightText.innerHTML = parts.join("<br><br>");
     if (elements.insightWhy){
       elements.insightWhy.textContent = (level === "good")
-        ? "Why this matters: stable rhythms often come with more back-and-forth at this timescale (less one-way randomness)."
+        ? "Why this matters: stable rhythms often indicate gentle back-and-forth behavior at this timescale, even when overall price movement is dominated by trends or noise."
         : (level === "mid")
-          ? "Why this matters: a weak rhythm may appear, but it can fade quickly in trends/noise—treat it as tentative."
+          ? "Why this matters: a moderately stable rhythm may appear, but it can fade quickly in trends/noise—treat it as tentative."
           : "Why this matters: unstable rhythms often suggest price movement is mostly random at this timescale right now.";
     }
   }

@@ -1,45 +1,22 @@
+The core problem (in one sentence)
 
+You are using one word (“strength”) to summarize only one axis of a multi-axis regime, while the rest of the UI is correctly multi-dimensional.
 
-Part 2, which will be even better (for oscillations): normalized projection power
+Recommended fix (minimal, surgical)
+Option A — rename the label (best fix)
 
-This is more “signal-processing correct” and less noise-sensitive:
+Change:
 
-coherence = ||projection of x onto sine||² / ||x||²
+🔴 Rhythm strength: LOW
 
+To one of:
 
-(We already halfway doing this in spirit with your energy / dominance scores.
-Energy (and the per-period scan “score”). This happens inside:
-computeOscillationScanOnResidual(resid1m, scanWindowMinutes, periods) 
-Dominance (your stability panel + gate’s “dominance >= …” idea)
-This happens inside:
-computePeriodStability(resid1m, scanWindowMinutes, periods, K=12, stepMinutes=60) 
-)
+🟡 Amplitude contribution: LOW
 
+🟡 Variance explained: LOW
 
-Properties:
+🟡 Oscillation intensity: LOW
 
-Range: 0 → 1
+🟡 Impact on price movement: LOW
 
-Interpretable as “% of variance explained by this rhythm”
-
-Phase-agnostic if you include both sine + cosine components
-
-UI label:
-
-Rhythm coherence: 0.41 (41% of cleaned motion)
-
-This pairs beautifully with your Insight Summary.
-
-Bonus metric (optional, but very powerful)
-
-Explained variance (R²-like)
-
-After fitting sine:
-
-R² = 1 − Var(residual) / Var(signal)
-
-Add these lines to the Insight Summary:
-
-
-Normalized projection power: 
-Rhythm coherence: 0.41 (41% of cleaned motion) 
+Any of these immediately resolves the tension.
