@@ -1,0 +1,136 @@
+1) Split by “concerns” into separate files (best ROI)
+
+Keep index.html minimal and move everything else out:
+
+index.html – layout + <div>/canvas> skeleton + imports
+
+styles.css – all CSS
+
+src/state.js – state object + applyFromUI + serialization
+
+src/synth.js – mulberry32 + genSeries + resample/flatten
+
+src/detrend.js – detrendRollingLinear + SMA + slope sigma helpers
+
+src/scan.js – EMA/bandpass + scan scoring + stability metrics
+
+src/baseline.js – noise baseline runner + caching + cancellation
+
+src/render/price.js – renderPrice
+
+src/render/analysis.js – renderAnalysis (cleaned signal + rhythm)
+
+src/render/scanPanel.js – renderScanPanel + bar hitboxes
+
+src/ui/dials.js – dial widget code
+
+src/ui/tooltips.js – tooltip system + strings
+
+src/main.js – wires DOM events + calls regen/render
+
+This lets the agent open only the file relevant to the change.
+
+2) Add a “module boundary contract” comment block at the top of each file
+
+LLMs do better when they know what not to touch. Example header:
+
+/**
+ * scan.js
+ * Exports:
+ *  - buildCandidatePeriods(...)
+ *  - computeOscillationScanOnResidual(...)
+ *  - computePeriodStability(...)
+ * No DOM access here. Pure functions only.
+ */
+
+3) Keep rendering pure(ish): render functions take inputs, return outputs
+
+Instead of render functions reaching into state and DOM everywhere, make:
+
+computeModel(state, data) -> model
+
+render(model)
+
+Even partial separation helps. LLMs can edit the compute model without worrying about DOM wiring.
+
+4) Centralize “magic numbers” into one config file
+
+Create src/config.js:
+
+MINUTES_PER_DAY
+
+default scan ranges
+
+max candidate count
+
+baseline runs chunk size
+
+gate defaults
+
+Agents waste tokens chasing constants scattered across the file.
+
+5) Extract UI text into copy.js
+
+All tooltip strings + labels in one place:
+
+easier for non-technical UI revisions
+
+reduces risk of breaking logic while changing text
+
+6) Add a tiny build step (optional, but worth it)
+
+If you can tolerate a simple dev tool:
+
+Vite or esbuild
+
+ES modules
+
+npm run dev
+
+Then you can import cleanly and still ship a single static build if you want (dist/).
+
+If you don’t want tooling: you can still split files and include them with script tags in order:
+
+<script src="src/config.js"></script>
+<script src="src/synth.js"></script>
+...
+<script src="src/main.js"></script>
+
+7) Create “LLM-friendly landmarks” in code
+
+Even if you keep one file, add strong section anchors:
+
+// ===========================
+// SCAN ENGINE (pure functions)
+// ===========================
+
+
+Then instruct the agent: “Only edit within SCAN ENGINE section.”
+
+8) Add a small DEV_NOTES.md with navigation + invariants
+
+This is huge for LLM agents. Include:
+
+file map (“where is scan logic?”)
+
+invariants (“analysis always computed on 1m closes”)
+
+debugging tips (“candle TF is display only”)
+
+how baseline keys are computed
+
+Agents can read the notes first and stop re-deriving intent.
+
+9) Add a “minimal reproduction harness”
+
+For heavy compute changes, create src/test_harness.js that runs the scan on a fixed seed and logs:
+
+best period
+
+bestRatio
+
+dominance/flip
+
+baseline percentile
+
+Then LLM edits can be validated without wading through canvas drawing.

@@ -1,0 +1,2645 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Detrend + Oscillation Scan (Continuous Series Demo)</title>
+  <style>
+    :root{
+      --bg:#0b0e13;
+      --panel:#0f1420;
+      --fg:#e8eefc;
+      --muted:rgba(232,238,252,0.62);
+      --grid:rgba(232,238,252,0.08);
+      --accent:#ff2fb3;
+      --accent2:#7ae3ff;
+      --warn:#ffd166;
+      --good:#40f99b;
+      --bad:#ff5c77;
+      --ghost:rgba(232,238,252,0.12);
+      --shadow:0 10px 35px rgba(0,0,0,0.55);
+    }
+    *{box-sizing:border-box;}
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      background: radial-gradient(1400px 800px at 18% 12%, rgba(255,47,179,0.12), transparent 55%),
+                  radial-gradient(900px 600px at 80% 22%, rgba(122,227,255,0.10), transparent 55%),
+                  var(--bg);
+      color:var(--fg);
+      overflow-x:hidden;
+    }
+    header{
+      padding:18px 18px 10px;
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-end;
+      gap:12px;
+    }
+    header h1{
+      margin:0;
+      font-size:16px;
+      font-weight:800;
+      letter-spacing:0.2px;
+    }
+    header .sub{
+      color:var(--muted);
+      font-size:12px;
+      margin-top:6px;
+    }
+    .wrap{
+      display:grid;
+      /* Make the controls column wide enough for the two 220px dials without creating an inner horizontal scrollbar.
+         Do this by using the full viewport width and keeping the left edge flush to the browser edge. */
+      grid-template-columns: 520px 1fr;
+      gap:12px;
+      padding:10px 12px 18px 0;
+      max-width:none;
+      margin:0;
+    }
+    .panel{
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent 40%), var(--panel);
+      border:1px solid rgba(255,255,255,0.06);
+      border-radius:16px;
+      box-shadow:var(--shadow);
+    }
+    .controls{
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      position:sticky;
+      top:10px;
+      height: calc(100vh - 28px);
+      overflow:auto;
+    }
+    .row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+    label{font-size:12px; color:var(--muted);}
+    select, button, input[type="number"]{
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(255,255,255,0.10);
+      color:var(--fg);
+      padding:8px 10px;
+      border-radius:12px;
+      font-size:12px;
+      outline:none;
+    }
+    /* Native <select> dropdown list fix (Windows/Chrome can show white popup with inherited light text). */
+    select{ color-scheme:dark; }
+    select option,
+    select optgroup{
+      background-color: var(--panel);
+      color: var(--fg);
+    }
+    select option:disabled{ color: rgba(232,238,252,0.45); }
+    button{cursor:pointer; font-weight:700;}
+    button:hover{border-color:rgba(255,255,255,0.20);}
+    .chk{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);}
+    .chk input{transform:translateY(1px);}
+    .pill{
+      padding:6px 10px;
+      border-radius:999px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(255,255,255,0.08);
+      font-size:12px;
+      color:var(--muted);
+    }
+
+    /* --- usability helpers --- */
+    .insightBox{
+      padding:10px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,0.08);
+      background:rgba(255,255,255,0.02);
+    }
+    .light{
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      display:inline-block;
+      border:1px solid rgba(255,255,255,0.18);
+      box-shadow:0 0 0 3px rgba(0,0,0,0.18) inset;
+    }
+    .light.good{ background:rgba(64,249,155,0.95); }
+    .light.mid{ background:rgba(255,209,102,0.95); }
+    .light.bad{ background:rgba(255,92,119,0.95); }
+    .hoverTip{
+      position:fixed;
+      z-index:2000;
+      pointer-events:none;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.10);
+      background:rgba(10,12,18,0.98);
+      color:rgba(232,238,252,0.88);
+      font-size:11px;
+      line-height:1.35;
+      box-shadow:0 10px 30px rgba(0,0,0,0.55);
+      opacity:0;
+      transform:translateY(2px);
+      transition:opacity 80ms ease, transform 80ms ease;
+      max-width:320px;
+      white-space:normal;
+    }
+    .hoverTip.on{ opacity:1; transform:translateY(0); }
+
+    details.insightBox > summary{
+      cursor:pointer;
+      user-select:none;
+      font-weight:800;
+      color:rgba(232,238,252,0.88);
+      list-style:none;
+    }
+    details.insightBox > summary::-webkit-details-marker{ display:none; }
+    details.insightBox > summary::before{
+      content:"▸";
+      display:inline-block;
+      margin-right:8px;
+      color:rgba(232,238,252,0.55);
+      transform:translateY(-1px);
+    }
+    details.insightBox[open] > summary::before{ content:"▾"; }
+
+    .gateVerdict{
+      display:flex;
+      align-items:flex-start;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.08);
+      background:rgba(255,255,255,0.02);
+      margin:8px 0 10px;
+    }
+    .gateVerdict .title{ font-weight:800; font-size:12px; }
+    .gateVerdict .reason{ font-size:11px; color:var(--muted); margin-top:2px; line-height:1.25; }
+    .gateChecks{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:6px;
+      margin-top:8px;
+      font-size:11px;
+      color:var(--muted);
+    }
+    .gateCheck{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:6px 8px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,0.06);
+      background:rgba(0,0,0,0.10);
+    }
+    .gateCheck .k{ color:rgba(232,238,252,0.75); }
+    .gateCheck.pass{ border-color: rgba(64,249,155,0.22); }
+    .gateCheck.warn{ border-color: rgba(255,209,102,0.22); }
+    .gateCheck.fail{ border-color: rgba(255,92,119,0.22); }
+    .gateCheck.off{ border-color: rgba(232,238,252,0.10); opacity:0.85; }
+
+    .grid2{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:10px;
+    }
+
+    .main{
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      min-height: calc(100vh - 40px);
+    }
+
+    .canvasRow{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:10px;
+    }
+
+    canvas{width:100%; height:100%;}
+
+    .chart{
+      padding:10px;
+      border-radius:14px;
+      background:rgba(0,0,0,0.18);
+      border:1px solid rgba(255,255,255,0.06);
+      position:relative;
+      overflow:hidden;
+    }
+
+    .chartTitle{
+      position:absolute;
+      top:10px; left:12px;
+      font-size:12px;
+      color:var(--muted);
+      display:flex; align-items:center; gap:10px;
+      z-index:2;
+      user-select:none;
+    }
+
+    .legendDot{width:10px; height:10px; border-radius:999px; display:inline-block;}
+
+    .status{
+      font-size:12px;
+      color:var(--muted);
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    .tiny{
+      font-size:11px;
+      color:var(--muted);
+      line-height:1.3;
+    }
+
+    .dialRow{display:grid; grid-template-columns: 1fr 1fr; gap:10px;}
+    .dialCol{
+      padding:10px;
+      border:1px solid rgba(255,255,255,0.06);
+      border-radius:14px;
+      background:rgba(255,255,255,0.02);
+    }
+    /* Dial visuals: match the knob-like look/feel from oscillator_signal_gate_fixed.html */
+    .dialWrap{
+      width:100%;
+      aspect-ratio:1/1;
+      border-radius:999px;
+      background:radial-gradient(140px 140px at 35% 30%, rgba(255,255,255,0.08) 0%, rgba(0,0,0,0.10) 55%, rgba(0,0,0,0.18) 100%);
+      border:1px solid rgba(255,255,255,0.08);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+    }
+    .dialCanvas{width:100%; height:100%; display:block;}
+    .dialValue{font-weight:800; color:var(--fg);}
+    .dialHelp{font-size:11px; color:var(--muted); margin-top:6px;}
+    .hiddenInput{display:none;}
+
+    .badge{
+      padding:4px 8px;
+      border-radius:999px;
+      font-size:11px;
+      border:1px solid rgba(255,255,255,0.10);
+      color:var(--muted);
+      background:rgba(255,255,255,0.03);
+    }
+
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}
+
+    /* --- tooltips --- */
+    .tip{
+      position:relative;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:16px;
+      height:16px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(255,255,255,0.04);
+      color:rgba(232,238,252,0.72);
+      font-size:11px;
+      line-height:1;
+      margin-left:6px;
+      cursor:help;
+      user-select:none;
+    }
+    .tip::after{
+      content:attr(data-tip);
+      position:absolute;
+      left:50%;
+      bottom:calc(100% + 10px);
+      transform:translateX(-50%);
+      min-width:220px;
+      max-width:320px;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.10);
+      background:rgba(10,12,18,0.98);
+      color:rgba(232,238,252,0.88);
+      font-size:11px;
+      line-height:1.35;
+      box-shadow:0 10px 30px rgba(0,0,0,0.55);
+      opacity:0;
+      pointer-events:none;
+      transition:opacity 120ms ease;
+      z-index:999;
+      white-space:normal;
+    }
+    .tip:hover::after{ opacity:1; }
+
+    @media (max-width: 980px){
+      .wrap{grid-template-columns:1fr;}
+      .controls{position:relative; height:auto;}
+    }
+  </style>
+</head>
+<body>
+  <div class="hoverTip" id="hoverTip"></div>
+  <header>
+    <div>
+      <h1>Detrend + Oscillation Scan (continuous demo)</h1>
+      <div class="sub">Synthetic series • detrend (rolling linear) • scan candidate periods • stability & signal gate</div>
+    </div>
+    <div class="status" id="status"></div>
+  </header>
+
+  <div class="wrap">
+    <aside class="panel">
+      <div class="controls">
+        <div class="row">
+          <div style="font-weight:800;">Continuous detrend + oscillation scan</div>
+        </div>
+
+        <details class="insightBox" open style="margin-top:10px;">
+          <summary>ⓘ About this tool</summary>
+          <div class="tiny" style="margin-top:8px;">
+            <div style="font-weight:700;color:rgba(232,238,252,0.82);">What this tool does</div>
+            <div style="margin-top:4px;">Identifies when price behaves like a repeating rhythm at a specific timescale.</div>
+            <div style="margin-top:8px;font-weight:700;color:rgba(232,238,252,0.82);">What it does <span style="text-decoration:underline;">not</span> do</div>
+            <div style="margin-top:4px;">Does not predict direction, timing, or profitability.</div>
+            <div style="margin-top:8px;">Being explicit about limits helps prevent misuse and builds trust.</div>
+          </div>
+        </details>
+
+        <div class="row">
+          <label for="ticker">Ticker</label>
+          <select id="ticker">
+            <option>QQQ</option>
+            <option>AAPL</option>
+            <option>SPY</option>
+            <option>TSLA</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="days">Trading days</label>
+          <select id="days">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
+            <option value="20">20</option>
+          </select>
+
+          <label for="tf" style="margin-left:10px;">Chart candle (minutes)</label>
+          <select id="tf">
+            <option value="1">1</option>
+            <option value="5" selected>5</option>
+            <option value="15">15</option>
+            <option value="30">30</option>
+          </select>
+
+          <button id="regen">Regenerate random data</button>
+        </div>
+
+        <div class="dialRow">
+          <div class="dialCol">
+            <label>
+              Smoothing strength <span class="dialValue" id="detrendLabel">2.0h</span>
+              <span class="tip" data-tip="Controls how much slow drift we remove before searching for repeating rhythms. Bigger = removes slower background movement, leaving a cleaner wiggle to scan.">i</span>
+            </label>
+            <div class="dialWrap">
+              <canvas class="dialCanvas" id="detrendDial" width="220" height="220"></canvas>
+            </div>
+            <input id="detrendHours" class="hiddenInput" type="number" min="0.25" step="0.25" value="2.0" />
+            <div class="dialHelp">How aggressively we ignore slow drift before scanning for rhythms.</div>
+          </div>
+
+          <div class="dialCol">
+            <label>Lookback window <span class="dialValue" id="scanLabel">780m</span></label>
+            <div class="dialWrap">
+              <canvas class="dialCanvas" id="scanDial" width="220" height="220"></canvas>
+            </div>
+            <input id="scanWindow" class="hiddenInput" type="number" min="120" step="30" value="780" />
+            <div class="dialHelp">How far back we look to score which rhythm repeats best.</div>
+          </div>
+        </div>
+
+        <details class="insightBox" style="margin-top:10px;">
+          <summary>Advanced settings</summary>
+          <div class="row" style="margin-top:10px;">
+            <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;width:100%;">
+              <div style="flex:1 1 260px;min-width:240px;">
+                <div style="font-weight:700;margin-bottom:4px;">
+                  Rhythm search
+                  <span class="tip" data-tip="We test many candidate repeat times P (minutes). Each bar's score uses: energy × coherence(P). Coherence ≈ how repeatable the pattern is at that lag.">i</span>
+                </div>
+                <div style="color:var(--muted);font-size:11px;line-height:1.25;">
+                  Controls which repeat times are tested by the Pattern Finder (minutes). Linear step or log spacing.
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);">
+                  Min
+                  <input id="scanMinPeriod" type="number" min="1" step="1" value="1"
+                    style="width:84px;padding:6px 8px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--fg);" />
+                </label>
+
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);">
+                  Max
+                  <input id="scanMaxPeriod" type="number" min="1" step="1" value="200"
+                    style="width:84px;padding:6px 8px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--fg);" />
+                </label>
+
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);">
+                  <span id="scanStepLabel">Step</span>
+                  <input id="scanStepPeriod" type="number" min="1" step="1" value="15"
+                    style="width:84px;padding:6px 8px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--fg);" />
+                </label>
+
+                <label class="chk" style="margin-top:18px;">
+                  <input id="scanLogSpacing" type="checkbox" checked />
+                  <span>Log spacing</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:10px;">
+            <div style="width:100%;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div style="font-weight:700;">Noise baseline</div>
+                <span class="tip" data-tip="Calibrates scan metrics against pure random-walk noise using the same settings (detrend window, scan window, candidate periods). Shows percentile vs noise so thresholds are grounded.">i</span>
+              </div>
+              <div class="row" style="margin-top:8px;">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                  Runs
+                  <input id="baselineRuns" type="number" min="20" step="10" value="200" style="width:92px;" />
+                </label>
+                <button id="baselineRunBtn">Build baseline</button>
+                <button id="baselineClearBtn">Clear</button>
+                <span class="pill" id="baselineStatus" style="margin-left:auto;">Baseline: none</span>
+              </div>
+              <div class="tiny" id="baselineSummary" style="margin-top:6px;"></div>
+            </div>
+          </div>
+        </details>
+
+        <details class="insightBox" style="margin-top:10px;">
+          <summary>
+            Search presets
+            <span class="tip" data-tip="Quick starting points for common rhythm searches. You can tweak any setting afterwards.">i</span>
+          </summary>
+          <div class="row" style="margin-top:10px;gap:8px;">
+            <button id="presetDaily">Daily patterns</button>
+            <button id="presetShort">Short-term jitters</button>
+            <button id="presetLong">Long-term trends</button>
+          </div>
+        </details>
+
+        <div class="row" style="margin-top:10px;">
+          <div style="width:100%;" class="insightBox">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="light bad" id="insightLight"></span>
+              <div style="font-weight:800;">Insight summary</div>
+              <span class="tip" data-tip="Plain-English summary of the current best rhythm and how confident the detection is.">i</span>
+            </div>
+            <div class="tiny" id="insightText" style="margin-top:8px;"></div>
+            <div class="tiny" id="insightWhy" style="margin-top:6px;"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%;">
+            <span class="pill">
+              Displayed rhythm (scan still tests all): <b id="selPeriod">Auto</b>
+              <span class="tip" data-tip="Clicking a rhythm only changes what is visualized (the wave + turning points). The Pattern Finder always tests all candidates.">i</span>
+            </span>
+            <span style="color:var(--muted);font-size:11px;">Hover or click a bar in the Pattern Finder to analyze that rhythm. Right-click to clear selection.</span>
+          </div>
+        </div>
+
+
+        <div class="row" style="margin-top:10px;">
+          <label class="chk"><input id="toggleGate" type="checkbox" checked /> <span>Filter weak signals</span></label>
+          <div class="gate" style="margin-top:8px;padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">
+            <div style="color:var(--muted);font-size:11px;margin-bottom:6px;">Gate marks which turning points are “eligible” vs suppressed.</div>
+
+            <div class="gateVerdict" id="gateVerdict">
+              <span class="light bad" id="gateVerdictLight"></span>
+              <div>
+                <div class="title" id="gateVerdictTitle">🔴 No reliable rhythm detected</div>
+                <div class="reason" id="gateVerdictReason">Reason: —</div>
+              </div>
+            </div>
+
+            <div class="gateChecks" id="gateChecks"></div>
+
+            <details class="insightBox" style="margin-top:10px;">
+              <summary>Advanced gate thresholds</summary>
+
+            <div style="font-size:12px;color:var(--muted);margin:6px 0 4px;">
+              Stability
+              <span class="tip" data-tip="Stability summarizes whether the scan picks the same dominant period across recent windows. Dominance=how often the same period wins. Separation=best score ÷ second-best score (how distinct the winner is).">i</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                Dominance ≥ <span class="tip" data-tip="Dominance is the fraction of recent windows where the same period is best. Higher = more repeatable regime.">i</span>
+                <input id="gateDom" type="number" min="0" max="1" step="0.05" value="0.60" />
+              </label>
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                Separation ≥ <span class="tip" data-tip="Separation is bestScore ÷ secondBestScore (median over windows). Higher = a clearer winner; low separation means many periods fit similarly (usually noisy/ambiguous).">i</span>
+                <input id="gateSep" type="number" min="1" step="0.05" value="1.25" />
+              </label>
+            </div>
+
+            <div style="font-size:12px;color:var(--muted);margin:10px 0 4px;">Regime</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                |Slope| ≤ σ/hr
+                <input id="gateSlope" type="number" min="0" step="0.1" value="0.9" />
+              </label>
+              <label class="chk" style="margin-top:18px;"><input id="gateRequireRange" type="checkbox" checked /> <span>Require ranging</span></label>
+            </div>
+
+            <div style="font-size:12px;color:var(--muted);margin:10px 0 4px;">Volatility</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);">
+                Noise mult ≤
+                <input id="gateVol" type="number" min="0" step="0.05" value="1.30" />
+              </label>
+              <label class="chk" style="margin-top:18px;"><input id="gateSuppressHighVol" type="checkbox" checked /> <span>Suppress high noise</span></label>
+            </div>
+
+            </details>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <label class="chk"><input id="toggleDetrend" type="checkbox" checked /> <span>Show detrended overlay</span></label>
+          <label class="chk" style="margin-left:18px;"><input id="toggleTurns" type="checkbox" /> <span>Show cycle turning points</span></label>
+        </div>
+
+        <div class="tiny">
+          <div class="badge">Note</div>
+          <div style="margin-top:6px;">Analysis math is always computed from 1‑minute closes. The “Chart candle” control is display-only.</div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="panel">
+      <div class="main">
+        <div class="canvasRow">
+          <div class="chart" style="height:340px;">
+          <div class="chartTitle">
+              <span class="legendDot" style="background:var(--accent2);"></span>
+            <span>Original data & slow trends</span>
+            </div>
+            <canvas id="price"></canvas>
+          </div>
+
+          <div class="chart" style="height:320px;">
+          <div class="chartTitle">
+              <span class="legendDot" style="background:var(--warn);"></span>
+            <span>Cleaned signal + selected rhythm</span>
+            </div>
+            <canvas id="analysis"></canvas>
+          </div>
+
+          <details class="insightBox" id="pfDetails">
+            <summary style="display:flex;align-items:center;gap:10px;">
+              <span class="legendDot" style="background:var(--accent);"></span>
+              <span>Pattern Finder</span>
+            </summary>
+
+            <div class="chart" style="height:220px; margin-top:10px;" id="scanPanel">
+              <canvas id="scan"></canvas>
+            </div>
+          </details>
+
+          <div class="chart" style="height:140px; margin-top:10px;" id="consistencyPanel">
+            <div class="chartTitle">
+              <span class="legendDot" style="background:var(--accent);"></span>
+              <span>Consistency</span>
+            </div>
+            <canvas id="consistency"></canvas>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+<script>
+(() => {
+  // -------- Helpers --------
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+  const clamp01 = (x)=>Math.max(0, Math.min(1, x));
+
+  function getCSS(varName){
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  }
+
+  function colorWithAlpha(color, alpha){
+    const a = Math.max(0, Math.min(1, Number(alpha)));
+    const s = String(color || "").trim();
+    if (!s) return `rgba(255,255,255,${a})`;
+
+    // rgb()/rgba()
+    const m = s.match(/^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+))?\s*\)$/i);
+    if (m){
+      const r = Math.round(Number(m[1]));
+      const g = Math.round(Number(m[2]));
+      const b = Math.round(Number(m[3]));
+      return `rgba(${r},${g},${b},${a})`;
+    }
+
+    // #rgb or #rrggbb
+    if (s[0] === "#"){
+      const hex = s.slice(1);
+      if (hex.length === 3){
+        const r = parseInt(hex[0] + hex[0], 16);
+        const g = parseInt(hex[1] + hex[1], 16);
+        const b = parseInt(hex[2] + hex[2], 16);
+        return `rgba(${r},${g},${b},${a})`;
+      }
+      if (hex.length === 6){
+        const r = parseInt(hex.slice(0,2), 16);
+        const g = parseInt(hex.slice(2,4), 16);
+        const b = parseInt(hex.slice(4,6), 16);
+        return `rgba(${r},${g},${b},${a})`;
+      }
+    }
+
+    // Fallback: unknown format; return as-is (alpha can't be applied reliably).
+    return s;
+  }
+
+  function setupHiDPICanvas(canvas){
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    return ctx;
+  }
+
+  function drawText(ctx, text, x, y, opts={}){
+    ctx.save();
+    ctx.font = opts.font || "12px system-ui";
+    ctx.fillStyle = opts.color || getCSS("--fg");
+    ctx.textBaseline = opts.baseline || "top";
+    ctx.textAlign = opts.align || "left";
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  function truncateTextToWidth(ctx, text, maxW){
+    const s = String(text || "");
+    if (maxW <= 0) return "";
+    if (ctx.measureText(s).width <= maxW) return s;
+    const ell = "…";
+    let lo = 0, hi = s.length;
+    while (lo < hi){
+      const mid = ((lo + hi + 1) >> 1);
+      const t = s.slice(0, mid) + ell;
+      if (ctx.measureText(t).width <= maxW) lo = mid;
+      else hi = mid - 1;
+    }
+    return s.slice(0, lo) + ell;
+  }
+
+  // -------- Dial control (ported from oscillator_signal_gate_fixed.html) --------
+  // Renders a circular "hardware knob" dial on a canvas and wires pointer + wheel interactions.
+  function createDial(opts){
+    const canvas = opts.canvas;
+    const min = Number(opts.min);
+    const max = Number(opts.max);
+    const step = Number(opts.step || 1);
+    const format = opts.format || (v => String(v));
+    const onChange = opts.onChange || (()=>{});
+    const colorVar = opts.colorVar || "--accent";
+
+    // 270° sweep centered at bottom (like many audio knobs)
+    const START = (-225) * Math.PI/180; // radians
+    const END   = (  45) * Math.PI/180; // radians
+    const SWEEP = END - START;
+
+    const ctx = canvas.getContext("2d");
+
+    function snap(v){
+      const s = step > 0 ? step : 1;
+      return Math.round(v / s) * s;
+    }
+
+    function valueToAngle(v){
+      const t = (clamp(v, min, max) - min) / (max - min || 1);
+      return START + t * SWEEP;
+    }
+
+    function angleToValue(a){
+      // `Math.atan2` returns [-π..π], but our sweep START is -225° (equivalent to +135°).
+      // Normalize the pointer angle into the same continuous range as the sweep so we don't
+      // "jump to max" when the pointer angle crosses the +π/-π boundary.
+      const TWO_PI = Math.PI * 2;
+      let aa = a;
+      while (aa > END) aa -= TWO_PI;
+      while (aa < START) aa += TWO_PI;
+
+      let t = (aa - START) / (SWEEP || 1);
+      t = clamp01(t);
+      const v = min + t * (max - min);
+      return snap(v);
+    }
+
+    function draw(v){
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const size = Math.max(1, Math.floor(rect.width * dpr));
+      if (canvas.width !== size || canvas.height !== size){
+        canvas.width = size;
+        canvas.height = size;
+      }
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.scale(dpr, dpr);
+
+      const w = rect.width;
+      const h = rect.height;
+      const cx = w/2, cy = h/2;
+      const r = Math.min(w,h)*0.42;
+
+      ctx.clearRect(0,0,w,h);
+
+      // base ring
+      ctx.save();
+      ctx.lineWidth = Math.max(10, r*0.14);
+      ctx.lineCap = "round";
+      ctx.strokeStyle = "rgba(255,255,255,0.10)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, START, END, false);
+      ctx.stroke();
+
+      // value ring
+      const a = valueToAngle(v);
+      ctx.strokeStyle = getCSS(colorVar);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, START, a, false);
+      ctx.stroke();
+
+      // tick dots (subtle)
+      const ticks = 9;
+      ctx.fillStyle = "rgba(255,255,255,0.10)";
+      for (let i=0; i<=ticks; i++){
+        const tt = i / ticks;
+        const ang = START + tt*SWEEP;
+        const tx = cx + Math.cos(ang) * (r + ctx.lineWidth*0.25);
+        const ty = cy + Math.sin(ang) * (r + ctx.lineWidth*0.25);
+        ctx.beginPath();
+        ctx.arc(tx, ty, 1.5, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // knob center
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r*0.78, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // pointer
+      ctx.strokeStyle = getCSS(colorVar);
+      ctx.lineWidth = 3;
+      const px = cx + Math.cos(a) * (r*0.90);
+      const py = cy + Math.sin(a) * (r*0.90);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+
+      // value text
+      ctx.fillStyle = getCSS("--fg");
+      ctx.font = "800 18px system-ui";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(format(v), cx, cy + r*0.55);
+
+      ctx.restore();
+    }
+
+    let value = snap(clamp(Number(opts.value), min, max));
+
+    function setValue(v, fire=true){
+      const nv = snap(clamp(Number(v), min, max));
+      if (nv === value) return;
+      value = nv;
+      draw(value);
+      if (fire) onChange(value);
+    }
+
+    function pointerToAngle(ev){
+      const rect = canvas.getBoundingClientRect();
+      const x = (ev.clientX - rect.left) - rect.width/2;
+      const y = (ev.clientY - rect.top)  - rect.height/2;
+      return Math.atan2(y, x);
+    }
+
+    let dragging = false;
+
+    function onPointerDown(ev){
+      dragging = true;
+      canvas.setPointerCapture(ev.pointerId);
+      setValue(angleToValue(pointerToAngle(ev)), true);
+    }
+
+    function onPointerMove(ev){
+      if (!dragging) return;
+      setValue(angleToValue(pointerToAngle(ev)), true);
+    }
+
+    function onPointerUp(ev){
+      dragging = false;
+      try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
+    }
+
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+
+    // scroll wheel nudge
+    canvas.addEventListener("wheel", (ev) => {
+      ev.preventDefault();
+      const dir = ev.deltaY > 0 ? -1 : 1;
+      setValue(value + dir*step, true);
+    }, {passive:false});
+
+    // initial draw
+    draw(value);
+
+    return {
+      get value(){ return value; },
+      setValue,
+      redraw(){ draw(value); }
+    };
+  }
+
+  // -------- Synthetic data generation (RTH only) --------
+  const MINUTES_PER_DAY = 390; // 9:30-16:00
+
+  function mulberry32(seed){
+    let t = seed >>> 0;
+    return function(){
+      t += 0x6D2B79F5;
+      let x = Math.imul(t ^ (t >>> 15), 1 | t);
+      x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    }
+  }
+
+  function genDayCandles1m(seed, startPrice=100){
+    const rnd = mulberry32(seed);
+    let p = startPrice;
+    const out = [];
+    for(let i=0;i<MINUTES_PER_DAY;i++){
+      const dir = rnd() < 0.5 ? -1 : 1;
+      const step = (0.04 + rnd()*0.12) * dir; // small random walk
+      const o = p;
+      const c = p + step;
+      const hi = Math.max(o,c) + rnd()*0.10;
+      const lo = Math.min(o,c) - rnd()*0.10;
+      out.push({o,h:hi,l:lo,c});
+      p = c;
+    }
+    return {candles: out, endPrice: p};
+  }
+
+  function genSeries(days, seed){
+    const daysArr = [];
+    let p = 100;
+    for(let d=0; d<days; d++){
+      const day = genDayCandles1m(seed + d*97, p);
+      daysArr.push(day.candles);
+      p = day.endPrice;
+    }
+    return daysArr;
+  }
+
+  function resampleCandles(dayCandles1m, tfMin){
+    if (tfMin <= 1) return dayCandles1m.map(c=>({...c}));
+    const out = [];
+    for(let i=0;i<dayCandles1m.length;i+=tfMin){
+      const chunk = dayCandles1m.slice(i, i+tfMin);
+      if (!chunk.length) continue;
+      const o = chunk[0].o;
+      const c = chunk[chunk.length-1].c;
+      let h = -Infinity, l = Infinity;
+      for (const k of chunk){ h = Math.max(h, k.h); l = Math.min(l, k.l); }
+      out.push({o,h,l,c});
+    }
+    return out;
+  }
+
+  function flattenDays(daysTf){
+    const flat = [];
+    const dayStartIdx = [];
+    let idx = 0;
+    for (let d=0; d<daysTf.length; d++){
+      dayStartIdx.push(idx);
+      for (const c of daysTf[d]){ flat.push(c); idx++; }
+    }
+    return {flat, dayStartIdx};
+  }
+
+  // -------- Detrending --------
+  function detrendRollingLinear(closes, win){
+    const N = closes.length;
+    const w = clamp(Math.floor(win), 5, N);
+    const out = new Array(N).fill(0);
+
+    for (let i=0; i<N; i++){
+      const start = clamp(i - w + 1, 0, N-1);
+      const end = i;
+      const nn = end - start + 1;
+
+      const sX = (nn-1)*nn/2;
+      const sX2 = (nn-1)*nn*(2*nn-1)/6;
+
+      let sY = 0, sXY = 0;
+      for (let j=0; j<nn; j++){
+        const y = closes[start + j];
+        sY += y;
+        sXY += j * y;
+      }
+
+      const denom = (nn * sX2 - sX*sX) || 1e-9;
+      const a = (nn*sXY - sX*sY) / denom;
+      const b = (sY - a*sX) / nn;
+      const yhat = a*(nn-1) + b;
+      out[i] = closes[i] - yhat;
+    }
+    return out;
+  }
+
+  function smaRolling(closes, win){
+    const N = closes.length;
+    const w = clamp(Math.floor(win), 1, N);
+    const out = new Array(N).fill(0);
+    let sum = 0;
+    for (let i=0; i<N; i++){
+      sum += closes[i];
+      if (i >= w) sum -= closes[i-w];
+      const denom = Math.min(i+1, w);
+      out[i] = sum/denom;
+    }
+    return out;
+  }
+
+  // -------- Oscillation scan --------
+  function ema(arr, period){
+    const alpha = 2 / (period + 1);
+    const out = new Array(arr.length);
+    let prev = arr[0] || 0;
+    out[0] = prev;
+    for (let i=1; i<arr.length; i++){
+      prev = alpha*arr[i] + (1-alpha)*prev;
+      out[i] = prev;
+    }
+    return out;
+  }
+
+  function bandpassApprox(arr, periodMin){
+    const fast = Math.max(2, Math.floor(periodMin/2));
+    const slow = Math.max(fast+1, Math.floor(periodMin));
+    const ef = ema(arr, fast);
+    const es = ema(arr, slow);
+    const out = new Array(arr.length);
+    for (let i=0; i<arr.length; i++) out[i] = ef[i] - es[i];
+    return out;
+  }
+
+  function rms(arr){
+    let s=0;
+    for (const v of arr) s += v*v;
+    return Math.sqrt(s / Math.max(1, arr.length));
+  }
+
+  function zeroCrossings(arr){
+    let z=0;
+    for (let i=1; i<arr.length; i++){
+      const a = arr[i-1], b = arr[i];
+      if ((a<=0 && b>0) || (a>=0 && b<0)) z++;
+    }
+    return z;
+  }
+
+
+ // Autocorrelation at a specific lag (Pearson correlation of x[t] vs x[t-lag])
+ function autocorrAtLag(arr, lag){
+   const L = Math.floor(lag);
+   const n = arr.length;
+   if (n < 8 || L < 1 || L >= n) return 0;
+   let mean = 0;
+   for (let i=0; i<n; i++) mean += arr[i];
+   mean /= n;
+   let num = 0, denA = 0, denB = 0;
+   for (let i=L; i<n; i++){
+     const a = arr[i] - mean;
+     const b = arr[i-L] - mean;
+     num += a*b;
+     denA += a*a;
+     denB += b*b;
+   }
+   const den = Math.sqrt(denA*denB) || 1e-9;
+   return num / den; // [-1..1]
+ }
+
+  function percentileRank(sortedArr, value){
+    // returns 0..100 where 100 means value >= max
+    if (!sortedArr || !sortedArr.length) return null;
+    let lo = 0, hi = sortedArr.length;
+    while (lo < hi){
+      const mid = (lo + hi) >> 1;
+      if (sortedArr[mid] <= value) lo = mid + 1;
+      else hi = mid;
+    }
+    return Math.round((lo / sortedArr.length) * 100);
+  }
+
+  function median(sortedArr){
+    if (!sortedArr || !sortedArr.length) return null;
+    return sortedArr[(sortedArr.length/2) | 0];
+  }
+
+  
+  const DEFAULT_SCAN_MIN_PERIOD = 1;
+  const DEFAULT_SCAN_MAX_PERIOD = 200;
+  // When log spacing is enabled, `scanStepPeriod` represents COUNT (see `syncScanPeriodLabel()`).
+  const DEFAULT_SCAN_STEP = 15;
+
+  function fmtPeriodLabel(min){
+    const m = Math.max(1, Math.round(Number(min) || 1));
+    if (m < 60) return `${m}m`;
+    if (m % 60 === 0){
+      const h = m / 60;
+      if (h < 24) return `${h}h`;
+      const d = h / 24;
+      return `${d}d`;
+    }
+    const h = (m / 60);
+    return `${h.toFixed(1)}h`;
+  }
+
+  function buildCandidatePeriods(minMin, maxMin, stepOrCount, useLog){
+    let minP = Math.max(1, Math.floor(Number(minMin) || DEFAULT_SCAN_MIN_PERIOD));
+    let maxP = Math.max(1, Math.floor(Number(maxMin) || DEFAULT_SCAN_MAX_PERIOD));
+    if (maxP < minP){ const t = maxP; maxP = minP; minP = t; }
+
+    maxP = Math.min(maxP, 24*60);
+    minP = Math.min(minP, maxP);
+
+    const out = [];
+    if (!useLog){
+      const step = Math.max(1, Math.floor(Number(stepOrCount) || DEFAULT_SCAN_STEP));
+      const maxCount = 80;
+      for (let m = minP; m <= maxP && out.length < maxCount; m += step){
+        out.push({ label: fmtPeriodLabel(m), min: m });
+      }
+      if (out.length && out[out.length-1].min !== maxP && out.length < maxCount){
+        out.push({ label: fmtPeriodLabel(maxP), min: maxP });
+      }
+    } else {
+      const count = clamp(Math.floor(Number(stepOrCount) || 24), 6, 80);
+      if (count === 1){
+        out.push({ label: fmtPeriodLabel(minP), min: minP });
+      } else {
+        const a = Math.log(minP);
+        const b = Math.log(maxP);
+        for (let i=0; i<count; i++){
+          const t = i / (count - 1);
+          const m = Math.max(1, Math.round(Math.exp(a + (b - a) * t)));
+          if (!out.length || out[out.length-1].min !== m){
+            out.push({ label: fmtPeriodLabel(m), min: m });
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  function computeOscillationScanOnResidual(resid1m, scanWindowMinutes, periods){
+    const N = resid1m.length;
+    const tailN = clamp(Math.floor(Number(scanWindowMinutes) || 780), 120, N);
+
+    const periodsSafe = (periods && periods.length) ? periods : buildCandidatePeriods(DEFAULT_SCAN_MIN_PERIOD, DEFAULT_SCAN_MAX_PERIOD, DEFAULT_SCAN_STEP, false);
+
+    const scores = periodsSafe.map(per => {
+      const bp = bandpassApprox(resid1m, per.min);
+      const tail = bp.slice(bp.length - tailN);
+
+      const energy = rms(tail);
+      // Coherence: does the bandpassed signal resemble itself after ~1 period?
+      const lag = Math.max(1, Math.round(per.min));
+      const corr = autocorrAtLag(tail, lag);          // [-1..1]
+      const coh = Math.max(0, corr);                  // ignore anti-phase / negative
+      const raw = energy * coh;
+
+      return {label: per.label, min: per.min, raw, energy, corr, coh};
+    });
+
+    let best = null, second = null;
+    for (const s of scores){
+      if (!best || s.raw > best.raw){ second = best; best = s; }
+      else if (!second || s.raw > second.raw){ second = s; }
+    }
+
+    const bestRatio = (best && second && second.raw>0) ? (best.raw/second.raw) : null;
+
+    return {scores, best, second, bestRatio, tailN};
+  }
+
+  function computePeriodStability(resid1m, scanWindowMinutes, periods, K=12, stepMinutes=60){
+    const N = resid1m.length;
+    const winLen = clamp(Math.floor(Number(scanWindowMinutes)||780), 120, N);
+    const step = clamp(Math.floor(Number(stepMinutes)||60), 5, winLen);
+
+    const windows = [];
+    for (let end = N; (end - winLen) >= 0 && windows.length < K; end -= step){
+      const windowResid = resid1m.slice(end - winLen, end);
+      const scan = computeOscillationScanOnResidual(windowResid, winLen, periods);
+      windows.push({end, bestMin: scan.best ? scan.best.min : null, bestRaw: scan.best ? scan.best.raw : null, ratio: scan.bestRatio, vol: rms(windowResid)});
+    }
+
+    const counts = new Map();
+    for (const w of windows){
+      if (w.bestMin == null) continue;
+      counts.set(w.bestMin, (counts.get(w.bestMin)||0) + 1);
+    }
+
+    let dominantMin = null, dominantCount = 0;
+    for (const [min,c] of counts){
+      if (c > dominantCount){ dominantCount = c; dominantMin = Number(min); }
+    }
+
+    let flipCount = 0;
+    for (let i=1; i<windows.length; i++){
+      if (windows[i].bestMin !== windows[i-1].bestMin) flipCount++;
+    }
+
+    const ratios = windows.map(w=>w.ratio).filter(v=>v!=null && isFinite(v)).sort((a,b)=>a-b);
+    const vols = windows.map(w=>w.vol).filter(v=>v!=null && isFinite(v)).sort((a,b)=>a-b);
+    const med = arr => arr.length ? arr[Math.floor(arr.length/2)] : null;
+    const medRatio = med(ratios);
+    const medVol = med(vols);
+
+    const dominance = (windows.length && dominantCount) ? (dominantCount / windows.length) : null;
+
+    return {windows, counts, dominantMin, dominantCount, dominance, flipCount, medRatio, medVol, winLen, step};
+  }
+
+  function drawStabilityPanel(ctx, x, y, w, stab){
+    const txt = getCSS("--muted");
+    const fg = getCSS("--fg");
+
+    if (!stab || !stab.windows || !stab.windows.length){
+      drawText(ctx, "Stability: (no data)", x, y, {color:txt, font:"12px system-ui"});
+      return;
+    }
+
+    const dom = (stab.dominantMin != null) ? fmtPeriodLabel(stab.dominantMin) : "–";
+    const domPct = (stab.dominance != null) ? Math.round(stab.dominance*100) : null;
+
+    const line1 = `Stability • dominant: ${dom}  • dominance: ${domPct!=null?domPct+"%":"–"}  • flips: ${stab.flipCount}`;
+    const line2 = `median separation: ${stab.medRatio!=null?stab.medRatio.toFixed(2):"–"}  • median resid σ: ${stab.medVol!=null?stab.medVol.toFixed(3):"–"}`;
+
+    drawText(ctx, line1, x, y, {color:fg, font:"12px system-ui"});
+    drawText(ctx, line2, x, y+16, {color:txt, font:"11px system-ui"});
+
+    const stripY = y + 38;
+    const stripH = 10;
+    const cellW = Math.max(6, Math.min(18, Math.floor(w / stab.windows.length)));
+    const bg = getCSS("--grid");
+    const accent = getCSS("--accent");
+
+    ctx.save();
+    ctx.fillStyle = bg;
+    ctx.fillRect(x, stripY, cellW*stab.windows.length, stripH);
+
+    for (let i=0; i<stab.windows.length; i++){
+      const win = stab.windows[i];
+      const isDom = (stab.dominantMin != null && win.bestMin === stab.dominantMin);
+      ctx.fillStyle = isDom ? accent : getCSS("--ghost");
+      ctx.fillRect(x + i*cellW, stripY, cellW-1, stripH);
+    }
+    ctx.restore();
+
+    drawText(ctx, "recent windows →", x + cellW*stab.windows.length + 6, stripY-1, {color:txt, font:"11px system-ui"});
+  }
+
+  function drawScaleBars(ctx, x, y, w, scores, bestLabel, activeMin, selectedMin, hoverMin){
+    const rowH = 12;
+    const labelW = 34;
+    const barH = 7;
+
+    const bg = getCSS("--grid");
+    const fill = getCSS("--accent");
+    const txt = getCSS("--muted");
+    const fg = getCSS("--fg");
+    const fillDim = colorWithAlpha(fill, 0.30);
+
+    // Keep canvas text below the DOM chart title area to avoid overlap.
+    if (bestLabel){
+      ctx.save();
+      ctx.font = "11px system-ui";
+      ctx.fillStyle = fg;
+      const safe = truncateTextToWidth(ctx, bestLabel, Math.max(0, w - 8));
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      ctx.fillText(safe, x, y);
+      ctx.restore();
+    }
+
+    const top = y + 18;
+    const maxRaw = Math.max(1e-9, ...scores.map(s=>s.raw));
+
+    const hit = [];
+
+    for (let i=0; i<scores.length; i++){
+      const s = scores[i];
+      const yy = top + i*(rowH);
+      const bx = x + labelW;
+      const bw = w - labelW - 8;
+
+      const frac = clamp(s.raw / maxRaw, 0, 1);
+      const barW = Math.max(0, Math.floor(frac * bw));
+
+      drawText(ctx, s.label, x, yy-1, {font:"11px ui-monospace", color:txt});
+
+      ctx.save();
+      ctx.fillStyle = bg;
+      ctx.fillRect(bx, yy+2, bw, barH);
+
+      const isActive = (activeMin != null && Number(activeMin) === Number(s.min));
+      ctx.fillStyle = isActive ? fill : fillDim;
+      if (isActive){
+        // Make the active (selected rhythm) bar pop: bright fill + subtle glow.
+        ctx.save();
+        ctx.shadowColor = colorWithAlpha(fill, 0.85);
+        ctx.shadowBlur = 10;
+        ctx.fillRect(bx, yy+2, barW, barH);
+        ctx.restore();
+      } else {
+        ctx.fillRect(bx, yy+2, barW, barH);
+      }
+
+      if (hoverMin != null && Number(hoverMin) === Number(s.min)){
+        ctx.strokeStyle = "rgba(255,255,255,0.55)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bx-1, yy+1, bw+2, barH+2);
+      }
+      if (selectedMin != null && Number(selectedMin) === Number(s.min)){
+        ctx.strokeStyle = getCSS("--accent2");
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bx-1, yy+1, bw+2, barH+2);
+      }
+
+      ctx.restore();
+
+      hit.push({x:bx, y:yy, w:bw, h:rowH, periodMin:s.min, label:s.label});
+    }
+
+    drawText(ctx, "Hover or click a bar to analyze that rhythm", x, top + scores.length*rowH + 6, {font:"11px system-ui", color:txt});
+
+    return hit;
+  }
+
+  // -------- Turning points --------
+  function findTurningPoints(series, minSep=3){
+    const out = [];
+    for (let i=1; i<series.length-1; i++){
+      const a = series[i-1], b = series[i], c = series[i+1];
+      if (b>a && b>c) out.push({i, kind:"peak", v:b});
+      else if (b<a && b<c) out.push({i, kind:"trough", v:b});
+    }
+    const filt = [];
+    for (const p of out){
+      if (!filt.length || (p.i - filt[filt.length-1].i) >= minSep) filt.push(p);
+    }
+    return filt;
+  }
+
+  // -------- Gate scoring --------
+  function computeSlopeSigmaPerHr(closes, detrendHours){
+    const L = clamp(Math.floor(detrendHours*60), 30, closes.length);
+    const tail = closes.slice(closes.length - L);
+    const N = tail.length;
+    if (N < 2) return null;
+
+    let sX=0,sY=0,sXY=0,sX2=0;
+    for (let i=0; i<N; i++){
+      const x=i;
+      const y=tail[i];
+      sX+=x; sY+=y; sXY+=x*y; sX2+=x*x;
+    }
+    const denom = (N*sX2 - sX*sX) || 1e-9;
+    const slopePerMin = (N*sXY - sX*sY)/denom;
+
+    const b = (sY - slopePerMin*sX)/N;
+    let ss=0;
+    for (let i=0; i<N; i++){
+      const yhat = slopePerMin*i + b;
+      const e = tail[i]-yhat;
+      ss += e*e;
+    }
+    const sigma = Math.sqrt(ss / Math.max(1, N));
+    const sigmaPerHr = sigma * Math.sqrt(60);
+    const slopePerHr = slopePerMin * 60;
+
+    const sigmaSafe = sigmaPerHr || 1e-9;
+    return (slopePerHr / sigmaSafe);
+  }
+
+  function gateDecision(stab, closes1m, resid1m, gate){
+    const reasons=[];
+    const checks=[];
+    let ok = true;
+
+    if (gate.enabled){
+      if (gate.requireRange){
+        const slopeSig = computeSlopeSigmaPerHr(closes1m, gate.detrendHoursForSlope);
+        if (slopeSig == null){
+          checks.push({key:"Avoid trends", status:"off", detail:"⏸ not enough data"});
+        } else {
+          const v = Math.abs(slopeSig);
+          const thr = gate.maxSlopeSigmaPerHr;
+          const borderline = (v > thr && v <= thr*1.10);
+          const pass = v <= thr;
+          const status = pass ? "pass" : (borderline ? "warn" : "fail");
+          checks.push({key:"Avoid trends", status, detail:`|slope| ${v.toFixed(2)}σ/hr ≤ ${thr.toFixed(2)}σ/hr`});
+          if (!pass){
+            ok = false;
+            reasons.push(`trendiness ${v.toFixed(2)}σ/hr > ${thr.toFixed(2)}σ/hr`);
+          }
+        }
+      } else {
+        checks.push({key:"Avoid trends", status:"off", detail:"⏸ ignored"});
+      }
+
+      if (gate.useStability){
+        const dom = (stab && stab.dominance != null && isFinite(stab.dominance)) ? Number(stab.dominance) : null;
+        const domThr = gate.minDominance;
+        if (dom == null){
+          checks.push({key:"Consistency over time", status:"off", detail:"⏸ not enough data"});
+        } else {
+          const borderline = (dom < domThr && dom >= Math.max(0, domThr - 0.10));
+          const pass = dom >= domThr;
+          const status = pass ? "pass" : (borderline ? "warn" : "fail");
+          checks.push({key:"Consistency over time", status, detail:`${Math.round(dom*100)}% ≥ ${Math.round(domThr*100)}%`});
+          if (!pass){
+            ok = false;
+            reasons.push(`consistency ${Math.round(dom*100)}% < ${Math.round(domThr*100)}%`);
+          }
+        }
+
+        const sep = (stab && stab.medRatio != null && isFinite(stab.medRatio)) ? Number(stab.medRatio) : null;
+        const sepThr = gate.minSeparation;
+        if (sep == null){
+          checks.push({key:"Clarity vs alternatives", status:"off", detail:"⏸ not enough data"});
+        } else {
+          const borderline = (sep < sepThr && sep >= Math.max(1, sepThr - 0.10));
+          const pass = sep >= sepThr;
+          const status = pass ? "pass" : (borderline ? "warn" : "fail");
+          checks.push({key:"Clarity vs alternatives", status, detail:`${sep.toFixed(2)}× ≥ ${sepThr.toFixed(2)}×`});
+          if (!pass){
+            ok = false;
+            reasons.push(`clarity ${sep.toFixed(2)}× < ${sepThr.toFixed(2)}×`);
+          }
+        }
+      } else {
+        checks.push({key:"Consistency over time", status:"off", detail:"⏸ ignored"});
+        checks.push({key:"Clarity vs alternatives", status:"off", detail:"⏸ ignored"});
+      }
+
+      if (gate.suppressHighVol){
+        const curVol = rms(resid1m.slice(resid1m.length - clamp(Math.floor(gate.volWindowMinutes), 60, resid1m.length)));
+        const base = (stab && stab.medVol != null) ? stab.medVol : null;
+        if (base == null || !isFinite(base)){
+          checks.push({key:"Avoid noisy periods", status:"off", detail:"⏸ no baseline σ"});
+        } else {
+          const thr = gate.volMult*base;
+          const borderline = (curVol > thr && curVol <= thr*1.10);
+          const pass = curVol <= thr;
+          const status = pass ? "pass" : (borderline ? "warn" : "fail");
+          checks.push({key:"Avoid noisy periods", status, detail:`${curVol.toFixed(3)} ≤ ${gate.volMult.toFixed(2)}×${base.toFixed(3)}`});
+          if (!pass){
+            ok = false;
+            reasons.push(`noise ${curVol.toFixed(3)} > ${gate.volMult.toFixed(2)}×${base.toFixed(3)}`);
+          }
+        }
+      } else {
+        checks.push({key:"Avoid noisy periods", status:"off", detail:"⏸ ignored"});
+      }
+    }
+
+    return {eligible: ok, reasons, checks};
+  }
+
+  // -------- Rendering --------
+  const elTicker = document.getElementById("ticker");
+  const elDays = document.getElementById("days");
+  const elTf = document.getElementById("tf");
+  const elRegen = document.getElementById("regen");
+
+  const elToggleDetrend = document.getElementById("toggleDetrend");
+  const elToggleTurns = document.getElementById("toggleTurns");
+  const elToggleGate = document.getElementById("toggleGate");
+
+  const elGateDom = document.getElementById("gateDom");
+  const elGateSep = document.getElementById("gateSep");
+  const elGateSlope = document.getElementById("gateSlope");
+  const elGateRequireRange = document.getElementById("gateRequireRange");
+  const elGateVol = document.getElementById("gateVol");
+  const elGateSuppressHighVol = document.getElementById("gateSuppressHighVol");
+
+  const elStatus = document.getElementById("status");
+  const elSelPeriod = document.getElementById("selPeriod");
+
+  const elDetrendLabel = document.getElementById("detrendLabel");
+  const elScanLabel = document.getElementById("scanLabel");
+
+  const elDetrendHours = document.getElementById("detrendHours");
+  const elScanWindow = document.getElementById("scanWindow");
+  const elScanMinPeriod = document.getElementById("scanMinPeriod");
+  const elScanMaxPeriod = document.getElementById("scanMaxPeriod");
+  const elScanStepPeriod = document.getElementById("scanStepPeriod");
+  const elScanLogSpacing = document.getElementById("scanLogSpacing");
+  const elScanStepLabel = document.getElementById("scanStepLabel");
+  const elDetrendDial = document.getElementById("detrendDial");
+  const elScanDial = document.getElementById("scanDial");
+
+  const elPresetDaily = document.getElementById("presetDaily");
+  const elPresetShort = document.getElementById("presetShort");
+  const elPresetLong = document.getElementById("presetLong");
+
+  const elBaselineRuns = document.getElementById("baselineRuns");
+  const elBaselineRunBtn = document.getElementById("baselineRunBtn");
+  const elBaselineClearBtn = document.getElementById("baselineClearBtn");
+  const elBaselineStatus = document.getElementById("baselineStatus");
+  const elBaselineSummary = document.getElementById("baselineSummary");
+
+  const elInsightLight = document.getElementById("insightLight");
+  const elInsightText = document.getElementById("insightText");
+  const elInsightWhy = document.getElementById("insightWhy");
+  const elHoverTip = document.getElementById("hoverTip");
+
+  const elGateVerdict = document.getElementById("gateVerdict");
+  const elGateVerdictLight = document.getElementById("gateVerdictLight");
+  const elGateVerdictTitle = document.getElementById("gateVerdictTitle");
+  const elGateVerdictReason = document.getElementById("gateVerdictReason");
+  const elGateChecks = document.getElementById("gateChecks");
+
+  const cPrice = document.getElementById("price");
+  const cAnalysis = document.getElementById("analysis");
+  const cScan = document.getElementById("scan");
+  const cConsistency = document.getElementById("consistency");
+  const scanPanel = document.getElementById("scanPanel");
+  const consistencyPanel = document.getElementById("consistencyPanel");
+  const pfDetails = document.getElementById("pfDetails");
+
+  const OUTER_PAD = 16;
+  const GUTTER_W = 230;
+
+  let state = {
+    ticker: elTicker.value,
+    days: Number(elDays.value),
+    tfMinutes: Number(elTf.value),
+    seed: 1337,
+    showDetrend: !!elToggleDetrend.checked,
+    showTurns: !!elToggleTurns.checked,
+    gateEnabled: !!elToggleGate.checked,
+
+    detrendHours: Number(elDetrendHours.value) || 2.0,
+    scanWindow: Number(elScanWindow.value) || 780,
+    scanMinPeriod: Number(elScanMinPeriod ? elScanMinPeriod.value : DEFAULT_SCAN_MIN_PERIOD) || DEFAULT_SCAN_MIN_PERIOD,
+    scanMaxPeriod: Number(elScanMaxPeriod ? elScanMaxPeriod.value : DEFAULT_SCAN_MAX_PERIOD) || DEFAULT_SCAN_MAX_PERIOD,
+    scanStepPeriod: Number(elScanStepPeriod ? elScanStepPeriod.value : DEFAULT_SCAN_STEP) || DEFAULT_SCAN_STEP,
+    scanLogSpacing: !!(elScanLogSpacing && elScanLogSpacing.checked),
+    periods: null,
+
+    selectedPeriodMin: null,
+    bestPeriodMin: null,
+
+    days1m: null,
+    flat1m: null,
+
+    scanHitboxes: [], // legacy; kept for compatibility
+    scanHitboxesAnalysis: [],
+    scanHitboxesScan: [],
+    hoverPeriodMin: null,
+    hoverLabel: null
+  };
+
+  function setHoverTip(on, clientX, clientY, text){
+    if (!elHoverTip) return;
+    if (!on){
+      elHoverTip.classList.remove("on");
+      return;
+    }
+    elHoverTip.textContent = text || "";
+    elHoverTip.style.left = `${Math.min(window.innerWidth - 30, clientX + 14)}px`;
+    elHoverTip.style.top = `${Math.min(window.innerHeight - 30, clientY + 14)}px`;
+    elHoverTip.classList.add("on");
+  }
+
+  function setHoverPeriod(periodMin, label){
+    const next = (periodMin == null) ? null : Number(periodMin);
+    const nextLbl = label || null;
+    if (state.hoverPeriodMin === next && state.hoverLabel === nextLbl) return;
+    state.hoverPeriodMin = next;
+    state.hoverLabel = nextLbl;
+    // Interaction model: hover activates the rhythm (no click-to-select).
+    // When not hovering a bar, fall back to Auto (selectedPeriodMin=null).
+    state.selectedPeriodMin = next;
+    updateSelPeriodLabel();
+    // Re-render to show hover outline.
+    renderScanPanel();
+    renderConsistencyPanel();
+    renderAnalysis();
+  }
+
+  function fmtMinutesHuman(min){
+    const m = Math.max(0, Math.round(Number(min) || 0));
+    if (m < 60) return `${m} minutes`;
+    if (m % 60 === 0){
+      const h = m/60;
+      if (h < 24) return `${h} hours`;
+      const d = h/24;
+      return (Number.isInteger(d) ? `${d} days` : `${d.toFixed(1)} days`);
+    }
+    const h = m/60;
+    return `${h.toFixed(1)} hours`;
+  }
+
+  function fmtLookbackShort(min){
+    const m = Math.max(0, Math.round(Number(min) || 0));
+    if (m < 60) return `last ${m}m`;
+    if (m % 60 === 0){
+      const h = m/60;
+      if (h < 24) return `last ${h}h`;
+      const d = h/24;
+      return `last ${Number.isInteger(d) ? d : d.toFixed(1)}d`;
+    }
+    return `last ${(m/60).toFixed(1)}h`;
+  }
+
+  function fmtRhythmPhrase(min){
+    return `Repeats roughly every ${fmtMinutesHuman(min)}`;
+  }
+
+  function renderGateUI(gateEnabled, gateRes){
+    if (!elGateVerdictLight || !elGateVerdictTitle || !elGateVerdictReason || !elGateChecks) return;
+
+    if (!gateEnabled){
+      elGateVerdictLight.className = "light mid";
+      elGateVerdictTitle.textContent = "⏸ Filter off";
+      elGateVerdictReason.textContent = "Reason: showing all turning points (no filtering)";
+      elGateChecks.innerHTML = "";
+      return;
+    }
+
+    const checks = (gateRes && gateRes.checks) ? gateRes.checks : [];
+    const eligible = !!(gateRes && gateRes.eligible);
+    const hasFail = checks.some(c=>c.status==="fail");
+    const hasWarn = checks.some(c=>c.status==="warn");
+
+    const light = eligible ? "good" : (hasWarn && !hasFail ? "mid" : "bad");
+    elGateVerdictLight.className = `light ${light}`;
+    elGateVerdictTitle.textContent = eligible ? "🟢 Rhythm is stable" : (hasWarn && !hasFail ? "🟡 Rhythm is weak" : "🔴 No reliable rhythm detected");
+
+    const reason = (gateRes && gateRes.reasons && gateRes.reasons.length) ? gateRes.reasons[0] : (eligible ? "passes all checks" : "one or more checks failed");
+    elGateVerdictReason.textContent = `Reason: ${reason}`;
+
+    const iconFor = (s)=> (s==="pass" ? "✅" : (s==="warn" ? "⚠" : (s==="fail" ? "❌" : "⏸")));
+    const clsFor = (s)=> (s==="pass" ? "pass" : (s==="warn" ? "warn" : (s==="fail" ? "fail" : "off")));
+    elGateChecks.innerHTML = checks.map(c => (
+      `<div class="gateCheck ${clsFor(c.status)}"><span class="k">${c.key}</span><span>${iconFor(c.status)}</span></div>`
+    )).join("");
+  }
+
+  function computeInsight(scan, stab, resid1m, activePeriodMin){
+    if (!elInsightText || !elInsightLight) return;
+    if (!scan || !scan.best || activePeriodMin == null || !resid1m || !resid1m.length){
+      elInsightLight.className = "light bad";
+      elInsightText.textContent = "No clear repeating rhythm detected. This often happens during strong trends or noisy conditions. Try a longer lookback window or a preset.";
+      if (elInsightWhy) elInsightWhy.textContent = "Why this matters: unstable rhythms often suggest price movement is mostly random at this timescale right now.";
+      return;
+    }
+
+    const coh = Number(scan.best.coh || 0);
+    const sep = (scan.bestRatio != null && isFinite(scan.bestRatio)) ? Number(scan.bestRatio) : null;
+    const dom = (stab && stab.dominance != null && isFinite(stab.dominance)) ? Number(stab.dominance) : null;
+
+    // Approx. variance share of the bandpassed rhythm vs cleaned signal (tail window)
+    const tailN = clamp(Math.floor(Number(state.scanWindow) || 780), 120, resid1m.length);
+    const tailResid = resid1m.slice(resid1m.length - tailN);
+    const bp = bandpassApprox(resid1m, activePeriodMin);
+    const tailCycle = bp.slice(bp.length - tailN);
+    const rR = rms(tailResid);
+    const rC = rms(tailCycle);
+    const share = clamp((rC*rC) / ((rR*rR) + 1e-9), 0, 1);
+    const sharePct = Math.round(share * 100);
+
+    let pRaw = null;
+    if (baseline && baseline.key && baseline.key === baselineKey() && baseline.bestRaw && scan.best){
+      pRaw = percentileRank(baseline.bestRaw, scan.best.raw);
+    }
+
+    const good = (pRaw != null ? (pRaw >= 85) : false) || ((sep != null && sep >= 1.35) && coh >= 0.25 && (dom == null || dom >= 0.55));
+    const mid = (!good) && (((sep != null && sep >= 1.20) && coh >= 0.15) || (pRaw != null && pRaw >= 70));
+    const level = good ? "good" : (mid ? "mid" : "bad");
+    elInsightLight.className = `light ${level}`;
+
+    const perLbl = fmtPeriodLabel(activePeriodMin);
+    const selTxt = (state.selectedPeriodMin != null) ? "You selected" : "Auto found";
+    const confTxt = good ? "Strong" : (mid ? "Moderate" : "Weak");
+
+    const bits = [];
+    bits.push(`${selTxt} a ${confTxt.toLowerCase()} repeating rhythm around ${perLbl}.`);
+    bits.push(`This rhythm explains ~${sharePct}% of the cleaned signal’s movement (within the lookback window).`);
+    if (sep != null) bits.push(`Clarity: ${sep.toFixed(2)}×.`);
+    bits.push(`Repeatability: ${coh.toFixed(2)}.`);
+    if (dom != null) bits.push(`Consistency: ${Math.round(dom*100)}%.`);
+    if (pRaw != null) bits.push(`Stronger than ${pRaw}% of random price behavior (score).`);
+
+    elInsightText.textContent = bits.join(" ");
+    if (elInsightWhy){
+      elInsightWhy.textContent = (level === "good")
+        ? "Why this matters: stable rhythms often come with more back-and-forth at this timescale (less one-way randomness)."
+        : (level === "mid")
+          ? "Why this matters: a weak rhythm may appear, but it can fade quickly in trends/noise—treat it as tentative."
+          : "Why this matters: unstable rhythms often suggest price movement is mostly random at this timescale right now.";
+    }
+  }
+
+  function syncScanPeriodLabel(){
+    if (!elScanStepLabel) return;
+    elScanStepLabel.textContent = (elScanLogSpacing && elScanLogSpacing.checked) ? "Count" : "Step";
+  }
+
+  function syncCandidatePeriods(){
+    state.scanMinPeriod = Number(elScanMinPeriod && elScanMinPeriod.value) || DEFAULT_SCAN_MIN_PERIOD;
+    state.scanMaxPeriod = Number(elScanMaxPeriod && elScanMaxPeriod.value) || DEFAULT_SCAN_MAX_PERIOD;
+    state.scanStepPeriod = Number(elScanStepPeriod && elScanStepPeriod.value) || DEFAULT_SCAN_STEP;
+    state.scanLogSpacing = !!(elScanLogSpacing && elScanLogSpacing.checked);
+    syncScanPeriodLabel();
+    state.periods = buildCandidatePeriods(state.scanMinPeriod, state.scanMaxPeriod, state.scanStepPeriod, state.scanLogSpacing);
+  }
+
+  syncCandidatePeriods();
+
+  // -------- Noise baseline (calibration vs random-walk noise) --------
+  let baselineRunToken = 0;
+  let baseline = {
+    key: null,          // settings signature
+    n: 0,
+    bestRaw: null,      // sorted arrays
+    bestRatio: null,
+    dominance: null,
+    flipCount: null,
+    running: false
+  };
+
+  function baselineKey(){
+    // baseline should match the current scan configuration
+    const p = state.periods || [];
+    const pKey = p.map(x => x.min).join(",");
+    return [
+      "v1",
+      `days=${state.days}`,
+      `detrend=${Number(state.detrendHours||0).toFixed(3)}`,
+      `scanWin=${Math.round(state.scanWindow||0)}`,
+      `periods=${pKey}`
+    ].join("|");
+  }
+
+  function setBaselineUI(msg){
+    if (elBaselineStatus) elBaselineStatus.textContent = msg;
+  }
+
+  function clearBaseline(){
+    // bump token so any in-flight run can detect cancellation
+    baselineRunToken++;
+    baseline = { key:null, n:0, bestRaw:null, bestRatio:null, dominance:null, flipCount:null, running:false };
+    if (elBaselineSummary) elBaselineSummary.textContent = "";
+    setBaselineUI("Baseline: none");
+    if (elBaselineRunBtn) elBaselineRunBtn.disabled = false;
+    // Clear is always enabled (acts as cancel when running)
+    if (elBaselineClearBtn) elBaselineClearBtn.disabled = false;
+  }
+
+  function maybeInvalidateBaseline(){
+    if (!baseline.key) return;
+    if (baseline.running) return;
+    if (baseline.key !== baselineKey()){
+      clearBaseline();
+    }
+  }
+
+  async function buildNoiseBaseline(){
+    if (baseline.running) return;
+    baseline.running = true;
+    const token = ++baselineRunToken;
+
+    // baseline must match the current scan configuration
+    const key = baselineKey();
+    const N = clamp(Math.floor(Number(elBaselineRuns && elBaselineRuns.value) || 200), 20, 2000);
+
+    const bestRaw = [];
+    const bestRatio = [];
+    const dominance = [];
+    const flipCount = [];
+
+    // Prevent multiple concurrent runs, but allow Clear to cancel mid-run.
+    if (elBaselineRunBtn) elBaselineRunBtn.disabled = true;
+    if (elBaselineClearBtn) elBaselineClearBtn.disabled = false;
+
+    setBaselineUI(`Baseline: running 0/${N}…`);
+    if (elBaselineSummary) elBaselineSummary.textContent = "Running noise simulations…";
+
+    const chunk = 10;
+    for (let i=0; i<N; i++){
+      // cancelled or settings changed
+      if (token !== baselineRunToken){
+        baseline.running = false;
+        return;
+      }
+      if (baselineKey() !== key){
+        baseline.running = false;
+        clearBaseline();
+        return;
+      }
+
+      const seed = 1000 + i*97;
+      const days1m = genSeries(state.days, seed);
+      const flat = flattenDays(days1m);
+      const closes1m = flat.flat.map(k => k.c);
+
+      const L = clamp(Math.floor(state.detrendHours*60), 30, closes1m.length);
+      const resid1m = detrendRollingLinear(closes1m, L);
+
+      const scan = computeOscillationScanOnResidual(resid1m, state.scanWindow, state.periods);
+      const stab = computePeriodStability(resid1m, state.scanWindow, state.periods);
+
+      if (scan && scan.best){
+        bestRaw.push(scan.best.raw);
+        if (scan.bestRatio != null && isFinite(scan.bestRatio)) bestRatio.push(scan.bestRatio);
+      }
+      if (stab){
+        if (stab.dominance != null && isFinite(stab.dominance)) dominance.push(stab.dominance);
+        if (stab.flipCount != null && isFinite(stab.flipCount)) flipCount.push(stab.flipCount);
+      }
+
+      if ((i+1) % chunk === 0){
+        setBaselineUI(`Baseline: running ${i+1}/${N}…`);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    bestRaw.sort((a,b)=>a-b);
+    bestRatio.sort((a,b)=>a-b);
+    dominance.sort((a,b)=>a-b);
+    flipCount.sort((a,b)=>a-b);
+
+    // cancelled late
+    if (token !== baselineRunToken){
+      baseline.running = false;
+      return;
+    }
+
+    baseline = { key, n:N, bestRaw, bestRatio, dominance, flipCount, running:false };
+    setBaselineUI(`Baseline: ready (n=${N})`);
+
+    const mRaw = median(bestRaw);
+    const mRatio = median(bestRatio);
+    const mDom = median(dominance);
+    const mFlip = median(flipCount);
+    if (elBaselineSummary){
+      elBaselineSummary.textContent =
+        `Noise medians → bestScore ${mRaw!=null?mRaw.toFixed(4):"–"}, ` +
+        `sep ${mRatio!=null?mRatio.toFixed(2):"–"}, ` +
+        `dom ${mDom!=null?Math.round(mDom*100)+"%":"–"}, ` +
+        `flips ${mFlip!=null?mFlip:"–"}.`;
+    }
+
+    if (elBaselineRunBtn) elBaselineRunBtn.disabled = false;
+    if (elBaselineClearBtn) elBaselineClearBtn.disabled = false;
+
+    renderAll();
+  }
+
+  function dialValueToAngle01(v01){
+    const start = (210/360) * Math.PI*2;
+    const end = (-30/360) * Math.PI*2;
+    return start + (end-start)*v01;
+  }
+
+  function drawDial(canvas, v01, label, colorVar){
+    const ctx = setupHiDPICanvas(canvas);
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    ctx.clearRect(0,0,w,h);
+
+    const cx = w/2, cy = h/2;
+    const r = Math.min(w,h)*0.40;
+    const start = dialValueToAngle01(0);
+    const end = dialValueToAngle01(1);
+
+    ctx.save();
+    ctx.lineWidth = 10;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.beginPath();
+    ctx.arc(cx,cy,r,start,end,false);
+    ctx.stroke();
+
+    const ang = dialValueToAngle01(v01);
+    ctx.strokeStyle = getCSS(colorVar);
+    ctx.beginPath();
+    ctx.arc(cx,cy,r,start,ang,false);
+    ctx.stroke();
+
+    const kx = cx + Math.cos(ang)*r;
+    const ky = cy + Math.sin(ang)*r;
+    ctx.fillStyle = getCSS(colorVar);
+    ctx.beginPath();
+    ctx.arc(kx,ky,7,0,Math.PI*2);
+    ctx.fill();
+
+    drawText(ctx, label, cx, cy-10, {align:"center", baseline:"middle", font:"14px system-ui", color:getCSS("--fg")});
+
+    ctx.restore();
+  }
+
+  function initDial(canvas, vMin, vMax, vInit, onChange, fmtLabel, colorVar){
+    let v = clamp(vInit, vMin, vMax);
+    let dragging = false;
+
+    const valueToV01 = (vv) => (vv - vMin) / (vMax - vMin);
+    const update = () => {
+      drawDial(canvas, valueToV01(v), fmtLabel(v), colorVar);
+      onChange(v);
+    };
+
+    const pointerToValue = (clientX, clientY) => {
+      const rect = canvas.getBoundingClientRect();
+      const cx = rect.left + rect.width/2;
+      const cy = rect.top + rect.height/2;
+      const dx = clientX - cx;
+      const dy = clientY - cy;
+      let ang = Math.atan2(dy, dx);
+
+      const start = dialValueToAngle01(0);
+      const end = dialValueToAngle01(1);
+
+      const norm = a => (a%(Math.PI*2) + Math.PI*2)%(Math.PI*2);
+      const a = norm(ang);
+      const s = norm(start);
+      const e = norm(end);
+
+      let t;
+      if (s < e){
+        t = clamp((a - s) / (e - s), 0, 1);
+      } else {
+        const span = (Math.PI*2 - s) + e;
+        let dist = (a >= s) ? (a - s) : ((Math.PI*2 - s) + a);
+        t = clamp(dist / span, 0, 1);
+      }
+
+      return vMin + t*(vMax - vMin);
+    };
+
+    const onDown = (e) => {
+      dragging = true;
+      const p = (e.touches && e.touches.length) ? e.touches[0] : e;
+      v = pointerToValue(p.clientX, p.clientY);
+      update();
+    };
+
+    const onMove = (e) => {
+      if (!dragging) return;
+      const p = (e.touches && e.touches.length) ? e.touches[0] : e;
+      v = pointerToValue(p.clientX, p.clientY);
+      update();
+    };
+
+    const onUp = () => { dragging = false; };
+
+    canvas.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+
+    canvas.addEventListener("touchstart", onDown, {passive:true});
+    window.addEventListener("touchmove", onMove, {passive:true});
+    window.addEventListener("touchend", onUp, {passive:true});
+
+    update();
+
+    return {
+      set(newV){ v = clamp(newV, vMin, vMax); update(); },
+      get(){ return v; }
+    };
+  }
+
+  function updateDialLabels(){
+    if (elDetrendLabel) elDetrendLabel.textContent = `${(state.detrendHours||0).toFixed(1)}h`;
+    if (elScanLabel) elScanLabel.textContent = fmtLookbackShort(state.scanWindow||0);
+  }
+
+  function setStatus(text){
+    elStatus.textContent = text;
+  }
+
+  function updateSelPeriodLabel(){
+    if (state.selectedPeriodMin == null){
+      if (state.bestPeriodMin != null) elSelPeriod.textContent = `Auto (${fmtPeriodLabel(state.bestPeriodMin)})`;
+      else elSelPeriod.textContent = "Auto";
+    } else {
+      elSelPeriod.textContent = fmtPeriodLabel(state.selectedPeriodMin);
+    }
+  }
+
+  function regenData(){
+    state.seed = Math.floor(Math.random()*100000) + 1;
+    state.days1m = genSeries(state.days, state.seed);
+    state.flat1m = flattenDays(state.days1m);
+  }
+
+  function renderPrice(candlesTf, dayStartsTf){
+    const ctx = setupHiDPICanvas(cPrice);
+    const w = cPrice.getBoundingClientRect().width;
+    const h = cPrice.getBoundingClientRect().height;
+    ctx.clearRect(0,0,w,h);
+
+    const pad = OUTER_PAD;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+    const x0 = pad;
+    const y0 = pad;
+
+    let lo=Infinity, hi=-Infinity;
+    for (const c of candlesTf){ lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); }
+
+    let overlay = null;
+    if (state.showDetrend){
+      const closes1m = state.flat1m.flat.map(k=>k.c);
+      const L = clamp(Math.floor(state.detrendHours*60), 30, closes1m.length);
+      const resid = detrendRollingLinear(closes1m, L);
+      const base = smaRolling(closes1m, L);
+      const detClose1m = resid.map((v,i)=>v + base[i]);
+
+      const tf = Math.max(1, Math.floor(state.tfMinutes||1));
+      overlay = [];
+      let idx=0;
+      for (let d=0; d<state.days1m.length; d++){
+        const day = state.days1m[d];
+        for (let i=0; i<day.length; i+=tf){
+          const j = Math.min(day.length-1, i+tf-1);
+          const globalIdx = idx + j;
+          overlay.push(detClose1m[globalIdx]);
+        }
+        idx += day.length;
+      }
+    }
+
+    const xStep = innerW / Math.max(1, candlesTf.length);
+
+    ctx.save();
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.lineWidth = 1;
+    for (let i=0; i<=5; i++){
+      const yy = y0 + (innerH*(i/5));
+      ctx.beginPath();
+      ctx.moveTo(x0, yy);
+      ctx.lineTo(x0+innerW, yy);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    const yScale = (v)=> y0 + innerH*(1 - (v - lo)/(hi-lo || 1e-9));
+
+    ctx.save();
+    ctx.strokeStyle = getCSS("--ghost");
+    ctx.lineWidth = 1;
+    for (const s of dayStartsTf){
+      const xx = x0 + s*xStep;
+      ctx.beginPath();
+      ctx.moveTo(xx, y0);
+      ctx.lineTo(xx, y0+innerH);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    const up = getCSS("--accent2");
+    const down = getCSS("--bad");
+    const wick = getCSS("--ghost");
+
+    const bodyW = Math.max(2, xStep*0.65);
+
+    ctx.save();
+    for (let i=0; i<candlesTf.length; i++){
+      const c = candlesTf[i];
+      const x = x0 + i*xStep + xStep*0.5;
+      const yO = yScale(c.o);
+      const yC = yScale(c.c);
+      const yH = yScale(c.h);
+      const yL = yScale(c.l);
+
+      ctx.strokeStyle = wick;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, yH);
+      ctx.lineTo(x, yL);
+      ctx.stroke();
+
+      ctx.fillStyle = (c.c >= c.o) ? up : down;
+      const top = Math.min(yO, yC);
+      const bot = Math.max(yO, yC);
+      ctx.fillRect(x - bodyW/2, top, bodyW, Math.max(1, bot-top));
+    }
+    ctx.restore();
+
+    if (overlay && overlay.length===candlesTf.length){
+      ctx.save();
+      ctx.strokeStyle = getCSS("--accent");
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i=0; i<overlay.length; i++){
+        const x = x0 + i*xStep + xStep*0.5;
+        const y = yScale(overlay[i]);
+        if (i===0) ctx.moveTo(x,y);
+        else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function renderAnalysis(){
+    const ctx = setupHiDPICanvas(cAnalysis);
+    const w = cAnalysis.getBoundingClientRect().width;
+    const h = cAnalysis.getBoundingClientRect().height;
+    ctx.clearRect(0,0,w,h);
+
+    const pad = OUTER_PAD;
+    const gutterW = GUTTER_W;
+
+    const innerX = pad + gutterW;
+    const innerY = pad;
+    const innerW = w - innerX - pad;
+    const innerH = h - pad*2;
+
+    const gapY = 10;
+    const topH = Math.max(120, Math.floor(innerH * 0.58));
+    const botH = Math.max(90, innerH - topH - gapY);
+
+    const residRect = {x:innerX, y:innerY, w:innerW, h:topH};
+    const cycleRect = {x:innerX, y:innerY + topH + gapY, w:innerW, h:botH};
+
+    const closes1m = state.flat1m.flat.map(k => k.c);
+    const L = clamp(Math.floor(state.detrendHours*60), 30, closes1m.length);
+    const resid1m = detrendRollingLinear(closes1m, L);
+
+    const tf = Math.max(1, Math.floor(state.tfMinutes || 1));
+    const residTf = [];
+    for (let i=0; i<resid1m.length; i+=tf){
+      residTf.push(resid1m[Math.min(resid1m.length-1, i+tf-1)]);
+    }
+
+    const scan = computeOscillationScanOnResidual(resid1m, state.scanWindow, state.periods);
+    state.bestPeriodMin = scan.best ? scan.best.min : null;
+
+    const activePeriodMin = (state.selectedPeriodMin != null) ? state.selectedPeriodMin : state.bestPeriodMin;
+
+    let cycleTf = new Array(residTf.length).fill(0);
+    if (activePeriodMin != null){
+      const bp = bandpassApprox(resid1m, activePeriodMin);
+      for (let i=0; i<bp.length; i+=tf){
+        cycleTf[Math.floor(i/tf)] = bp[Math.min(bp.length-1, i+tf-1)];
+      }
+    }
+
+    updateSelPeriodLabel();
+
+    const turns = (activePeriodMin != null) ? findTurningPoints(cycleTf, 2) : [];
+
+    const stab = computePeriodStability(resid1m, state.scanWindow, state.periods);
+    computeInsight(scan, stab, resid1m, activePeriodMin);
+
+    const gate = {
+      enabled: state.gateEnabled,
+      useStability: true,
+      minDominance: Number(elGateDom.value) || 0.6,
+      minSeparation: Number(elGateSep.value) || 1.25,
+      requireRange: !!elGateRequireRange.checked,
+      detrendHoursForSlope: state.detrendHours,
+      maxSlopeSigmaPerHr: Number(elGateSlope.value) || 0.9,
+      suppressHighVol: !!elGateSuppressHighVol.checked,
+      volMult: Number(elGateVol.value) || 1.3,
+      volWindowMinutes: 120
+    };
+
+    const gateRes = gateDecision(stab, closes1m, resid1m, gate);
+    renderGateUI(state.gateEnabled, gateRes);
+
+    // --- Reading guides (per notes.txt) ---
+    // These charts are normalized to the current window (units are arbitrary after detrending),
+    // so we avoid numeric axes and instead provide semantic cues: a center (0) line and a
+    // qualitative vertical guide.
+    function drawZeroLine(rect, yScale){
+      const y0 = yScale(0);
+      if (!isFinite(y0)) return;
+      if (y0 < rect.y || y0 > rect.y + rect.h) return;
+      ctx.save();
+      ctx.strokeStyle = "rgba(232,238,252,0.14)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(rect.x, y0 + 0.5);
+      ctx.lineTo(rect.x + rect.w, y0 + 0.5);
+      ctx.stroke();
+      // label once per panel; keep short to avoid pretending this is a unit axis
+      drawText(ctx, "Center", rect.x + 6, y0 - 12, {font:"10px system-ui", color:"rgba(232,238,252,0.52)"});
+      ctx.restore();
+    }
+
+    function drawQualitativeScale(rect){
+      const x = rect.x + rect.w - 6;
+      const topY = rect.y + 6;
+      const midY = rect.y + rect.h*0.5 - 6;
+      const botY = rect.y + rect.h - 16;
+      const txt = "rgba(232,238,252,0.42)";
+      drawText(ctx, "High motion", x, topY, {font:"10px system-ui", color:txt, align:"right"});
+      drawText(ctx, "Moderate", x, midY, {font:"10px system-ui", color:txt, align:"right"});
+      drawText(ctx, "Low motion", x, botY, {font:"10px system-ui", color:txt, align:"right"});
+    }
+
+    function drawBadge(text, xRight, yTop, opts={}){
+      const padX = opts.padX ?? 8;
+      const padY = opts.padY ?? 5;
+      const r = opts.radius ?? 10;
+      const bg = opts.bg ?? "rgba(255,255,255,0.03)";
+      const border = opts.border ?? "rgba(255,255,255,0.10)";
+      const color = opts.color ?? getCSS("--muted");
+      const font = opts.font ?? "11px system-ui";
+
+      ctx.save();
+      ctx.font = font;
+      const tw = ctx.measureText(text).width;
+      const wBox = Math.ceil(tw + padX*2);
+      const hBox = Math.ceil(11 + padY*2);
+      const x = Math.round(xRight - wBox);
+      const y = Math.round(yTop);
+      ctx.fillStyle = bg;
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      // rounded rect
+      const rr = Math.min(r, wBox/2, hBox/2);
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + wBox, y, x + wBox, y + hBox, rr);
+      ctx.arcTo(x + wBox, y + hBox, x, y + hBox, rr);
+      ctx.arcTo(x, y + hBox, x, y, rr);
+      ctx.arcTo(x, y, x + wBox, y, rr);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = color;
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      ctx.fillText(text, x + padX, y + padY);
+      ctx.restore();
+    }
+
+    function drawSeries(rect, series, color, label){
+      let lo=Infinity, hi=-Infinity;
+      for (const v of series){ lo=Math.min(lo,v); hi=Math.max(hi,v); }
+      const padY = 6;
+      const yScale = v => rect.y + padY + (rect.h - padY*2) * (1 - (v - lo)/(hi-lo || 1e-9));
+      const xStep = rect.w / Math.max(1, series.length);
+
+      ctx.save();
+      ctx.strokeStyle = getCSS("--grid");
+      ctx.lineWidth = 1;
+      for (let i=0;i<=4;i++){
+        const yy = rect.y + rect.h*(i/4);
+        ctx.beginPath();
+        ctx.moveTo(rect.x, yy);
+        ctx.lineTo(rect.x+rect.w, yy);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Baseline + semantic vertical guide (no numeric y-axis).
+      drawZeroLine(rect, yScale);
+      drawQualitativeScale(rect);
+
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i=0; i<series.length; i++){
+        const x = rect.x + i*xStep + xStep*0.5;
+        const y = yScale(series[i]);
+        if (i===0) ctx.moveTo(x,y);
+        else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      // Label is already provided by the DOM chart title; avoid overlapping canvas text.
+
+      return {yScale, xStep};
+    }
+
+    const residScale = drawSeries(residRect, residTf, getCSS("--warn"), `Cleaned signal (computed from *1-minute* closes)`);
+    const cycleColor = (state.selectedPeriodMin != null) ? getCSS("--accent2") : getCSS("--accent");
+    const cycleScale = drawSeries(cycleRect, cycleTf, cycleColor, `Selected rhythm (≈ ${activePeriodMin}m)`);
+
+    // Optional amplitude cue (badge). Uses noise percentile when available; otherwise uses
+    // the variance share proxy from the current window.
+    if (scan && scan.best && activePeriodMin != null){
+      let strengthLabel = null;
+      if (baseline.key && baseline.key === baselineKey() && baseline.bestRaw){
+        const pRaw = percentileRank(baseline.bestRaw, scan.best.raw);
+        if (pRaw != null){
+          strengthLabel = (pRaw >= 85) ? "High" : (pRaw >= 70 ? "Medium" : "Low");
+        }
+      }
+      if (!strengthLabel){
+        const tailN = clamp(Math.floor(Number(state.scanWindow) || 780), 120, resid1m.length);
+        const tailResid = resid1m.slice(resid1m.length - tailN);
+        const bp = bandpassApprox(resid1m, activePeriodMin);
+        const tailCycle = bp.slice(bp.length - tailN);
+        const rR = rms(tailResid);
+        const rC = rms(tailCycle);
+        const share = clamp((rC*rC) / ((rR*rR) + 1e-9), 0, 1);
+        const sharePct = Math.round(share * 100);
+        strengthLabel = (sharePct >= 40) ? "High" : (sharePct >= 20 ? "Medium" : "Low");
+      }
+      const strengthVar = (strengthLabel === "High") ? "--good" : (strengthLabel === "Medium" ? "--warn" : "--bad");
+      const strengthColor = getCSS(strengthVar);
+      drawBadge(
+        `Rhythm strength: ${strengthLabel}`,
+        residRect.x + residRect.w - 6,
+        residRect.y + 6,
+        {
+          bg: colorWithAlpha(strengthColor, 0.18),
+          border: colorWithAlpha(strengthColor, 0.55),
+          color: colorWithAlpha(strengthColor, 0.95)
+        }
+      );
+    }
+
+    state.scanHitboxes = [];
+    state.scanHitboxesAnalysis = [];
+
+    // Always draw Pattern Finder bars in the analysis gutter.
+    const bestLbl = scan.best ? `Best: ${scan.best.label}` : "Best: –";
+    const ratioTxt = (scan.bestRatio != null) ? ` • ${scan.bestRatio.toFixed(2)}×` : "";
+    const sel = (state.selectedPeriodMin != null) ? fmtPeriodLabel(state.selectedPeriodMin) : "Auto";
+    let pctTxt = "";
+    if (baseline.key && baseline.key === baselineKey() && baseline.bestRaw && scan.best){
+      const pRaw = percentileRank(baseline.bestRaw, scan.best.raw);
+      const pSep = (scan.bestRatio != null && baseline.bestRatio && baseline.bestRatio.length)
+        ? percentileRank(baseline.bestRatio, scan.bestRatio)
+        : null;
+      if (pRaw != null && pSep != null) pctTxt = ` • vs noise: stronger ${pRaw}% / clearer ${pSep}%`;
+      else if (pRaw != null) pctTxt = ` • vs noise: stronger than ${pRaw}% of random behavior`;
+    }
+    const bestLabel = `${bestLbl}${ratioTxt} • Sel: ${sel}${pctTxt}`;
+
+    const scores = scan.scores;
+    const gutterX = pad;
+    const gutterY = pad + 28; // below DOM title overlay
+    const gutterBarsW = GUTTER_W - 16;
+
+    const hit = drawScaleBars(ctx, gutterX, gutterY, gutterBarsW, scores, bestLabel, activePeriodMin, state.selectedPeriodMin, state.hoverPeriodMin);
+    state.scanHitboxes = hit;
+    state.scanHitboxesAnalysis = hit;
+
+    if (state.showTurns && turns.length){
+      const markerColor = gateRes.eligible ? getCSS("--accent") : getCSS("--ghost");
+      ctx.save();
+      ctx.fillStyle = markerColor;
+      for (const t of turns){
+        const i = t.i;
+        const x = cycleRect.x + i*cycleScale.xStep + cycleScale.xStep*0.5;
+        const y = cycleScale.yScale(cycleTf[i]);
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      const msg = gateRes.eligible ? "Gate: eligible" : `Gate: suppressed (${gateRes.reasons.join(", ")})`;
+      drawText(ctx, msg, cycleRect.x, cycleRect.y + cycleRect.h + 6, {font:"11px system-ui", color: gateRes.eligible ? getCSS("--good") : getCSS("--muted")});
+    }
+
+    // Normalization note (prevents users from comparing vertical magnitude across charts/rerenders).
+    drawText(
+      ctx,
+      "Vertical scale normalized to recent window",
+      w - pad,
+      h - pad - 6,
+      {font:"10px system-ui", color:"rgba(232,238,252,0.42)", align:"right", baseline:"bottom"}
+    );
+  }
+
+  function renderScanPanel(){
+    if (pfDetails && !pfDetails.open) return;
+    const pad = OUTER_PAD;
+
+    const closes1m = state.flat1m.flat.map(k => k.c);
+    const L = clamp(Math.floor(state.detrendHours*60), 30, closes1m.length);
+    const resid1m = detrendRollingLinear(closes1m, L);
+
+    const scan = computeOscillationScanOnResidual(resid1m, state.scanWindow, state.periods);
+    const stab = computePeriodStability(resid1m, state.scanWindow, state.periods);
+
+    // Auto-size the Pattern Finder panel so all bars are visible (no clipping).
+    // Keep in sync with `drawScaleBars()` layout:
+    // - y passed in as (pad)
+    // - bars start at (y + 18)
+    // - row height = 12
+    // - footer text at (top + n*rowH + 6)
+    // Add a little breathing room + account for `.chart` padding (10px top + bottom).
+    if (scanPanel && scan && scan.scores){
+      const n = scan.scores.length;
+      const rowH = 12;
+      const canvasNeeded = (pad) + 18 + (n * rowH) + 6 + 14 + pad; // header + rows + footer + bottom pad
+      const chartPadding = 20; // `.chart{ padding:10px; }`
+      const desiredH = Math.max(220, Math.ceil(canvasNeeded + chartPadding));
+      if (scanPanel.style.height !== `${desiredH}px`) scanPanel.style.height = `${desiredH}px`;
+    }
+
+    const ctx = setupHiDPICanvas(cScan);
+    const w = cScan.getBoundingClientRect().width;
+    const h = cScan.getBoundingClientRect().height;
+    ctx.clearRect(0,0,w,h);
+
+    const bestLbl = scan.best ? `Best: ${scan.best.label}` : "Best: –";
+    const ratioTxt = (scan.bestRatio != null) ? ` • ${scan.bestRatio.toFixed(2)}×` : "";
+    const sel = (state.selectedPeriodMin != null) ? fmtPeriodLabel(state.selectedPeriodMin) : "Auto";
+    let pctTxt = "";
+    if (baseline.key && baseline.key === baselineKey() && baseline.bestRaw && scan.best){
+      const pRaw = percentileRank(baseline.bestRaw, scan.best.raw);
+      const pSep = (scan.bestRatio != null && baseline.bestRatio && baseline.bestRatio.length)
+        ? percentileRank(baseline.bestRatio, scan.bestRatio)
+        : null;
+      if (pRaw != null && pSep != null) pctTxt = ` • vs noise: stronger ${pRaw}% / clearer ${pSep}%`;
+      else if (pRaw != null) pctTxt = ` • vs noise: stronger than ${pRaw}% of random behavior`;
+    }
+    const bestLabel = `${bestLbl}${ratioTxt} • Sel: ${sel}${pctTxt}`;
+
+    const scores = scan.scores;
+    const gutterW = w - pad*2;
+
+    const activeMin = (state.selectedPeriodMin != null) ? state.selectedPeriodMin : (scan.best ? scan.best.min : null);
+    const hit = drawScaleBars(ctx, pad, pad, gutterW, scores, bestLabel, activeMin, state.selectedPeriodMin, state.hoverPeriodMin);
+    const mapped = hit.map(hb => ({...hb, canvas:"scan"}));
+    state.scanHitboxes = mapped;
+    state.scanHitboxesScan = mapped;
+  }
+
+  function renderConsistencyPanel(){
+    if (!cConsistency || !consistencyPanel) return;
+    consistencyPanel.style.display = "block";
+
+    const ctx = setupHiDPICanvas(cConsistency);
+    const w = cConsistency.getBoundingClientRect().width;
+    const h = cConsistency.getBoundingClientRect().height;
+    ctx.clearRect(0,0,w,h);
+
+    if (!state.days1m || !state.flat1m) return;
+
+    const pad = OUTER_PAD;
+    const closes1m = state.flat1m.flat.map(k => k.c);
+    const L = clamp(Math.floor(state.detrendHours*60), 30, closes1m.length);
+    const resid1m = detrendRollingLinear(closes1m, L);
+    const stab = computePeriodStability(resid1m, state.scanWindow, state.periods);
+
+    // use the existing stability renderer, but place it in a dedicated panel
+    // Leave room for the DOM `chartTitle` overlay.
+    drawStabilityPanel(ctx, pad, pad + 28, w - pad*2, stab);
+  }
+
+  function renderAll(){
+    if (!state.days1m) return;
+
+    const tf = Math.max(1, Math.floor(state.tfMinutes || 1));
+
+    const daysTf = state.days1m.map(day => resampleCandles(day, tf));
+    const flatTf = flattenDays(daysTf);
+
+    updateSelPeriodLabel();
+    const selTxt = (state.selectedPeriodMin != null) ? ` • Sel ${fmtPeriodLabel(state.selectedPeriodMin)}` : (state.bestPeriodMin != null ? ` • Sel Auto(${fmtPeriodLabel(state.bestPeriodMin)})` : "");
+    setStatus(`${state.ticker} • ${state.days} days • TF ${tf}m${selTxt} • seed ${state.seed}`);
+
+    renderPrice(flatTf.flat, flatTf.dayStartIdx);
+    renderAnalysis();
+
+    // Only render Pattern Finder when the section is expanded (avoids 0-size canvases).
+    if (!pfDetails || pfDetails.open) renderScanPanel();
+    renderConsistencyPanel();
+
+    updateDialLabels();
+  }
+
+  // When user expands Pattern Finder section, render immediately.
+  if (pfDetails){
+    pfDetails.addEventListener("toggle", () => {
+      if (pfDetails.open){
+        renderScanPanel();
+      }
+    });
+  }
+
+  function applyFromUI(){
+    state.ticker = elTicker.value;
+    state.days = Number(elDays.value);
+    state.tfMinutes = Number(elTf.value);
+    state.showDetrend = !!elToggleDetrend.checked;
+    state.showTurns = !!elToggleTurns.checked;
+    state.gateEnabled = !!elToggleGate.checked;
+    state.detrendHours = Number(elDetrendHours.value) || state.detrendHours;
+    state.scanWindow = Number(elScanWindow.value) || state.scanWindow;
+    maybeInvalidateBaseline();
+  }
+
+  elTicker.addEventListener("change", () => { applyFromUI(); renderAll(); });
+  elDays.addEventListener("change", () => { applyFromUI(); regenData(); renderAll(); });
+  elTf.addEventListener("change", () => { applyFromUI(); renderAll(); });
+  elRegen.addEventListener("click", () => { applyFromUI(); regenData(); renderAll(); });
+
+  elToggleDetrend.addEventListener("change", () => { applyFromUI(); renderAll(); });
+  elToggleTurns.addEventListener("change", () => { applyFromUI(); renderAll(); });
+  elToggleGate.addEventListener("change", () => { applyFromUI(); renderAll(); });
+
+  elGateDom.addEventListener("change", () => { renderAll(); });
+  elGateSep.addEventListener("change", () => { renderAll(); });
+  elGateSlope.addEventListener("change", () => { renderAll(); });
+  elGateRequireRange.addEventListener("change", () => { renderAll(); });
+  elGateVol.addEventListener("change", () => { renderAll(); });
+  elGateSuppressHighVol.addEventListener("change", () => { renderAll(); });
+
+  if (elScanWindow) elScanWindow.addEventListener("change", () => { state.scanWindow = Number(elScanWindow.value) || 780; maybeInvalidateBaseline(); renderAll(); });
+
+  if (elScanMinPeriod) elScanMinPeriod.addEventListener("change", () => { syncCandidatePeriods(); maybeInvalidateBaseline(); renderAll(); });
+  if (elScanMaxPeriod) elScanMaxPeriod.addEventListener("change", () => { syncCandidatePeriods(); maybeInvalidateBaseline(); renderAll(); });
+  if (elScanStepPeriod) elScanStepPeriod.addEventListener("change", () => { syncCandidatePeriods(); maybeInvalidateBaseline(); renderAll(); });
+  if (elScanLogSpacing) elScanLogSpacing.addEventListener("change", () => { syncCandidatePeriods(); maybeInvalidateBaseline(); renderAll(); });
+
+  if (elBaselineRunBtn) elBaselineRunBtn.addEventListener("click", () => {
+    syncCandidatePeriods();
+    maybeInvalidateBaseline();
+    buildNoiseBaseline();
+  });
+  if (elBaselineClearBtn) elBaselineClearBtn.addEventListener("click", () => {
+    clearBaseline();
+    renderAll();
+  });
+
+  function hitboxAtPointer(e, canvas, hitboxes){
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const hit = hitboxes || [];
+    for (const hb of hit){
+      if (x>=hb.x && x<=hb.x+hb.w && y>=hb.y && y<=hb.y+hb.h){
+        return hb;
+      }
+    }
+    return null;
+  }
+
+  // Click-to-select disabled: hover activates instead.
+  cScan.addEventListener("click", (e)=>{ e.preventDefault(); });
+  cAnalysis.addEventListener("click", (e)=>{ e.preventDefault(); });
+
+  function onScanHover(e, canvas){
+    const hit = (canvas === cAnalysis) ? state.scanHitboxesAnalysis : state.scanHitboxesScan;
+    const hb = hitboxAtPointer(e, canvas, hit);
+    if (hb){
+      canvas.style.cursor = "pointer";
+      setHoverTip(true, e.clientX, e.clientY, `Hover to analyze: ${fmtRhythmPhrase(hb.periodMin)}`);
+      setHoverPeriod(hb.periodMin, hb.label);
+    } else {
+      canvas.style.cursor = "";
+      setHoverTip(false);
+      setHoverPeriod(null, null);
+    }
+  }
+
+  cScan.addEventListener("mousemove", (e)=> onScanHover(e, cScan));
+  cAnalysis.addEventListener("mousemove", (e)=> onScanHover(e, cAnalysis));
+  cScan.addEventListener("mouseleave", ()=>{ cScan.style.cursor=""; setHoverTip(false); setHoverPeriod(null,null); });
+  cAnalysis.addEventListener("mouseleave", ()=>{ cAnalysis.style.cursor=""; setHoverTip(false); setHoverPeriod(null,null); });
+
+  function clearSel(e){
+    e.preventDefault();
+    state.selectedPeriodMin = null;
+    updateSelPeriodLabel();
+    renderAll();
+  }
+  cScan.addEventListener("contextmenu", clearSel);
+  cAnalysis.addEventListener("contextmenu", clearSel);
+
+  const detrendDial = createDial({
+    canvas: elDetrendDial,
+    min: 0.25,
+    max: 8.0,
+    step: 0.25,
+    value: state.detrendHours,
+    colorVar: "--accent2",
+    format: (v)=>`${Number(v).toFixed(1)}h`,
+    onChange: (v)=>{ state.detrendHours = Number(v); elDetrendHours.value = Number(v).toFixed(2); updateDialLabels(); maybeInvalidateBaseline(); renderAll(); }
+  });
+
+  const scanDial = createDial({
+    canvas: elScanDial,
+    min: 120,
+    max: MINUTES_PER_DAY*10,
+    step: 30,
+    value: state.scanWindow,
+    colorVar: "--warn",
+    format: (v)=>fmtLookbackShort(v),
+    onChange: (v)=>{ state.scanWindow = Math.round(Number(v)); elScanWindow.value = String(state.scanWindow); updateDialLabels(); maybeInvalidateBaseline(); renderAll(); }
+  });
+
+  function applyPreset(p){
+    // Cancels any running baseline and clears selection (presets are "fresh starts").
+    clearBaseline();
+    state.selectedPeriodMin = null;
+
+    if (p.detrendHours != null){
+      state.detrendHours = Number(p.detrendHours);
+      if (elDetrendHours) elDetrendHours.value = state.detrendHours.toFixed(2);
+      detrendDial.setValue(state.detrendHours, false);
+    }
+    if (p.scanWindow != null){
+      state.scanWindow = Math.round(Number(p.scanWindow));
+      if (elScanWindow) elScanWindow.value = String(state.scanWindow);
+      scanDial.setValue(state.scanWindow, false);
+    }
+    if (p.scanMinPeriod != null && elScanMinPeriod) elScanMinPeriod.value = String(Math.round(p.scanMinPeriod));
+    if (p.scanMaxPeriod != null && elScanMaxPeriod) elScanMaxPeriod.value = String(Math.round(p.scanMaxPeriod));
+    if (p.scanStepPeriod != null && elScanStepPeriod) elScanStepPeriod.value = String(Math.round(p.scanStepPeriod));
+    if (p.scanLogSpacing != null && elScanLogSpacing) elScanLogSpacing.checked = !!p.scanLogSpacing;
+
+    syncCandidatePeriods();
+    updateSelPeriodLabel();
+    updateDialLabels();
+    renderAll();
+  }
+
+  if (elPresetDaily) elPresetDaily.addEventListener("click", () => {
+    applyPreset({
+      // Focus on ~hours/day rhythms
+      detrendHours: 4.0,
+      scanWindow: MINUTES_PER_DAY*3,
+      scanMinPeriod: 30,
+      scanMaxPeriod: 24*60,
+      scanStepPeriod: 15,
+      scanLogSpacing: false
+    });
+  });
+  if (elPresetShort) elPresetShort.addEventListener("click", () => {
+    applyPreset({
+      // Focus on minutes→hours rhythms
+      detrendHours: 1.0,
+      scanWindow: MINUTES_PER_DAY*1,
+      scanMinPeriod: 5,
+      scanMaxPeriod: 180,
+      scanStepPeriod: 5,
+      scanLogSpacing: false
+    });
+  });
+  if (elPresetLong) elPresetLong.addEventListener("click", () => {
+    applyPreset({
+      // Focus on multi-hour / multi-day rhythms
+      detrendHours: 8.0,
+      scanWindow: MINUTES_PER_DAY*10,
+      scanMinPeriod: 60,
+      scanMaxPeriod: 24*60,
+      scanStepPeriod: 30,
+      scanLogSpacing: true
+    });
+  });
+
+  syncScanPeriodLabel();
+  regenData();
+  updateDialLabels();
+  renderAll();
+
+})();
+</script>
+</body>
+</html>

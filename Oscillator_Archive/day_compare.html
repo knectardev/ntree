@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Day-of-Week Price Matrix → Intraday Drilldown (Demo)</title>
+  <style>
+    :root{
+      --bg:#050505;
+      --panel:#0b0b0b;
+      --grid:#171717;
+      --fg:#eaeaea;
+      --muted:#9a9a9a;
+      --accent:#ff2bd6;
+      --up:#1fd28e;
+      --dn:#ff4b5c;
+      --line:#ffe400;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+    .wrap{display:grid;grid-template-columns:240px 1fr;min-height:100vh;}
+    .sidebar{padding:14px;border-right:1px solid #111;background:linear-gradient(#070707,#040404);}
+    .sidebar h2{margin:0 0 10px 0;font-size:15px;font-weight:700;letter-spacing:.2px;}
+    .row{margin:8px 0;}
+    select,button{width:100%;padding:9px 10px;border-radius:10px;border:1px solid #1a1a1a;background:var(--panel);color:var(--fg);}
+    button{cursor:pointer;background:#0e0e0e;}
+    button:hover{border-color:#2a2a2a;}
+    .hint{margin-top:14px;padding:10px;border:1px solid #141414;border-radius:12px;background:#070707;color:var(--muted);font-size:12px;}
+    .main{padding:14px;}
+    .titlebar{display:flex;align-items:flex-end;gap:14px;justify-content:space-between;margin-bottom:10px;}
+    .titlebar h1{margin:0;font-size:16px;font-weight:800;}
+    .sub{color:var(--muted);font-size:12px;margin-top:2px;}
+    .status{color:var(--muted);font-size:12px;}
+    .panel{border:1px solid #111;border-radius:16px;background:radial-gradient(1200px 700px at 30% 20%,#0b0b0b 0%,#050505 55%,#040404 100%);
+           padding:10px;}
+    canvas{width:100%;display:block;border-radius:12px;}
+    .sp{height:12px;}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="sidebar">
+    <div class="row"><label for="ticker">Ticker</label></div>
+    <select id="ticker">
+      <option>QQQ</option>
+      <option>AAPL</option>
+      <option>SPY</option>
+      <option>TSLA</option>
+    </select>
+
+    <div class="row" style="margin-top:10px;"><label for="weeks">Weeks</label></div>
+    <select id="weeks">
+      <option value="4">4</option>
+      <option value="6" selected>6</option>
+      <option value="8">8</option>
+      <option value="10">10</option>
+    </select>
+
+    <div class="row" style="margin-top:10px;"><label for="tf">Matrix candle (minutes)</label></div>
+    <select id="tf">
+      <option value="15" selected>15</option>
+      <option value="30">30</option>
+      <option value="60">60</option>
+    </select>
+
+    <div class="row" style="margin-top:10px;"><label for="tfDetail">Drilldown candle (minutes)</label></div>
+    <select id="tfDetail">
+      <option value="1" selected>1</option>
+      <option value="5">5</option>
+      <option value="15">15</option>
+    </select>
+
+    <div class="row" style="margin-top:10px;"><button id="regen">Regenerate random data</button></div>
+
+    <div class="row" style="margin-top:10px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">
+        <input id="toggleLine" type="checkbox" style="width:16px;height:16px;" checked />
+        <span>Show inflection line</span>
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">
+        <input id="toggleDetrend" type="checkbox" style="width:16px;height:16px;" checked />
+        <span>Detrend drilldown (rolling linear)</span>
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:6px;display:flex;gap:10px;align-items:center;">
+      <label for="detrendHours" style="flex:1;">Detrend window (hours)</label>
+      <input id="detrendHours" type="number" min="0.5" step="0.5" value="2" style="width:90px;background:#0e0e0e;color:var(--fg);border:1px solid #2a2a2a;border-radius:8px;padding:6px 8px;" />
+    </div>
+
+    <div class="hint">
+      <div style="color:var(--accent);margin-bottom:6px;">Tip</div>
+      Click a <b>day header</b> (Sunday…Saturday) in the top grid to update the hourly drilldown below.
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="titlebar">
+      <div>
+        <h1>Day-of-Week Price Matrix → Intraday Drilldown (Demo)</h1>
+        <div class="sub">Random coin-flip walk OHLC • click headers to drill down</div>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="panel">
+      <canvas id="matrix" height="260"></canvas>
+      <div class="sp"></div>
+      <canvas id="detail" height="420"></canvas>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  // ---------- Utilities ----------
+  const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]; 
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+
+  function detrendRollingLinear(series, L){
+    // Returns residuals after removing a rolling linear fit over the last L samples.
+    const n = series.length;
+    const out = new Array(n).fill(0);
+    const w = Math.max(3, Math.floor(Number(L) || 24));
+    for(let i=0;i<n;i++){
+      const a = Math.max(0, i - w + 1);
+      const b = i;
+      const m = (b - a + 1);
+      if(m < 3){ out[i] = 0; continue; }
+      let sumT = 0, sumY = 0, sumTT = 0, sumTY = 0;
+      for(let j=0;j<m;j++){
+        const t = j;
+        const y = series[a + j];
+        sumT += t; sumY += y; sumTT += t*t; sumTY += t*y;
+      }
+      const denom = (m*sumTT - sumT*sumT) || 1e-9;
+      const beta = (m*sumTY - sumT*sumY) / denom;
+      const alpha = (sumY - beta*sumT) / m;
+      const yhat = alpha + beta*(m-1);
+      out[i] = series[i] - yhat;
+    }
+    return out;
+  }
+
+  function smaRolling(series, L){
+    const n = series.length;
+    const out = new Array(n).fill(0);
+    const w = Math.max(1, Math.floor(Number(L) || 24));
+    let sum = 0;
+    for(let i=0;i<n;i++){
+      sum += series[i];
+      if(i >= w) sum -= series[i-w];
+      const denom = Math.min(i+1, w);
+      out[i] = sum / denom;
+    }
+    return out;
+  }
+
+  function applyDetrendedClose(candles, L){
+    // Detrend the close series, but keep the result in "price-like" units so it
+    // visually looks like a flattened version of the same path.
+    //
+    // We do: detrendedClose = residual + SMA(L)
+    // - residual removes local linear slope
+    // - SMA adds back a local level so values aren't centered at ~0
+    //
+    // Then we synthesize OHLC around that detrendedClose using the original candle's
+    // typical range for wicks, so it still looks like candles.
+    const closes = candles.map(k => k.c);
+    const resid = detrendRollingLinear(closes, L);
+    const base = smaRolling(closes, L);
+
+    const det = resid.map((r,i)=> r + base[i]);
+
+    const out = [];
+    for(let i=0;i<candles.length;i++){
+      const prevC = (i > 0) ? det[i-1] : det[i];
+      const currC = det[i];
+      const o = prevC;
+      const c = currC;
+
+      const origRange = Math.max(1e-9, (candles[i].h - candles[i].l));
+      const wick = origRange * 0.35;
+      const h = Math.max(o, c) + wick;
+      const l = Math.min(o, c) - wick;
+      out.push({o,h,l,c,v:candles[i].v});
+    }
+    return out;
+  }
+
+  function mulberry32(seed){
+    let t = seed >>> 0;
+    return function(){
+      t += 0x6D2B79F5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function getCSS(varName){
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  }
+
+  function setupHiDPICanvas(canvas){
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.floor(rect.width * dpr));
+    const h = Math.max(1, Math.floor(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h){
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.scale(dpr, dpr);
+    return ctx;
+  }
+
+  function drawText(ctx, text, x, y, opts){
+    const o = opts || {};
+    ctx.save();
+    ctx.font = o.font || "12px system-ui";
+    ctx.fillStyle = o.color || getCSS("--fg");
+    ctx.textBaseline = o.baseline || "alphabetic";
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  // ---------- Random OHLC generator ----------
+  function generateMarket({weeks, candlesPerDay, seed}){
+    const rng = mulberry32(seed);
+    const market = []; // market[weekIndex][dayIndex] = candle[]
+    let price = 100 + rng()*20;
+
+    for (let w=0; w<weeks; w++){
+      const week = [];
+      for (let d=0; d<7; d++){
+        const day = [];
+        for (let i=0; i<candlesPerDay; i++){
+          const o = price;
+          const flip = rng() < 0.5 ? -1 : 1;
+          const step = flip * (0.03 + rng()*0.25); // %
+          const c = o * (1 + step/100);
+
+          const wick = (0.02 + rng()*0.18) / 100; // fraction
+          const hi = Math.max(o,c) * (1 + wick);
+          const lo = Math.min(o,c) * (1 - wick);
+          const v = 50 + rng()*150;
+
+          day.push({o,h:hi,l:lo,c,v});
+          price = c;
+        }
+        week.push(day);
+      }
+      market.push(week);
+    }
+    return market;
+  }
+
+  // Resample 1m candles to a higher timeframe (tfMinutes must be >= 1)
+  function resampleCandles(candles1m, tfMinutes){
+    const tf = Math.max(1, Math.floor(Number(tfMinutes) || 1));
+    if (tf === 1) return candles1m.slice();
+
+    const out = [];
+    for (let i=0; i<candles1m.length; i += tf){
+      const chunk = candles1m.slice(i, i+tf);
+      if (!chunk.length) continue;
+      const o = chunk[0].o;
+      const c = chunk[chunk.length-1].c;
+      let h = -Infinity;
+      let l = Infinity;
+      let v = 0;
+      for (const k of chunk){
+        h = Math.max(h, k.h);
+        l = Math.min(l, k.l);
+        v += (k.v || 0);
+      }
+      out.push({o,h,l,c,v});
+    }
+    return out;
+  }
+
+  // ---------- Candle renderer ----------
+  function drawCandles(ctx, candles, rect){
+    const {x,y,w,h} = rect;
+    const pad = 6;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+
+    // background + grid
+    ctx.save();
+    ctx.fillStyle = getCSS("--panel");
+    ctx.fillRect(x,y,w,h);
+
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.lineWidth = 1;
+    const gx = 5;
+    const gy = 4;
+    for (let i=1;i<gx;i++){
+      const xx = innerX + innerW*(i/gx);
+      ctx.beginPath();ctx.moveTo(xx, innerY);ctx.lineTo(xx, innerY+innerH);ctx.stroke();
+    }
+    for (let j=1;j<gy;j++){
+      const yy = innerY + innerH*(j/gy);
+      ctx.beginPath();ctx.moveTo(innerX, yy);ctx.lineTo(innerX+innerW, yy);ctx.stroke();
+    }
+
+    if (!candles || !candles.length){
+      ctx.restore();
+      return;
+    }
+
+    let minP = Infinity;
+    let maxP = -Infinity;
+    for (const k of candles){
+      minP = Math.min(minP, k.l, k.c, k.o);
+      maxP = Math.max(maxP, k.h, k.c, k.o);
+    }
+    const span = (maxP-minP) || 1;
+
+    const n = candles.length;
+    const candleW = innerW / n;
+    const bodyW = Math.max(1, candleW*0.62);
+
+    function yMap(p){
+      const t = (p - minP) / span;
+      return innerY + innerH*(1 - t);
+    }
+
+    for (let i=0;i<n;i++){
+      const k = candles[i];
+      const cx = innerX + i*candleW + candleW/2;
+      const yO = yMap(k.o);
+      const yC = yMap(k.c);
+      const yH = yMap(k.h);
+      const yL = yMap(k.l);
+
+      const up = k.c >= k.o;
+      ctx.strokeStyle = up ? getCSS("--up") : getCSS("--dn");
+      ctx.fillStyle = up ? getCSS("--up") : getCSS("--dn");
+
+      // wick
+      ctx.beginPath();
+      ctx.moveTo(cx, yH);
+      ctx.lineTo(cx, yL);
+      ctx.stroke();
+
+      // body
+      const top = Math.min(yO,yC);
+      const bot = Math.max(yO,yC);
+      const bh = Math.max(1, bot-top);
+      ctx.fillRect(cx - bodyW/2, top, bodyW, bh);
+    }
+
+    ctx.restore();
+  }
+
+  function candlesToPoints(candles, rect){
+    const {x,y,w,h} = rect;
+    const pad = 6;
+    const innerX = x + pad;
+    const innerY = y + pad;
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+    if (!candles || !candles.length) return [];
+
+    let minP = Infinity;
+    let maxP = -Infinity;
+    for (const k of candles){
+      minP = Math.min(minP, k.l, k.c, k.o);
+      maxP = Math.max(maxP, k.h, k.c, k.o);
+    }
+    const span = (maxP-minP) || 1;
+    const n = candles.length;
+    const step = innerW / Math.max(1,(n-1));
+
+    const pts = [];
+    for (let i=0;i<n;i++){
+      const k = candles[i];
+      const xx = innerX + i*step;
+      const t = (k.c - minP) / span;
+      const yy = innerY + innerH*(1-t);
+      pts.push({x:xx,y:yy});
+    }
+    return pts;
+  }
+
+  function strokePolyline(ctx, pts, color, width){
+    if (!pts || pts.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width || 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function rms(series){
+    if (!series || !series.length) return 0;
+    let s = 0;
+    for (const v of series) s += v*v;
+    return Math.sqrt(s / series.length);
+  }
+
+  function zeroCrossings(series){
+    if (!series || series.length < 2) return 0;
+    let z = 0;
+    let prev = series[0];
+    for (let i=1;i<series.length;i++){
+      const cur = series[i];
+      if ((prev <= 0 && cur > 0) || (prev >= 0 && cur < 0)) z++;
+      prev = cur;
+    }
+    return z;
+  }
+
+  function clamp01(x){
+    return Math.max(0, Math.min(1, x));
+  }
+
+  // ---------- Oscillation scan helpers ----------
+  // Candidate periods for oscillation scan (minutes)
+  const PERIODS = [
+    {label:"1m",  min:1},
+    {label:"5m",  min:5},
+    {label:"30m", min:30},
+    {label:"1h",  min:60},
+    {label:"2h",  min:120},
+    {label:"4h",  min:240},
+    {label:"12h", min:720},
+    {label:"24h", min:1440}
+  ];
+
+  function computeOscillationScanForSelectedDay(){
+    const dayIdx = state.selectedDay;
+    const weeks = state.weeks;
+
+    const sums = new Array(PERIODS.length).fill(0);
+    const counts = new Array(PERIODS.length).fill(0);
+
+    for (let w=0; w<weeks; w++){
+      const candles1m = state.base[w][dayIdx];
+      const closes = candles1m.map(k => k.c);
+
+      for (let p=0; p<PERIODS.length; p++){
+        const L = Math.max(3, Math.round(PERIODS[p].min)); // 1m base
+        if (L >= closes.length) continue;
+
+        const resid = detrendRollingLinear(closes, L);
+
+        // Window big enough to contain multiple cycles (heuristic)
+        const win = Math.min(resid.length, Math.max(120, 6*L));
+        const tail = resid.slice(resid.length - win);
+
+        const energy = rms(tail);
+        const zc = zeroCrossings(tail);
+        const expected = Math.max(1, Math.round((win / L) * 2));
+        const regularity = clamp01(1 - (Math.abs(zc - expected) / expected));
+
+        const score = energy * regularity;
+        sums[p] += score;
+        counts[p] += 1;
+      }
+    }
+
+    const scores = PERIODS.map((per, i) => {
+      const ok = counts[i] > 0;
+      return {
+        ...per,
+        raw: ok ? (sums[i] / counts[i]) : null,
+        norm: 0
+      };
+    });
+
+    let maxRaw = 0;
+    for (const s of scores){
+      if (s.raw != null) maxRaw = Math.max(maxRaw, s.raw);
+    }
+    for (const s of scores){
+      s.norm = (s.raw != null && maxRaw > 0) ? (s.raw / maxRaw) : 0;
+    }
+
+    let best = null;
+    for (const s of scores){
+      if (s.raw == null) continue;
+      if (!best || s.raw > best.raw) best = s;
+    }
+
+    return {scores, best, maxRaw};
+  }
+
+  function drawScaleBars(ctx, x, y, w, scores, bestLabel){
+    const rowH = 12;
+    const gap = 4;
+    const labelW = 34;
+    const barH = 7;
+
+    const bg = getCSS("--grid");
+    const fill = getCSS("--accent");
+    const txt = getCSS("--muted");
+    const fg = getCSS("--fg");
+
+    drawText(ctx, "Oscillation scan (detrended)", x, y, {font:"12px system-ui", color:txt});
+    if (bestLabel){
+      // Keep the "Best" label inside the provided width.
+      const bestX = x + Math.max(120, Math.min(195, w - 110));
+      drawText(ctx, bestLabel, bestX, y, {font:"700 12px system-ui", color:fg});
+    }
+
+    let yy = y + 14;
+    const barW = Math.max(40, w - labelW - 10);
+
+    for (const s of scores){
+      const isBest = (bestLabel && s.label && bestLabel.includes(s.label));
+
+      drawText(ctx, s.label, x, yy, {
+        font: isBest ? "700 11px system-ui" : "11px system-ui",
+        color: isBest ? fg : txt,
+        baseline:"alphabetic"
+      });
+
+      const bx = x + labelW;
+      const by = yy - barH + 2;
+      ctx.save();
+      ctx.fillStyle = bg;
+      ctx.fillRect(bx, by, barW, barH);
+
+      const frac = clamp01(s.norm || 0);
+      ctx.fillStyle = (s.raw == null) ? bg : fill;
+      ctx.fillRect(bx, by, Math.max(0, barW * frac), barH);
+      ctx.restore();
+
+      yy += rowH + gap;
+    }
+  }
+
+  // ---------- App state ----------
+  const elTicker = document.getElementById("ticker");
+  const elWeeks = document.getElementById("weeks");
+  const elTf = document.getElementById("tf");
+  const elTfDetail = document.getElementById("tfDetail");
+  const elStatus = document.getElementById("status");
+  const elDetrend = document.getElementById("toggleDetrend");
+  const elDetrendHours = document.getElementById("detrendHours");
+
+  const cMatrix = document.getElementById("matrix");
+  const cDetail = document.getElementById("detail");
+
+  let state = {
+    ticker: elTicker.value,
+    weeks: Number(elWeeks.value),
+    tfMatrixMinutes: Number(elTf.value),
+    tfDetailMinutes: Number(elTfDetail.value) || 1,
+    seed: 1337,
+    selectedDay: 2, // Tuesday
+    showInflectionLine: true,
+    detrendEnabled: !!(elDetrend && elDetrend.checked),
+    detrendHours: Number(elDetrendHours && elDetrendHours.value) || 2,
+    _matrixLayout: null,
+    base: null
+  };
+
+  // Buckets for drilldown
+  const BUCKETS = ["09:30","10:30","11:30","12:30","13:30","14:30","15:30"];
+
+  function setStatus(msg){
+    elStatus.textContent = msg;
+  }
+
+  function renderAll(){
+    // Generate base data at 1-minute resolution, then resample separately for matrix vs drilldown.
+    const candlesPerDay = 390; // 6.5h * 60m
+    state.base = generateMarket({weeks: state.weeks, candlesPerDay, seed: state.seed});
+
+    setStatus(`${state.ticker} • ${state.weeks} weeks • matrix ${state.tfMatrixMinutes}m • drilldown ${state.tfDetailMinutes}m • seed ${state.seed}`);
+
+    renderMatrix();
+    renderDetail();
+  }
+
+  function getMatrixLayout(){
+    const w = cMatrix.getBoundingClientRect().width;
+    const h = cMatrix.getBoundingClientRect().height;
+    const pad = 10;
+    const headerH = 34;
+    const labelW = 70;
+    const innerX = pad + labelW;
+    const innerY = pad + headerH;
+    const innerW = w - innerX - pad;
+    const innerH = h - innerY - pad;
+    const colW = innerW / 7;
+    const rowH = innerH / state.weeks;
+    return {w,h,pad,headerH,labelW,innerX,innerY,innerW,innerH,colW,rowH};
+  }
+
+  function renderMatrix(){
+    const ctx = setupHiDPICanvas(cMatrix);
+    const w = cMatrix.getBoundingClientRect().width;
+    const h = cMatrix.getBoundingClientRect().height;
+
+    ctx.clearRect(0,0,w,h);
+
+    const layout = getMatrixLayout();
+    state._matrixLayout = layout;
+
+    // Headers
+    for (let c=0;c<7;c++){
+      const cellX = layout.innerX + c*layout.colW;
+      drawText(ctx, DAYS[c], cellX + layout.colW/2 - 24, layout.pad + 20, {
+        font:"700 14px system-ui",
+        color: c===state.selectedDay ? getCSS("--accent") : getCSS("--fg")
+      });
+
+      ctx.strokeStyle = getCSS("--grid");
+      ctx.beginPath();
+      ctx.moveTo(cellX, layout.pad);
+      ctx.lineTo(cellX, h-layout.pad);
+      ctx.stroke();
+    }
+
+    // Rows (weeks)
+    for (let r=0;r<state.weeks;r++){
+      const y0 = layout.innerY + r*layout.rowH;
+      ctx.strokeStyle = getCSS("--grid");
+      ctx.beginPath();ctx.moveTo(layout.pad, y0);ctx.lineTo(w-layout.pad, y0);ctx.stroke();
+      drawText(ctx, `Week ${r+1}`, layout.pad, y0 + layout.rowH/2 + 4, {font:"12px system-ui", color:getCSS("--muted")});
+
+      for (let c=0;c<7;c++){
+        const cellX = layout.innerX + c*layout.colW;
+        const cellY = y0;
+        const cellW = layout.colW;
+        const cellH = layout.rowH;
+
+        const dayCandles = resampleCandles(state.base[r][c], state.tfMatrixMinutes);
+
+        // Downsample so each cell stays light
+        const step = Math.max(1, Math.floor(dayCandles.length / 24));
+        const mini = [];
+        for (let i=0; i<dayCandles.length; i+=step) mini.push(dayCandles[i]);
+
+        if (c === state.selectedDay){
+          ctx.strokeStyle = getCSS("--accent");
+          ctx.lineWidth = 1;
+          ctx.strokeRect(cellX-2, cellY-2, cellW+4, cellH+4);
+        }
+
+        drawCandles(ctx, mini, {x:cellX,y:cellY,w:cellW,h:cellH});
+
+        if (state.showInflectionLine){
+          const pts = candlesToPoints(mini, {x:cellX,y:cellY,w:cellW,h:cellH});
+          strokePolyline(ctx, pts, getCSS("--line"), 2);
+        }
+      }
+    }
+
+    ctx.strokeStyle = getCSS("--grid");
+    ctx.beginPath();ctx.moveTo(layout.pad, layout.innerY + state.weeks*layout.rowH);
+    ctx.lineTo(w-layout.pad, layout.innerY + state.weeks*layout.rowH);
+    ctx.stroke();
+  }
+
+  function renderDetail(){
+    const ctx = setupHiDPICanvas(cDetail);
+    const w = cDetail.getBoundingClientRect().width;
+    const h = cDetail.getBoundingClientRect().height;
+
+    ctx.clearRect(0,0,w,h);
+
+    const pad = 10;
+
+    // Left gutter is used for row labels AND the oscillation histogram.
+    const labelW = 260;
+
+    // Size header to fit the histogram block + bucket labels cleanly.
+    const scanRowsH = 14 + (12 + 4) * PERIODS.length + 6; // title + rows + padding
+    const headerH = Math.max(118, 54 + scanRowsH);
+
+    const innerX = pad + labelW;
+    const innerY = pad + headerH;
+    const innerW = w - innerX - pad;
+    const innerH = h - innerY - pad;
+
+    const cols = BUCKETS.length;
+    const rows = state.weeks;
+    const colW = innerW / cols;
+
+    const dayName = DAYS[state.selectedDay];
+    drawText(ctx, `${dayName} drilldown`, pad, pad+18, {font:"700 14px system-ui"});
+    drawText(ctx, `Each row = same weekday across weeks`, pad+140, pad+18, {font:"12px system-ui", color:getCSS("--muted")});
+
+    // Oscillation scan bar list (averaged across weeks, based on 1-minute base data)
+    const scan = computeOscillationScanForSelectedDay();
+    const bestLabel = scan.best ? `Best: ${scan.best.label}` : "Best: (none)";
+
+    const barsX = pad;
+    const barsY = pad + 34;
+    const barsW = Math.max(180, labelW - pad*2);
+    // Draw inside the left gutter so it never collides with candle columns.
+    drawScaleBars(ctx, barsX, barsY, barsW, scan.scores, bestLabel);
+
+    for (let c=0;c<cols;c++){
+      const cellX = innerX + c*colW;
+      drawText(ctx, BUCKETS[c], cellX + 6, innerY - 8, {font:"12px system-ui", color:getCSS("--muted"), baseline:"alphabetic"});
+
+      ctx.strokeStyle = getCSS("--grid");
+      ctx.beginPath();ctx.moveTo(cellX, innerY-20);ctx.lineTo(cellX, h-pad);ctx.stroke();
+    }
+
+    for (let r=0;r<rows;r++){
+      const rowY = innerY + r*(innerH/rows);
+      ctx.strokeStyle = getCSS("--grid");
+      ctx.beginPath();ctx.moveTo(pad, rowY);ctx.lineTo(w-pad, rowY);ctx.stroke();
+      drawText(ctx, `W${r+1}`, pad, rowY + (innerH/rows)/2 + 4, {font:"12px system-ui", color:getCSS("--muted")});
+
+      const dayCandles = resampleCandles(state.base[r][state.selectedDay], state.tfDetailMinutes);
+
+      for (let c=0;c<cols;c++){
+        const cellX = innerX + c*colW;
+        const cellY = rowY;
+        const cellW = colW;
+        const cellH = innerH/rows;
+
+        const startIdx = Math.round((c/cols) * dayCandles.length);
+        const endIdx = Math.round(((c+1)/cols) * dayCandles.length);
+        const slice = dayCandles.slice(startIdx, endIdx);
+
+        // Detrend on the full-resolution slice first, then downsample for drawing.
+        const Lbars = Math.max(3, Math.round((((state.detrendHours || 2) * 60)) / (state.tfDetailMinutes || 1)));
+        const seriesForDraw = state.detrendEnabled ? applyDetrendedClose(slice, Lbars) : slice;
+
+        const step = Math.max(1, Math.floor(seriesForDraw.length / 28));
+        const miniDraw = [];
+        for (let i=0; i<seriesForDraw.length; i+=step) miniDraw.push(seriesForDraw[i]);
+
+        drawCandles(ctx, miniDraw, {x:cellX,y:cellY,w:cellW,h:cellH});
+
+        if (state.showInflectionLine){
+          const pts = candlesToPoints(miniDraw, {x:cellX,y:cellY,w:cellW,h:cellH});
+          strokePolyline(ctx, pts, getCSS("--line"), 2);
+        }
+      }
+    }
+  }
+
+  function hitTestHeader(clientX){
+    const rect = cMatrix.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const layout = state._matrixLayout;
+    if (!layout) return null;
+    if (x < layout.innerX || x > layout.innerX + layout.innerW) return null;
+    const col = Math.floor((x - layout.innerX) / layout.colW);
+    return clamp(col, 0, 6);
+  }
+
+  function setSelectedDay(dayIndex){
+    state.selectedDay = clamp(dayIndex,0,6);
+    renderMatrix();
+    renderDetail();
+  }
+
+  cMatrix.addEventListener("click", (e) => {
+    const d = hitTestHeader(e.clientX);
+    if (d === null) return;
+    setSelectedDay(d);
+  });
+
+  function regenerate(){
+    state.ticker = elTicker.value;
+    state.weeks = Number(elWeeks.value);
+    state.tfMatrixMinutes = Number(elTf.value);
+    state.tfDetailMinutes = Number(elTfDetail && elTfDetail.value) || 1;
+    state.detrendEnabled = !!(elDetrend && elDetrend.checked);
+    state.detrendHours = Number(elDetrendHours && elDetrendHours.value) || 2;
+    state.seed = (state.seed + 99991) >>> 0;
+    renderAll();
+    setSelectedDay(state.selectedDay);
+  }
+
+  // ---------- Lightweight self-tests (console.assert) ----------
+  function runSelfTests(){
+    try{
+      const fake = generateMarket({weeks: 2, candlesPerDay: 30, seed: 1});
+      console.assert(fake.length === 2, "test: generateMarket weeks");
+      console.assert(fake[0].length === 7, "test: generateMarket days");
+      console.assert(fake[0][0].length === 30, "test: generateMarket candlesPerDay");
+
+      const r5 = resampleCandles(fake[0][0], 5);
+      console.assert(r5.length === 6, "test: resample 30x1m -> 6x5m");
+
+      const closes = fake[0][0].map(k => k.c);
+      const resid = detrendRollingLinear(closes, 10);
+      console.assert(resid.length === closes.length, "test: detrend length matches");
+
+      const detCandles = applyDetrendedClose(fake[0][0], 10);
+      console.assert(detCandles.length === fake[0][0].length, "test: applyDetrendedClose length matches");
+
+      // Minimal scan sanity (requires base + weeks + selectedDay)
+      const oldBase = state.base;
+      state.base = fake;
+      state.weeks = 2;
+      state.selectedDay = 0;
+      const scan = computeOscillationScanForSelectedDay();
+      console.assert(Array.isArray(scan.scores) && scan.scores.length === PERIODS.length, "test: scan scores length");
+      console.assert(scan.scores.every(s => typeof s.norm === "number" && !Number.isNaN(s.norm)), "test: scan norms numeric");
+      state.base = oldBase;
+    }catch(err){
+      console.warn("Self-tests encountered an error:", err);
+    }
+  }
+
+  // ---------- Wiring ----------
+  document.getElementById("regen").addEventListener("click", regenerate);
+  elTicker.addEventListener("change", regenerate);
+  elWeeks.addEventListener("change", regenerate);
+  elTf.addEventListener("change", regenerate);
+  elTfDetail.addEventListener("change", regenerate);
+
+  const elToggleLine = document.getElementById("toggleLine");
+  elToggleLine.addEventListener("change", () => {
+    state.showInflectionLine = !!elToggleLine.checked;
+    renderMatrix();
+    renderDetail();
+  });
+
+  if (elDetrend){
+    elDetrend.addEventListener("change", () => {
+      state.detrendEnabled = !!elDetrend.checked;
+      renderDetail();
+    });
+  }
+
+  if (elDetrendHours){
+    elDetrendHours.addEventListener("change", () => {
+      state.detrendHours = Number(elDetrendHours.value) || 2;
+      renderDetail();
+    });
+  }
+
+  window.addEventListener("resize", () => {
+    renderMatrix();
+    renderDetail();
+  });
+
+  // Initial
+  runSelfTests();
+  renderAll();
+})();
+</script>
+</body>
+</html>

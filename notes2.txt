@@ -1,0 +1,53 @@
+Why this is especially confusing in your UI
+
+Because:
+
+The yellow line is not price
+
+It is not computed at the candle resolution
+
+But it looks like it’s tied to the candle selector
+
+So users (correctly!) infer a contradiction.
+
+What you should do to fix this (UX + correctness)
+✅ 1. Decouple cleaned-signal rendering from candle size
+
+For the cleaned signal panel only:
+
+Always render at native 1-minute resolution
+
+Do not downsample to match candle size
+
+Let it “float” over the price view
+
+This makes the line visually stable across candle selections.
+
+Price candles can change.
+Analysis overlays should not.
+
+✅ 2. Add a small, explicit label (this matters)
+
+Right near the cleaned signal title, add:
+
+Rendered at full 1-minute resolution
+
+or
+
+Independent of candle display
+
+This instantly resolves user confusion.
+
+✅ 3. (Optional but strong) Lock the cleaned signal’s Y-scale
+
+If you normalize the cleaned signal to:
+
+±1
+
+or recent RMS
+
+and keep that scale fixed, then:
+
+amplitude comparisons become meaningful
+
+visual shape becomes more consistent across views
