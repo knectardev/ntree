@@ -208,6 +208,9 @@ A comprehensive signal processing tool for identifying repeating rhythms in pric
   - Log spacing option for period distribution
 - **Noise Baseline**: Calibrates metrics against random-walk noise (400 runs default)
 - **Search Presets**: Quick configurations for daily patterns, short-term jitters, long-term trends
+- **Visualization Toggles**:
+  - **Show best-fit wave** (default on): global best-fit sine overlay for the active period
+  - **Show local match strength** (default on): highlights where the active rhythm matches strongly vs fades out (diagnostic)
 
 **Visualization Panels**:
 1. **Original Data & Slow Trends**: Shows raw price with detrend overlay (optional)
@@ -215,9 +218,18 @@ A comprehensive signal processing tool for identifying repeating rhythms in pric
    - Detrended signal (yellow)
    - Bandpassed rhythm component (pink/cyan)
    - Best-fit sine wave overlay (dashed, optional, enabled by default)
+   - **Local match strength overlay** (optional, enabled by default):
+     - **Presence strip** (bottom band): brighter = stronger local match
+     - **Segmented sine overlay** (gapped line): drawn only where local match exceeds threshold
    - Cycle turning points (optional)
    - Variance explained badge (High/Medium/Low)
 3. **Pattern Finder**: Bar chart showing candidate period scores with coherence and energy metrics
+   - **Hover**: shows per-period tooltip (energy, r/coherence)
+   - **Click**: selects a period for visualization (locks “Selected rhythm” visuals to that period)
+   - **Right-click**: clears selection (returns to Auto)
+   - Selection works from both:
+     - The main Pattern Finder panel
+     - The mini Pattern Finder bars drawn in the analysis chart’s left gutter
 4. **Rhythm Stability**: Tracks agreement, clarity, and changes across recent windows
 
 #### Advanced Metrics & Analysis
@@ -253,15 +265,15 @@ A comprehensive signal processing tool for identifying repeating rhythms in pric
 
 **Architecture**: Modular JavaScript (no build step, classic script loading)
 - **Core Modules**:
-  - `scan.js`: Oscillation scanning, period stability, sine fitting, correlation
+  - `scan.js`: Oscillation scanning, period stability, sine fitting, correlation, local match-strength segmentation
   - `detrend.js`: Rolling linear detrending
   - `baseline.js`: Noise baseline generation and calibration
   - `gate.js`: Signal gating logic and UI
   - `insight.js`: Insight summary computation and formatting
 - **Rendering Modules**:
   - `render/price.js`: Original price chart with trends
-  - `render/analysis.js`: Cleaned signal, rhythm, sine fit visualization
-  - `render/scanPanel.js`: Pattern Finder bar chart
+  - `render/analysis.js`: Cleaned signal, rhythm, sine fit visualization, local match-strength overlay
+  - `render/scanPanel.js`: Pattern Finder bar chart (interactive selection)
   - `render/consistency.js`: Rhythm stability tracking
 - **UI Modules**:
   - `ui/dials.js`: Interactive dial controls
@@ -280,10 +292,14 @@ A comprehensive signal processing tool for identifying repeating rhythms in pric
 - **Sine Wave Fitting**: Least-squares fit using sin/cos basis functions
 - **Pearson Correlation**: Standard correlation coefficient between signal and fitted sine
 - **Rhythm Coherence**: Normalized projection power = (RMS_sine)² / (RMS_signal)²
+- **Local Match Strength (diagnostic)**:
+  - Computes a trailing-window correlation between the signal and a sine fit at the active period
+  - Smooths correlation to reduce flicker, then thresholds into “active” vs “inactive” segments
+  - Renders as a presence strip + a segmented (gapped) sine overlay; does **not** feed back into period selection/scoring
 
 **Data Resolution**: All analysis uses 1-minute resolution data (no resampling)
 
-#### Recent Enhancements (2024)
+#### Recent Enhancements (2024–2025)
 
 1. **Sine Fit Correlation Metrics**:
    - Added Pearson correlation between detrended signal and best-fit sine wave
@@ -304,6 +320,11 @@ A comprehensive signal processing tool for identifying repeating rhythms in pric
    - Best-fit wave checkbox enabled by default
    - HTML-formatted insight summary with proper line breaks and bold labels
    - Improved visual hierarchy and readability
+
+5. **Selected Rhythm Interaction + Local Match Strength (diagnostic)**:
+   - Pattern Finder bars are interactive (hover tooltip, click-to-select, right-click-to-clear)
+   - Added “Show local match strength” toggle
+   - Added presence strip + segmented/gapped overlay to indicate where the selected rhythm matches strongly vs weakly
 
 #### Usage Notes
 

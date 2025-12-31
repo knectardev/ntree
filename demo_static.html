@@ -11,19 +11,22 @@
       --grid:#1b2838;
       --text:#d7e0ea;
       --muted:#8aa0b5;
-      --sidebarW: 280px;
+      /* Responsive sidebar width with a desktop minimum. */
+      --sidebarW: clamp(525px, 30vw, 525px);
     }
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
     /* Full-width, responsive layout: left sidebar placeholder + right chart. */
     .layout{
       display:grid;
-      grid-template-columns: var(--sidebarW) 1fr;
+      grid-template-columns: var(--sidebarW) minmax(0, 1fr);
       /* Row 1: title. Row 2: size to the chart card so sidebar matches chart height. */
       grid-template-rows: auto auto;
       gap:18px;
       padding:18px;
-      max-width: 1600px;
-      margin: 0 auto;
+      /* Full-width layout: remove centered gutters so sidebar reaches the left edge (within padding). */
+      max-width:none;
+      width:100%;
+      margin:0;
       box-sizing:border-box;
       align-items: stretch;
     }
@@ -56,6 +59,52 @@
       font-weight:750;
       letter-spacing:.2px;
       color:rgba(215,224,234,.92);
+    }
+    /* Collapsible sidebar cards (Practice / Strategy) */
+    details.sideCard.sideCard--collapsible > summary.sideCardTitle{
+      cursor:pointer;
+      user-select:none;
+      list-style:none; /* Firefox */
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin:0; /* collapsed: no extra gap */
+    }
+    details.sideCard.sideCard--collapsible > summary.sideCardTitle::-webkit-details-marker{ display:none; }
+    details.sideCard.sideCard--collapsible > summary.sideCardTitle::after{
+      content:"▸";
+      color:rgba(215,224,234,.55);
+      font-weight:800;
+      transform: translateY(-1px);
+    }
+    details.sideCard.sideCard--collapsible[open] > summary.sideCardTitle{
+      margin:0 0 10px 0; /* open: restore the usual title spacing */
+    }
+    details.sideCard.sideCard--collapsible[open] > summary.sideCardTitle::after{ content:"▾"; }
+    details.sideCard.sideCard--collapsible > summary.sideCardTitle:focus-visible{
+      outline: 2px solid rgba(90,150,255,.65);
+      outline-offset: 3px;
+      border-radius: 10px;
+    }
+
+    /* Reusable sub-grouping container inside sidebar cards (keeps related controls together). */
+    .subCard{
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(0,0,0,.14);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+      padding:10px;
+    }
+    .subCardTitle{
+      margin:0 0 8px 0;
+      font-size:11px;
+      font-weight:750;
+      letter-spacing:.2px;
+      color:rgba(215,224,234,.78);
+      display:flex;
+      align-items:center;
+      gap:8px;
     }
     .sideList{display:flex;flex-direction:column;gap:10px}
     .chkRow{display:flex;gap:10px;align-items:flex-start}
@@ -486,11 +535,11 @@
       <h1>.</h1>
     </div>
     <aside class="sidebar" aria-label="Indicator controls">
-      <h2>Indicators</h2>
-      <p class="hint">Placeholder panel — indicator controls will live here.</p>
-
       <!-- Indicator controls -->
-      <div class="sideCard" aria-label="Indicator toggles">
+      <details class="sideCard sideCard--collapsible" aria-label="Indicator toggles">
+        <summary class="sideCardTitle">Indicators</summary>
+        <div class="sideCardBody">
+        <p class="hint" style="margin: 0 0 10px 0;">Placeholder panel — indicator controls will live here.</p>
         <div class="sideList">
           <label class="chkRow">
             <input id="indEma9" type="checkbox" checked />
@@ -524,11 +573,13 @@
             </span>
           </label>
         </div>
-      </div>
+        </div>
+      </details>
 
       <!-- Candlestick bias overlay is intentionally hidden/disabled for now. -->
-      <div class="sideCard" aria-label="Practice mode">
-        <div class="sideCardTitle">Practice</div>
+      <details class="sideCard sideCard--collapsible" aria-label="Practice mode">
+        <summary class="sideCardTitle">Practice</summary>
+        <div class="sideCardBody">
         <p class="hint" style="margin: 0 0 10px 0;">
           Start a replay “practice field” session (manual play).
         </p>
@@ -601,24 +652,65 @@
           </button>
           <div class="hint" id="practiceHistoryStatus" style="margin-top: 6px;"></div>
         </div>
-      </div>
-
-      <div class="sideCard" aria-label="Strategy controls">
-        <div class="sideCardTitle">Strategy</div>
-        <div class="formGroup">
-          <label class="fieldLabel" for="strategySelect">Strategy</label>
-          <select class="select" id="strategySelect" disabled>
-            <option selected>None</option>
-          </select>
-
-          <label class="fieldLabel" for="btConfigSelect">Backtest config</label>
-          <select class="select" id="btConfigSelect" disabled>
-            <option selected>Default (risk 0.5%, RR 2.0, fee 0)</option>
-          </select>
-
-          <button class="btnPrimary" type="button" disabled>Run Backtest</button>
         </div>
-      </div>
+      </details>
+
+      <details class="sideCard sideCard--collapsible" aria-label="Strategy controls">
+        <summary class="sideCardTitle">Strategy</summary>
+        <div class="sideCardBody">
+          <div class="formGroup">
+            <label class="fieldLabel" for="strategySelect">Strategy</label>
+            <select class="select" id="strategySelect" disabled>
+              <option selected>None</option>
+            </select>
+
+            <label class="fieldLabel" for="btConfigSelect">Backtest config</label>
+            <select class="select" id="btConfigSelect" disabled>
+              <option selected>Default (risk 0.5%, RR 2.0, fee 0)</option>
+            </select>
+
+            <button class="btnPrimary" type="button" disabled>Run Backtest</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="sideCard sideCard--collapsible" aria-label="Continuous detrend + oscillation scan">
+        <summary class="sideCardTitle">Continuous detrend + oscillation scan</summary>
+        <div class="sideCardBody">
+          <div class="subCard" aria-label="Scan display toggles">
+            <div class="subCardTitle">Display toggles</div>
+            <div class="sideList">
+              <label class="chkRow" title="Show detrended overlay">
+                <input id="toggleDetrend" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Show detrended overlay</span>
+                </span>
+              </label>
+
+              <label class="chkRow" title="Show cycle turning points">
+                <input id="toggleTurns" type="checkbox" />
+                <span class="chkLbl">
+                  <span class="chkName">Show cycle turning points</span>
+                </span>
+              </label>
+
+              <label class="chkRow" title="Show best-fit wave">
+                <input id="toggleSineFit" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Show best-fit wave</span>
+                </span>
+              </label>
+
+              <label class="chkRow" title="Show local match strength">
+                <input id="toggleLocalMatch" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Show local match strength</span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </details>
     </aside>
     <main class="main">
       <div class="wrap">
