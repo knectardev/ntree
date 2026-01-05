@@ -2,3 +2,32 @@ Add back-tests and strategy options to new chart
 http://127.0.0.1:5000/synthetic/MES_SYNTH?scenario=trend_regime_v1&timeframe=1m 
 
 
+
+Compliment to Detrending function: 
+
+
+2) Local linear trend extraction (trend level + slope)
+
+Does it make sense here? Very much yes — and it’s likely the most useful for your regime gating.
+
+If your detrendRollingLinear() is doing “rolling linear regression residuals”, then internally it’s already computing a local line. The trend-only sibling is:
+
+trendLevel[i] = fittedValueAtI (the regression line value at the right edge)
+
+trendSlope[i] = slope (per bar or per minute)
+
+Pros
+
+Gives you direction + strength directly (slope)
+
+Often better for “is there a real trend?” than SMA/EMA
+
+Pairs naturally with your “trend vs cycle” gating logic
+
+Cons
+
+A bit more compute than SMA/EMA (still totally fine in JS for typical window sizes)
+
+Needs care at the left edge / warmup (same as SMA)
+
+Recommendation: If you add only one “trend-only” mode beyond SMA/EMA, make it this.

@@ -703,7 +703,7 @@
       </details>
 
       <details class="sideCard sideCard--collapsible" aria-label="Continuous detrend + oscillation scan">
-        <summary class="sideCardTitle">Continuous detrend + oscillation scan</summary>
+        <summary class="sideCardTitle">Continuous detrend / trends </summary>
         <div class="sideCardBody">
           <div class="subCard" aria-label="Scan display toggles">
             <div class="subCardTitle">Display toggles</div>
@@ -2250,6 +2250,113 @@
     ctx.restore();
   }
 
+  // --- Detrend overlay helpers (ported from osc/src/detrend.js + osc/src/render/price.js) ---
+  function detrendRollingLinear(closes, win){
+    var N = closes.length;
+    var w = clamp(Math.floor(Number(win) || 0), 5, N);
+    var out = new Array(N);
+    for(var i=0;i<N;i++) out[i] = 0;
+
+    for(var i2=0; i2<N; i2++){
+      var start = clamp(i2 - w + 1, 0, N-1);
+      var end = i2;
+      var nn = end - start + 1;
+
+      var sX = (nn-1)*nn/2;
+      var sX2 = (nn-1)*nn*(2*nn-1)/6;
+
+      var sY = 0, sXY = 0;
+      for(var j=0; j<nn; j++){
+        var y = Number(closes[start + j]);
+        if(!Number.isFinite(y)) y = 0;
+        sY += y;
+        sXY += j * y;
+      }
+
+      var denom = (nn * sX2 - sX*sX) || 1e-9;
+      var a = (nn*sXY - sX*sY) / denom;
+      var b = (sY - a*sX) / nn;
+      var yhat = a*(nn-1) + b;
+      var yi = Number(closes[i2]);
+      if(!Number.isFinite(yi)) yi = 0;
+      out[i2] = yi - yhat;
+    }
+    return out;
+  }
+
+  function smaRolling(closes, win){
+    var N = closes.length;
+    var w = clamp(Math.floor(Number(win) || 0), 1, N);
+    var out = new Array(N);
+    var sum = 0;
+    for(var i=0; i<N; i++){
+      var y = Number(closes[i]);
+      if(!Number.isFinite(y)) y = 0;
+      sum += y;
+      if(i >= w){
+        var y0 = Number(closes[i-w]);
+        if(!Number.isFinite(y0)) y0 = 0;
+        sum -= y0;
+      }
+      var denom = Math.min(i+1, w);
+      out[i] = sum/denom;
+    }
+    return out;
+  }
+
+  function getDetrendOverlaySeries(){
+    try{
+      if(!(ui && ui.toggleDetrend && ui.toggleDetrend.checked)) return null;
+      if(!state || !Array.isArray(state.data) || !state.data.length) return null;
+      var n = state.data.length;
+      if(n < 2) return null;
+
+      var barS = Math.floor(Number(state.windowSec) || 60);
+      if(!Number.isFinite(barS) || barS <= 0) barS = 60;
+
+      var dh = ui.detrendHours ? Number(ui.detrendHours.value) : NaN;
+      if(!Number.isFinite(dh) || dh <= 0) dh = 2.0;
+
+      // Convert hours to window in bars based on current bar size.
+      var winBars = Math.floor((dh * 3600) / barS);
+      if(!Number.isFinite(winBars) || winBars <= 0) winBars = 5;
+      // osc demo clamps to at least 30 minutes when operating on 1-minute data.
+      // Mirror that time-based minimum across any bar size.
+      var minBars = Math.max(5, Math.ceil((30 * 60) / barS));
+      winBars = clamp(winBars, minBars, n);
+
+      var t0 = Number(state.data[0] && state.data[0].t) || 0;
+      var t1 = Number(state.data[n-1] && state.data[n-1].t) || 0;
+      var key = [n, t0, t1, barS, Math.round(dh*100)/100, winBars].join('|');
+
+      try{
+        if(!state._render) state._render = {};
+        if(state._render.detrendOverlay && state._render.detrendOverlay.key === key){
+          return state._render.detrendOverlay.y;
+        }
+      } catch(_eCache){}
+
+      var closes = new Array(n);
+      for(var i=0;i<n;i++){
+        var d = state.data[i];
+        var c = d ? Number(d.c) : NaN;
+        closes[i] = Number.isFinite(c) ? c : 0;
+      }
+
+      var resid = detrendRollingLinear(closes, winBars);
+      var base = smaRolling(closes, winBars);
+      var y = new Array(n);
+      for(var k=0;k<n;k++) y[k] = Number(resid[k]) + Number(base[k]);
+
+      try{
+        state._render.detrendOverlay = { key: key, y: y };
+      } catch(_eStore){}
+      return y;
+    } catch(_e){
+      return null;
+    }
+  }
+
   function orderSig(d){
     var arr = [
       ['l', d.l],
@@ -2414,6 +2521,9 @@
     candleStyleLabel: document.getElementById('candleStyleLabel'),
     windowVal: document.getElementById('windowVal'),
     regen: document.getElementById('regen'),
+    // Continuous detrend overlay controls (sidebar)
+    toggleDetrend: document.getElementById('toggleDetrend'),
+    detrendHours: document.getElementById('detrendHours'),
     // Footer session toggles
     sessPreMarket: document.getElementById('sessPreMarket'),
     sessAfterHours: document.getElementById('sessAfterHours'),
@@ -2443,6 +2553,9 @@
   if(!ui.showVolume) ui.showVolume = makeAlwaysOnCheckbox();
   if(!ui.grid) ui.grid = makeAlwaysOnCheckbox();
   if(!ui.scale) ui.scale = makeAlwaysOnCheckbox();
+  // Optional sidebar controls (may not exist in all modes/layouts).
+  if(!ui.toggleDetrend) ui.toggleDetrend = { checked: false, addEventListener: function(){ /* no-op */ } };
+  if(!ui.detrendHours) ui.detrendHours = { value: '2.0', addEventListener: function(){ /* no-op */ } };
   enforceAlwaysOnOptions();
 
   // Scale preset (requested window span) helpers.
@@ -4250,6 +4363,8 @@
         ui.outer && ui.outer.checked ? 1 : 0,
         ui.avgline && ui.avgline.checked ? 1 : 0,
         ui.showVolume && ui.showVolume.checked ? 1 : 0,
+        ui.toggleDetrend && ui.toggleDetrend.checked ? 1 : 0,
+        ui.detrendHours ? (Math.round((Number(ui.detrendHours.value) || 0) * 100) / 100) : 0,
         os0 && os0.ema9 ? 1 : 0,
         os0 && os0.ema21 ? 1 : 0,
         os0 && os0.ema50 ? 1 : 0,
@@ -4755,6 +4870,28 @@
       // Match the bright UI blue used elsewhere (screenshot).
       strokePolyline(ctx, ptsAvg, 'rgb(0, 162, 255)', 1.15, doSmooth);
     }
+
+    // Detrended overlay (optional): render as a price-space line on the main chart.
+    (function drawDetrendOverlay(){
+      try{
+        if(!(ui && ui.toggleDetrend && ui.toggleDetrend.checked)) return;
+        var series = getDetrendOverlaySeries();
+        if(!series || series.length !== state.data.length) return;
+        var ptsD = [];
+        for(var bi=start; bi<=end; bi++){
+          var x = xForIndex(bi + 0.5, plot, barsVisible);
+          var yv = Number(series[bi]);
+          if(!Number.isFinite(yv)){
+            ptsD.push([NaN, NaN]);
+          } else {
+            ptsD.push([x, yForPrice(yv, pricePlot, yMin, yMax)]);
+          }
+        }
+        // Vivid magenta to match the osc demo overlay vibe.
+        // osc demo draws a straight polyline (no smoothing). Respect the chart Smooth toggle here.
+        strokePolyline(ctx, ptsD, 'rgba(255, 62, 165, 0.92)', 2.0, !!doSmooth);
+      } catch(_e){}
+    })();
 
     // Indicator overlays (EMA/VWAP), aligned 1:1 with state.data.
     (function drawOverlays(){
@@ -5609,6 +5746,7 @@
   ui.smooth.addEventListener('change', onToggleDraw);
   ui.outer.addEventListener('change', onToggleDraw);
   ui.avgline.addEventListener('change', onToggleDraw);
+  if(ui.toggleDetrend) ui.toggleDetrend.addEventListener('change', onToggleDraw);
   if(ui.indEma9) ui.indEma9.addEventListener('change', onOverlayToggleChanged);
   if(ui.indEma21) ui.indEma21.addEventListener('change', onOverlayToggleChanged);
   if(ui.indEma50) ui.indEma50.addEventListener('change', onOverlayToggleChanged);
@@ -8015,6 +8153,7 @@
       onChange: function(v){
         detrendInput.value = Number(v).toFixed(2);
         updateLabels();
+        try{ requestDraw('detrend'); } catch(_e){ try{ draw(); } catch(_e2){} }
       }
     });
 
