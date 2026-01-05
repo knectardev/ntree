@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connected OCLH Chart (Static JSON)</title>
+
+  <link rel="stylesheet" href="static/demo_static/css/demo_static.css" />
+</head>
+<body>
+  <div class="appNav" id="appNav">
+    <a href="/" title="Back to Dashboard">Dashboard</a>
+  </div>
+  <div class="statusChip" id="updateChip" aria-live="polite">
+    <span class="statusDot" id="updateDot"></span>
+    <span id="updateText" class="statusMono">Last update: —</span>
+  </div>
+  <!-- History modal -->
+  <div class="modalOverlay" id="historyModal" role="dialog" aria-modal="true" aria-label="Session history" style="display:none;">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="modalHeaderLeft">
+          <div class="modalTitle">Session History</div>
+          <div class="historyToggles" aria-label="History view">
+            <button class="btn" type="button" id="historyViewCardsBtn" title="Session cards (glance view)">Cards</button>
+            <button class="btn" type="button" id="historyViewLedgerBtn" title="Ledger view (FIFO lots)">Ledger</button>
+            <button class="btn" type="button" id="historyViewMatrixBtn" title="Matrix summary view">Matrix</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn" type="button" id="historyRefreshBtn">Refresh</button>
+          <button class="btn" type="button" id="historyCloseBtn">Close</button>
+        </div>
+      </div>
+      <div class="modalBody">
+        <div class="hint" id="historyModalStatus" style="margin-bottom:10px;"></div>
+        <div class="tableWrap" id="historyTableWrap"></div>
+      </div>
+    </div>
+  </div>
+  <div class="layout">
+    <div class="pageTop top">
+      <h1>.</h1>
+    </div>
+    <aside class="sidebar" aria-label="Indicator controls">
+      <!-- Indicator controls -->
+      <details class="sideCard sideCard--collapsible" aria-label="Indicator toggles">
+        <summary class="sideCardTitle">Indicators</summary>
+        <div class="sideCardBody">
+        <p class="hint" style="margin: 0 0 10px 0;">Placeholder panel — indicator controls will live here.</p>
+        <div class="sideList">
+          <label class="chkRow">
+            <input id="indEma9" type="checkbox" checked />
+            <span class="chkLbl">
+              <span class="chkName">EMA 9</span>
+              <span class="swatch ema9" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <label class="chkRow">
+            <input id="indEma21" type="checkbox" checked />
+            <span class="chkLbl">
+              <span class="chkName">EMA 21</span>
+              <span class="swatch ema21" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <label class="chkRow">
+            <input id="indEma50" type="checkbox" />
+            <span class="chkLbl">
+              <span class="chkName">EMA 50</span>
+              <span class="swatch ema50" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <label class="chkRow">
+            <input id="indVwap" type="checkbox" checked />
+            <span class="chkLbl">
+              <span class="chkName">VWAP</span>
+              <span class="swatch vwap" aria-hidden="true"></span>
+            </span>
+          </label>
+        </div>
+        </div>
+      </details>
+
+      <!-- Candlestick bias overlay is intentionally hidden/disabled for now. -->
+      <details class="sideCard sideCard--collapsible" aria-label="Practice mode">
+        <summary class="sideCardTitle">Practice</summary>
+        <div class="sideCardBody">
+        <p class="hint" style="margin: 0 0 10px 0;">
+          Start a replay “practice field” session (manual play).
+        </p>
+        <div class="practiceCtrls">
+          <!-- Idle state: show only Play -->
+          <button class="practiceCtl practiceCtl--play" type="button" id="practiceBtn" title="Play replay">
+            <span class="practiceCtl__label">Play</span>
+            <span class="practiceCtl__icon practiceCtl__icon--play" aria-hidden="true"></span>
+          </button>
+          <!-- Active state: show Pause + Reset -->
+          <button class="practiceCtl practiceCtl--pause" type="button" id="practicePauseBtn" title="Pause replay" style="display:none;">
+            <span class="practiceCtl__label">Pause</span>
+            <span class="practiceCtl__icon practiceCtl__icon--pause" aria-hidden="true"></span>
+          </button>
+          <button class="practiceCtl practiceCtl--reset" type="button" id="practiceResetBtn" title="Reset replay" style="display:none;">
+            <span class="practiceCtl__label">Reset</span>
+            <span class="practiceCtl__icon practiceCtl__icon--reset" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="hint practiceSpeedWrap" style="margin-top: 12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+            <span>Speed</span>
+            <span class="mono" id="practiceSpeedLabel">60</span>
+          </div>
+          <input id="practiceSpeed" type="range" min="30" max="100" step="1" value="60" style="width:100%;margin-top:8px;" />
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+            <span>Slow (30)</span>
+            <span>Fast (100)</span>
+          </div>
+        </div>
+        <div class="sideDivider"></div>
+        <div class="formGroup" aria-label="Trade controls">
+          <label class="fieldLabel" for="practiceQty">Order size</label>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <input id="practiceQty" type="range" min="0" max="5" step="1" value="1"
+                   list="practiceQtyMarks"
+                   style="width:100%; accent-color: rgba(90,150,255,.92);" />
+            <datalist id="practiceQtyMarks">
+              <option value="0" label="1"></option>
+              <option value="1" label="5"></option>
+              <option value="2" label="10"></option>
+              <option value="3" label="25"></option>
+              <option value="4" label="50"></option>
+              <option value="5" label="100"></option>
+            </datalist>
+            <div style="display:flex;justify-content:space-between;color:rgba(215,224,234,.60);font-size:11px;">
+              <span>1</span><span>5</span><span>10</span><span>25</span><span>50</span><span>100</span>
+            </div>
+            <div class="hint" id="practiceQtyLabel" style="margin-top:-2px;"></div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;">
+            <button class="btn" type="button" id="practiceLongBtn" title="Enter long (market)">
+              Long
+            </button>
+            <button class="btn" type="button" id="practiceShortBtn" title="Enter short (market)">
+              Short
+            </button>
+            <button class="btn" type="button" id="practiceFlattenBtn" title="Exit / flatten (market)">
+              Flatten
+            </button>
+          </div>
+        </div>
+        <!-- Practice debug readouts are intentionally hidden for now (needs design pass). -->
+        <div class="hint" id="practiceScore" style="display:none; margin-top: 10px; white-space: pre-line;"></div>
+        <div class="hint" id="practiceStatus" style="display:none; margin-top: 10px;"></div>
+        <div class="sideDivider"></div>
+        <div class="formGroup" aria-label="Session history">
+          <button class="btn" type="button" id="practiceHistoryBtn" title="View session history">
+            History
+          </button>
+          <div class="hint" id="practiceHistoryStatus" style="margin-top: 6px;"></div>
+        </div>
+        </div>
+      </details>
+
+      <details class="sideCard sideCard--collapsible" aria-label="Strategy controls">
+        <summary class="sideCardTitle">Strategy</summary>
+        <div class="sideCardBody">
+          <div class="formGroup">
+            <label class="fieldLabel" for="strategySelect">Strategy</label>
+            <select class="select" id="strategySelect" disabled>
+              <option selected>None</option>
+            </select>
+
+            <label class="fieldLabel" for="btConfigSelect">Backtest config</label>
+            <select class="select" id="btConfigSelect" disabled>
+              <option selected>Default (risk 0.5%, RR 2.0, fee 0)</option>
+            </select>
+
+            <button class="btnPrimary" type="button" disabled>Run Backtest</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="sideCard sideCard--collapsible" aria-label="Continuous detrend + oscillation scan">
+        <summary class="sideCardTitle">Continuous detrend / trends </summary>
+        <div class="sideCardBody">
+          <div class="subCard" aria-label="Scan display toggles">
+            <div class="subCardTitle">Display toggles</div>
+            <div class="sideList">
+              <label class="chkRow" title="Show detrended overlay">
+                <input id="toggleDetrend" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Show detrended overlay</span>
+                </span>
+              </label>
+
+              <label class="chkRow" title="Show de-noised trend">
+                <input id="toggleTurns" type="checkbox" />
+                <span class="chkLbl">
+                  <span class="chkName">Show de-noised trend</span>
+                </span>
+              </label>
+
+
+            </div>
+          </div>
+
+          <div class="subCard" aria-label="Scan settings" style="margin-top:10px;">
+            <div class="subCardTitle">Scan settings</div>
+            <div class="dialRow">
+              <div class="dialCol">
+                <label>
+                  Smoothing strength
+                </label>
+                <div class="dialWrap">
+                  <canvas class="dialCanvas" id="detrendDial" width="220" height="220"></canvas>
+                </div>
+                <input id="detrendHours" class="hiddenInput" type="number" min="0.25" step="0.25" value="2.0" />
+                <div class="dialHelp">How aggressively we ignore slow drift before scanning for rhythms.</div>
+              </div>
+
+              <div class="dialCol">
+                <label>
+                  Lookback window
+                </label>
+                <div class="dialWrap">
+                  <canvas class="dialCanvas" id="scanDial" width="220" height="220"></canvas>
+                </div>
+                <input id="scanWindow" class="hiddenInput" type="number" min="120" step="30" value="780" />
+                <div class="dialHelp">How far back we look to score which rhythm repeats best.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+    </aside>
+    <main class="main">
+      <div class="wrap">
+        <div class="card">
+          <div class="toolbar">
+            <div class="left">
+              <div class="pill">
+                <label>Ticker</label>
+                <div class="dd" id="tickerDD">
+                  <button class="ddBtn mono" id="tickerBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="tickerLabel" class="mono">ES</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="tickerMenu" role="listbox" aria-label="Ticker"></div>
+                </div>
+              </div>
+
+          <div class="pill">
+            <label><input id="showCandles" type="checkbox" /> Candles</label>
+            <div class="dd" id="candleStyleDD">
+              <button class="ddBtn" id="candleStyleBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+                <span id="candleStyleLabel">Standard</span>
+                <span class="ddChevron">▾</span>
+              </button>
+              <div class="ddMenu" id="candleStyleMenu" role="listbox" aria-label="Candle style">
+                <div class="ddItem" role="option" data-value="std">Standard</div>
+                <div class="ddItem" role="option" data-value="ha">Heikin Ashi</div>
+              </div>
+            </div>
+          </div>
+          <div class="pill"><label><input id="showBands" type="checkbox" checked /> Bands</label></div>
+
+          <div class="pill pill--nocross"><label><input id="nocross" type="checkbox" checked /> No-cross</label></div>
+          <div class="pill"><label><input id="fills" type="checkbox" checked /> Fill bands</label></div>
+          <div class="pill"><label><input id="smooth" type="checkbox" checked /> Smooth</label></div>
+          <div class="pill"><label><input id="outer" type="checkbox" checked /> High/Low bands (or wicks)</label></div>
+          <div class="pill"><label><input id="avgline" type="checkbox" checked /> Avg line</label></div>
+        </div>
+        <div class="right">
+          <button class="btn" id="pickStaticDir" title="Pick a folder containing catalog.json and bars/*.json (works on file:// in Chromium browsers).">Pick snapshot folder</button>
+          <button class="btn" id="pickBarsFile" title="Pick a single bars JSON file (works on file://).">Pick bars file</button>
+          <button class="btn" id="regen">Load snapshot</button>
+        </div>
+          </div>
+
+          <canvas id="c"></canvas>
+
+      <div class="footer" aria-label="Footer (reserved for future controls)">
+        <div class="footerLeft">
+          <div class="pill pill--barSize" id="barSizeFooter">
+            <label for="window">Bar size (W)</label>
+            <!-- Keep a hidden value input so existing code can continue reading ui.window.value -->
+            <input id="window" type="hidden" value="60" />
+            <div class="scaleRadios barRadios" role="radiogroup" aria-label="Bar size (W)">
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="60" checked /> 1m</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="300" /> 5m</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="1800" /> 30m</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="3600" /> 1h</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="14400" /> 4h</label>
+              <label class="scaleOpt"><input type="radio" name="windowPreset" value="86400" /> 1d</label>
+            </div>
+            <span id="windowVal" class="k mono">60s</span>
+            <label title="Auto-select bar size to keep the number of candles reasonable for the current zoom/span. Turn off to manually pick bar size.">
+              <input id="autoW" type="checkbox" checked /> Auto
+            </label>
+          </div>
+        </div>
+        <div class="footerMid" aria-label="Market session shading toggles">
+          <div class="sessionChecks" id="sessionChecks">
+            <label title="Bars in window: pre-market">
+              <input id="sessPreMarket" type="checkbox" checked /> Pre-Market:
+              <span class="meta mono">4AM - 9:30AM</span>
+              <span class="meta mono">(<span id="sessCountPre">—</span>)</span>
+            </label>
+            <label title="Bars in window: after-hours">
+              <input id="sessAfterHours" type="checkbox" checked /> After-Hours:
+              <span class="meta mono">4PM - 8PM</span>
+              <span class="meta mono">(<span id="sessCountAfter">—</span>)</span>
+            </label>
+            <label title="Bars in window: closed (often 0 for equities)">
+              <input id="sessClosed" type="checkbox" checked /> Closed:
+              <span class="meta mono">8PM - 4AM</span>
+              <span class="meta mono">(<span id="sessCountClosed">—</span>)</span>
+            </label>
+          </div>
+        </div>
+        <div class="footerRight" aria-label="Time scale">
+          <div class="scaleRadios" role="radiogroup" aria-label="Scale">
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="1d" checked /> 1D</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="5d" /> 5D</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="1m" /> 1M</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="3m" /> 3M</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="6m" /> 6M</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="1y" /> 1Y</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="3y" /> 3Y</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="5y" /> 5Y</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="all" /> ALL</label>
+          </div>
+        </div>
+      </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="static/demo_static/js/01_core_overlays_sessions.js"></script>
+  <script src="static/demo_static/js/02_mode_and_static_loader.js"></script>
+  <script src="static/demo_static/js/03_persistence_and_catalog.js"></script>
+  <script src="static/demo_static/js/04_dom_ui_and_span_presets.js"></script>
+  <script src="static/demo_static/js/05_state_and_chart_math.js"></script>
+  <script src="static/demo_static/js/06_loaders_and_fetch.js"></script>
+  <script src="static/demo_static/js/07_render_and_interactions.js"></script>
+  <script src="static/demo_static/js/08_replay_and_file_io.js"></script>
+  <script src="static/demo_static/js/09_dials_and_boot.js"></script>
+</body>
+</html>
+
+

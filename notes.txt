@@ -1,10 +1,29 @@
-Add back-tests and strategy options to new chart 
-http://127.0.0.1:5000/synthetic/MES_SYNTH?scenario=trend_regime_v1&timeframe=1m 
 
+1) Low-pass filtering (trend level)
 
+Does it make sense here? Yes — you already have it: smaRolling() is a low-pass filter. 
 
-Compliment to Detrending function: 
+price
 
+What you’d expose as “trend-only”:
+
+trendLevel[i] = base[i] (SMA trend line)
+
+Optionally also offer EMA (less lag than SMA)
+
+Pros
+
+Simple, stable, cheap
+
+Great as a “don’t hallucinate cycles” baseline
+
+Cons
+
+Lag (especially if L is large)
+
+Doesn’t explicitly give you “trend strength” (slope) unless you compute it
+
+Fit to your UI: easiest toggle (“Trend: SMA/EMA”).
 
 2) Local linear trend extraction (trend level + slope)
 

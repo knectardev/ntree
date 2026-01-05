@@ -192,7 +192,7 @@ The standalone oscillation tool (`osc/index.html`) includes its own **client-sid
   - Default renders `templates/detail.html` (candlestick + indicators + strategy tools)
   - Query params:
     - `interval` (default `1Min`; commonly `1Min`/`5Min`)
-    - `band` (renders `templates/ticker_band.html`, which iframes `demo_static.html?mode=api`)
+    - `band` (renders `templates/ticker_band.html`, which iframes `chart.html?mode=api`)
     - `legacy` (reserved override; currently still renders `detail.html`)
 
 ### Synthetic symbol detail
@@ -207,9 +207,10 @@ The standalone oscillation tool (`osc/index.html`) includes its own **client-sid
 
 ### Standalone demo page
 
-- **GET `/demo_static.html`**
-  - Serves the static demo (`demo_static.html`)
-  - Used by band view: `/ticker/<sym>?band` → iframe → `/demo_static.html?mode=api&symbol=<sym>`
+- **GET `/chart.html`**
+  - Serves the chart page (`chart.html`)
+  - Used by band view: `/ticker/<sym>?band` → iframe → `/chart.html?mode=api&symbol=<sym>`
+  - Back-compat: `/demo_static.html` redirects to `/chart.html`
   - Grid lines are axis-driven:
     - Horizontal grid aligns to Y-axis price ticks (nice intervals)
     - Vertical grid aligns to X-axis time/date ticks (adaptive with zoom/span)
@@ -503,7 +504,7 @@ Response:
 
 ## Replay (practice-field) API
 
-The practice-field replay system is used by `demo_static.html` and provides a deterministic “game loop” over historical bars.
+The practice-field replay system is used by `chart.html` and provides a deterministic “game loop” over historical bars.
 
 ### High-level behavior (requirements)
 
@@ -569,7 +570,7 @@ Request:
 Response:
 - `{"state": <snapshot>, "delta": {}}` or `{"state": <last>, "states": [<snapshots...>], "delta": {}}`
 
-#### 2) Delta-only mode (opt-in, used by `demo_static.html`)
+#### 2) Delta-only mode (opt-in, used by `chart.html`)
 
 Request fields:
 
@@ -618,9 +619,9 @@ Gap handling (important):
 
 ---
 
-## Replay delta protocol — frontend contract (demo_static.html)
+## Replay delta protocol — frontend contract (`chart.html`)
 
-`demo_static.html` uses a buffered queue + RAF loop. In delta mode:
+`chart.html` uses a buffered queue + RAF loop. In delta mode:
 
 - `replayStart()` sends `delta_mode: true`.
 - `replayStart()` derives replay session parameters from **current UI state**:
@@ -665,7 +666,7 @@ Session filters (Pre-Market / After-Hours / Closed):
 
 **Quick manual check (before/after changes)**
 
-- Start replay in `demo_static.html` and confirm:
+- Start replay in `chart.html` and confirm:
   - `/replay/step` payloads are small (Network tab)
   - cadence matches BPM slider
   - candles render normally in Standard and Heikin Ashi

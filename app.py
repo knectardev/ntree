@@ -665,7 +665,7 @@ def index():
 def api_symbols():
     """List real symbols available in the SQLite DB (matches dashboard 'Real Symbols')."""
     syms = list_chart_tickers()
-    # demo_static.html expects items shaped like {dataset,symbol}; we set dataset=symbol
+    # chart.html expects items shaped like {dataset,symbol}; we set dataset=symbol
     # so the single dropdown can show the symbols directly.
     return jsonify([{"dataset": s, "symbol": s} for s in syms])
 
@@ -1124,7 +1124,7 @@ def ticker_detail(ticker):
         #
         # Preserve any relevant query params (bar_s/span/etc), but force API mode and symbol.
         try:
-            cache_bust = int(os.path.getmtime("demo_static.html"))
+            cache_bust = int(os.path.getmtime("chart.html"))
         except Exception:
             cache_bust = int(time.time())
 
@@ -1137,7 +1137,7 @@ def ticker_detail(ticker):
         # Rebuild query string without importing url_for (keep it simple).
         from urllib.parse import urlencode
 
-        return redirect("/demo_static.html?" + urlencode(params), code=302)
+        return redirect("/chart.html?" + urlencode(params), code=302)
     interval = request.args.get('interval', '1Min')
     return render_template(
         'detail.html',
@@ -1149,15 +1149,27 @@ def ticker_detail(ticker):
     )
 
 
-@app.route("/demo_static.html")
-def demo_static_page():
+@app.route("/chart.html")
+def chart_page():
     """Serve the standalone band/candle canvas demo (also used by /ticker/<sym>?band)."""
-    resp = send_file("demo_static.html", mimetype="text/html", max_age=0)
+    resp = send_file("chart.html", mimetype="text/html", max_age=0)
     # Avoid sticky caching in Chrome during rapid iteration.
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
     return resp
+
+
+@app.route("/demo_static.html")
+def demo_static_page():
+    """Back-compat: redirect old demo_static.html URL to /chart.html (preserve query string)."""
+    try:
+        from urllib.parse import urlencode
+
+        qs = urlencode(dict(request.args)) if request.args else ""
+        return redirect("/chart.html" + (("?" + qs) if qs else ""), code=302)
+    except Exception:
+        return redirect("/chart.html", code=302)
 
 
 @app.route('/backtest-config')
@@ -1991,7 +2003,7 @@ def replay_start():
     if not symbol:
         return _bad_request("missing_params", "symbol is required", fields=["symbol"])
 
-    # UI contract (demo_static.html): allow omitting t_start/t_end; derive from DB.
+    # UI contract (chart.html): allow omitting t_start/t_end; derive from DB.
     if not t_start or not t_end:
         conn = get_db_connection()
         try:
@@ -2220,7 +2232,7 @@ def replay_end():
 @app.route("/replay/session_summaries", methods=["GET"])
 def replay_session_summaries():
     """
-    Returns recent replay sessions from SQLite for the demo_static.html History modal.
+    Returns recent replay sessions from SQLite for the chart.html History modal.
     Query params:
       - limit_sessions (default 8)
       - only_with_fills (default 1)

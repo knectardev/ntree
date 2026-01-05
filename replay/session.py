@@ -59,7 +59,7 @@ def _floor_time_to_step(dt: datetime, step_sec: int) -> datetime:
 
 def _ema_series(values: List[float], period: int) -> List[Optional[float]]:
     """
-    EMA implementation intentionally matches demo_static.html:
+    EMA implementation intentionally matches chart.html:
     - k = 2/(p+1)
     - seed EMA with close[0]
     - if close[i] is not finite, reuse previous EMA
@@ -94,7 +94,7 @@ def _vwap_session_series(
     volume: List[float],
 ) -> List[Optional[float]]:
     """
-    Session VWAP intended to match demo_static.html logic:
+    Session VWAP intended to match chart.html logic:
     - VWAP anchored to 09:30 ET
     - Before 09:30: None
     - During regular session [09:30, 16:00): cumulative typical-price * volume / cumulative volume
@@ -297,7 +297,7 @@ class ReplaySession:
 
     def get_state_payload(self) -> Dict[str, Any]:
         """
-        Payload used by demo_static.html replay UI.
+        Payload used by chart.html replay UI.
         Returns a dict with:
         - display_series.bars: aggregated OHLCV buckets (disp_tf_sec)
         - clock.disp_window: start/end for current display window
@@ -631,7 +631,7 @@ class ReplaySession:
     def get_state_payload_delta(self) -> Dict[str, Any]:
         """
         Full snapshot payload for delta mode (fixed window + overlays).
-        Shape matches demo_static.html expectations, but uses a fixed-length bars window.
+        Shape matches chart.html expectations, but uses a fixed-length bars window.
         """
         self._delta_init_cache()
         st = self.get_state()

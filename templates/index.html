@@ -595,7 +595,7 @@
                         </thead>
                         <tbody>
                             {% for ticker_data in tickers %}
-                            <tr onclick="window.location.href='/demo_static.html?mode=api&symbol={{ ticker_data.ticker }}'">
+                            <tr onclick="window.location.href='/chart.html?mode=api&symbol={{ ticker_data.ticker }}'">
                                 <td class="ticker">{{ ticker_data.ticker }}</td>
                                 <td class="price">
                                     {% if ticker_data.price %}
@@ -1073,7 +1073,7 @@
                     }
 
                     tr.addEventListener('click', () => {
-                        // Prefer the newer bandchart-style view (demo_static.html) for both real + synthetic.
+                        // Prefer the newer bandchart-style view (chart.html) for both real + synthetic.
                         // For synthetic we pass source/scenario/timeframe so /window selects the correct group.
                         const tf = ds.timeframe || SYNTHETIC_DEFAULT_TIMEFRAME;
                         const params = new URLSearchParams({
@@ -1083,7 +1083,7 @@
                             scenario: ds.scenario,
                             timeframe: tf
                         });
-                        const url = `/demo_static.html?${params.toString()}`;
+                        const url = `/chart.html?${params.toString()}`;
                         window.location.href = url;
                     });
 

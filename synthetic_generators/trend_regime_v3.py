@@ -69,7 +69,7 @@ DEFAULT_PARAMS = TrendRegimeV3Params(
     stay_prob=0.92,
     tz_name="America/New_York",
     # Default to include extended hours like SPY (premarket + after-hours).
-    # This makes session shading in demo_static.html behave like real data.
+    # This makes session shading in chart.html behave like real data.
     session_open_local=time(4, 0),
     session_minutes=960,  # 04:00–20:00 ET
     overnight_gap_sigma=0.0030,

@@ -1,0 +1,524 @@
+/* Extracted from chart.html */
+
+    :root{
+      --bg:#0b0f14;
+      --panel:#0f1620;
+      --grid:#1b2838;
+      --text:#d7e0ea;
+      --muted:#8aa0b5;
+      /* Responsive sidebar width with a desktop minimum. */
+      --sidebarW: clamp(525px, 30vw, 525px);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
+    /* Full-width, responsive layout: left sidebar placeholder + right chart. */
+    .layout{
+      display:grid;
+      grid-template-columns: var(--sidebarW) minmax(0, 1fr);
+      /* Row 1: title. Row 2: size to the chart card so sidebar matches chart height. */
+      grid-template-rows: auto auto;
+      gap:18px;
+      padding:18px;
+      /* Full-width layout: remove centered gutters so sidebar reaches the left edge (within padding). */
+      max-width:none;
+      width:100%;
+      margin:0;
+      box-sizing:border-box;
+      align-items: stretch;
+    }
+    @media (max-width: 980px){
+      .layout{ grid-template-columns: 1fr; grid-template-rows: auto auto; }
+    }
+    .pageTop{ grid-column: 1 / -1; }
+    .sidebar{
+      align-self:stretch;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.07);
+      background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+      padding:12px;
+      min-height: 0;
+    }
+    .sidebar h2{margin:0 0 8px 0;font-size:13px;font-weight:750;letter-spacing:.2px;color:rgba(215,224,234,.92)}
+    .sidebar .hint{margin:0;font-size:12px;color:var(--muted);line-height:1.35}
+    .sideCard{
+      margin-top:10px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(8,12,18,.55);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+      padding:10px;
+    }
+    .sideCardTitle{
+      margin:0 0 10px 0;
+      font-size:12px;
+      font-weight:750;
+      letter-spacing:.2px;
+      color:rgba(215,224,234,.92);
+    }
+    /* Collapsible sidebar cards (Practice / Strategy) */
+    details.sideCard.sideCard--collapsible > summary.sideCardTitle{
+      cursor:pointer;
+      user-select:none;
+      list-style:none; /* Firefox */
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin:0; /* collapsed: no extra gap */
+    }
+    details.sideCard.sideCard--collapsible > summary.sideCardTitle::-webkit-details-marker{ display:none; }
+    details.sideCard.sideCard--collapsible > summary.sideCardTitle::after{
+      content:"▸";
+      color:rgba(215,224,234,.55);
+      font-weight:800;
+      transform: translateY(-1px);
+    }
+    details.sideCard.sideCard--collapsible[open] > summary.sideCardTitle{
+      margin:0 0 10px 0; /* open: restore the usual title spacing */
+    }
+    details.sideCard.sideCard--collapsible[open] > summary.sideCardTitle::after{ content:"▾"; }
+    details.sideCard.sideCard--collapsible > summary.sideCardTitle:focus-visible{
+      outline: 2px solid rgba(90,150,255,.65);
+      outline-offset: 3px;
+      border-radius: 10px;
+    }
+
+    /* Reusable sub-grouping container inside sidebar cards (keeps related controls together). */
+    .subCard{
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(0,0,0,.14);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+      padding:10px;
+    }
+    .subCardTitle{
+      margin:0 0 8px 0;
+      font-size:11px;
+      font-weight:750;
+      letter-spacing:.2px;
+      color:rgba(215,224,234,.78);
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+
+    /* Dial UI (ported from osc demo) */
+    .dialRow{display:grid; grid-template-columns: 1fr 1fr; gap:10px;}
+    @media (max-width: 620px){
+      .dialRow{ grid-template-columns: 1fr; }
+    }
+    .dialCol{
+      padding:10px;
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;
+      background:rgba(255,255,255,.02);
+    }
+    .dialWrap{
+      width:100%;
+      aspect-ratio:1/1;
+      border-radius:999px;
+      background:radial-gradient(140px 140px at 35% 30%, rgba(255,255,255,0.08) 0%, rgba(0,0,0,0.10) 55%, rgba(0,0,0,0.18) 100%);
+      border:1px solid rgba(255,255,255,0.08);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+    }
+    .dialCanvas{width:100%; height:100%; display:block;}
+    .dialValue{font-weight:800; color:rgba(215,224,234,.92);}
+    .dialHelp{font-size:11px; color:var(--muted); margin-top:6px; line-height:1.25;}
+    .hiddenInput{display:none;}
+    .sideList{display:flex;flex-direction:column;gap:10px}
+    .chkRow{display:flex;gap:10px;align-items:flex-start}
+    .chkRow input[type="checkbox"]{transform: translateY(2px)}
+    .chkLbl{display:flex;flex-direction:column;gap:6px;min-width:0}
+    .chkName{font-size:12px;color:rgba(215,224,234,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .swatch{
+      width:44px;height:3px;border-radius:999px;background:rgba(255,255,255,.25);
+      box-shadow: 0 0 0 1px rgba(255,255,255,.06) inset;
+    }
+    /* Keep EMAs neutral (reduce color bloat); keep VWAP as the accent. */
+    .swatch.ema9{background:rgba(215,224,234,.92)}
+    .swatch.ema21{background:rgba(215,224,234,.72)}
+    .swatch.ema50{background:rgba(215,224,234,.52)}
+    .swatch.vwap{background:rgb(255, 215, 0)}
+    .sideDivider{height:1px;background:rgba(255,255,255,.07);margin:10px 0}
+    .formGroup{display:flex;flex-direction:column;gap:8px}
+    .fieldLabel{font-size:12px;color:rgba(215,224,234,.92);font-weight:650}
+    .select{
+      width:100%;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.20);
+      color:rgba(215,224,234,.92);
+      outline:none;
+      font-size:12px;
+    }
+    .select:focus{border-color:rgba(90,150,255,.65)}
+    .btnPrimary{
+      cursor:pointer;
+      width:100%;
+      border-radius:10px;
+      padding:10px 12px;
+      border:1px solid rgba(90,150,255,.35);
+      background:rgba(90,150,255,.18);
+      color:rgba(235,245,255,.98);
+      font-weight:750;
+      font-size:12px;
+    }
+    .btnPrimary:hover{background:rgba(90,150,255,.24)}
+    .main{min-width:0}
+    .wrap{max-width:none;margin:0;padding:0}
+    .top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:10px}
+    h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+    .hint{font-size:12px;color:var(--muted);line-height:1.35}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.07);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);overflow:hidden}
+    .toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,.07);background:rgba(15,22,32,.7);backdrop-filter: blur(10px)}
+    .left{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .pill{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);padding:8px 10px;border-radius:999px}
+    .pill label{font-size:12px;color:var(--muted);user-select:none;white-space:nowrap}
+    .pill input[type="range"]{width:160px}
+    .pill input[type="checkbox"]{transform: translateY(1px)}
+    .pill input[type="text"], .pill select{width:92px;padding:6px 8px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.20);color:var(--text);outline:none}
+    .pill input[type="text"]:focus, .pill select:focus{border-color:rgba(90,150,255,.65)}
+    .pill select{appearance:none}
+    /* Hide No-cross option in the toolbar UI (feature remains enabled by default). */
+    .pill.pill--nocross{display:none}
+    .btn{cursor:pointer;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);color:var(--text);border-radius:12px;padding:8px 10px;font-size:12px}
+    .btn:hover{background:rgba(255,255,255,.09)}
+
+    /* App nav (shown when hosted via Flask). */
+    .appNav{
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 6000;
+      display: none; /* enabled by JS only for http(s) */
+    }
+    .appNav a{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(8,12,18,.78);
+      backdrop-filter: blur(10px);
+      color: rgba(215,224,234,.92);
+      text-decoration:none;
+      font-size:12px;
+      font-weight:650;
+      box-shadow:0 12px 34px rgba(0,0,0,.45);
+    }
+    .appNav a:hover{background:rgba(255,255,255,.08)}
+    
+    /* Practice controls (Play / Pause / Reset) */
+    .practiceCtrls{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .practiceCtl{
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      flex:1 1 auto;
+      min-width:120px;
+      border-radius:999px;
+      padding:10px 14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.06);
+      color:rgba(235,245,255,.98);
+      font-weight:720;
+      font-size:13px;
+      user-select:none;
+    }
+    .practiceCtl:hover{background:rgba(255,255,255,.09)}
+    .practiceCtl--play{
+      width:100%;
+      flex:1 1 100%;
+      border-color:rgba(90,150,255,.35);
+      background:rgba(90,150,255,.18);
+    }
+    .practiceCtl--play:hover{background:rgba(90,150,255,.24)}
+    .practiceCtl__label{display:inline-flex;align-items:center}
+    .practiceCtl__icon{display:inline-block}
+    .practiceCtl__icon--play{
+      width:0;height:0;
+      border-left:12px solid rgba(34,197,94,.95);
+      border-top:7px solid transparent;
+      border-bottom:7px solid transparent;
+      transform: translateY(1px);
+    }
+    .practiceCtl__icon--pause{
+      width:18px;height:14px;
+      display:inline-flex;
+      gap:4px;
+      align-items:stretch;
+    }
+    .practiceCtl__icon--pause::before,
+    .practiceCtl__icon--pause::after{
+      content:'';
+      display:block;
+      width:5px;
+      border-radius:2px;
+      background:rgba(250,204,21,.95);
+    }
+    .practiceCtl__icon--reset{
+      width:12px;height:12px;
+      border-radius:999px;
+      background:rgba(239,68,68,.95);
+      box-shadow:0 0 0 3px rgba(239,68,68,.20);
+    }
+    .practiceSpeedWrap input[type="range"]{
+      appearance:none;
+      height:4px;
+      border-radius:999px;
+      background:rgba(255,255,255,.16);
+      outline:none;
+    }
+    .practiceSpeedWrap input[type="range"]::-webkit-slider-thumb{
+      -webkit-appearance:none;
+      appearance:none;
+      width:14px;height:14px;
+      border-radius:999px;
+      background:rgba(236,72,153,.95);
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow:0 6px 16px rgba(0,0,0,.35);
+    }
+    .practiceSpeedWrap input[type="range"]::-moz-range-thumb{
+      width:14px;height:14px;
+      border-radius:999px;
+      background:rgba(236,72,153,.95);
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow:0 6px 16px rgba(0,0,0,.35);
+    }
+
+    /* Modal (history) */
+    .modalOverlay{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.62);
+      backdrop-filter: blur(8px);
+      z-index:5000;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+    }
+    .modal{
+      width:min(1100px, calc(100vw - 24px));
+      max-height: min(720px, calc(100vh - 24px));
+      background:rgba(10,14,20,.96);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:16px;
+      box-shadow:0 22px 70px rgba(0,0,0,.55);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    .modalHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:12px 14px;
+      background:rgba(15,22,32,.70);
+      border-bottom:1px solid rgba(255,255,255,.07);
+    }
+    .modalTitle{font-size:14px;font-weight:750;color:rgba(235,245,255,.98)}
+    .modalHeaderLeft{display:flex;align-items:center;gap:10px;min-width:0}
+    .historyToggles{display:flex;gap:8px;align-items:center}
+    .btnToggleOn{background:rgba(90,150,255,.22); border-color:rgba(90,150,255,.45)}
+    .cardList{display:flex;flex-direction:column;gap:12px}
+    .sessCard{
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(8,12,18,.55);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+      overflow:hidden;
+    }
+    .sessCardHd{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      padding:12px 12px 10px 12px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .sessTitle{font-weight:850;color:rgba(235,245,255,.98)}
+    .sessSub{margin-top:4px;color:rgba(215,224,234,.70);font-size:12px}
+    .pnlBig{font-weight:900;font-size:16px;white-space:nowrap}
+    .pnlPos{color:rgba(80,220,140,.95)}
+    .pnlNeg{color:rgba(255,110,110,.95)}
+    .pnlFlat{color:rgba(215,224,234,.78)}
+    .sessBd{padding:10px 12px 12px 12px}
+    .miniRow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;color:rgba(215,224,234,.80);font-size:12px}
+    .miniK{color:rgba(215,224,234,.60)}
+    .badgePill{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:3px 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:750;
+      border:1px solid rgba(255,255,255,.14);
+      color:rgba(215,224,234,.88);
+      background:rgba(255,255,255,.05);
+      white-space:nowrap;
+    }
+    .badgeGood{border-color:rgba(80,220,140,.40); color:rgba(80,220,140,.92); background:rgba(80,220,140,.10)}
+    .badgeWarn{border-color:rgba(255,200,90,.45); color:rgba(255,200,90,.95); background:rgba(255,200,90,.10)}
+    .badgeBad{border-color:rgba(255,110,110,.45); color:rgba(255,110,110,.95); background:rgba(255,110,110,.10)}
+    .badgeNeutral{border-color:rgba(215,224,234,.22); color:rgba(215,224,234,.78); background:rgba(215,224,234,.06)}
+    .strip{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    .segPill{
+      height:10px;
+      width:34px;
+      border-radius:999px;
+      background:rgba(215,224,234,.22);
+      border:1px solid rgba(255,255,255,.10);
+    }
+    .segPos{background:rgba(80,220,140,.30); border-color:rgba(80,220,140,.35)}
+    .segNeg{background:rgba(255,110,110,.30); border-color:rgba(255,110,110,.35)}
+    .segNeu{background:rgba(215,224,234,.10); border-color:rgba(215,224,234,.14)}
+    .sessFt{padding:10px 12px;border-top:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;gap:10px;align-items:center}
+    .sessHint{color:rgba(215,224,234,.60);font-size:12px}
+    .modalBody{padding:12px 14px; overflow:auto}
+    .tableWrap{overflow:auto; border:1px solid rgba(255,255,255,.08); border-radius:14px; background:rgba(0,0,0,.18)}
+    table.histTable{border-collapse:separate;border-spacing:0; width:100%; min-width:780px; font-size:12px; color:rgba(215,224,234,.92)}
+    table.histTable th, table.histTable td{padding:10px 10px; border-bottom:1px solid rgba(255,255,255,.06); border-right:1px solid rgba(255,255,255,.06); vertical-align:top}
+    table.histTable th{position:sticky; top:0; background:rgba(12,18,26,.96); z-index:2; font-weight:750}
+    table.histTable th:first-child, table.histTable td:first-child{position:sticky; left:0; background:rgba(12,18,26,.96); z-index:3; font-weight:700}
+    table.histTable tr:last-child td{border-bottom:none}
+    table.histTable th:last-child, table.histTable td:last-child{border-right:none}
+    .tradeCell{display:flex;flex-direction:column;gap:4px}
+    .tradePnlUp{color:rgba(80,220,140,.95); font-weight:750}
+    .tradePnlDn{color:rgba(255,110,110,.95); font-weight:750}
+    .tradeMeta{color:rgba(215,224,234,.70)}
+    canvas{display:block;width:100%;height:710px}
+    .footer{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid rgba(255,255,255,.07);color:var(--muted);font-size:12px;min-height:40px}
+    .k{color:var(--text)}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+
+    /* Footer bar-size control (bottom-left, like trading charts) */
+    .footerLeft{display:flex;align-items:center;gap:10px;min-width:0}
+    .pill.pill--barSize{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+    .pill.pill--barSize input[type="hidden"]{display:none}
+    .pill.pill--barSize .barRadios{gap:8px;flex-wrap:wrap}
+    /* Footer session shading toggles (center) */
+    .footerMid{display:flex;align-items:center;justify-content:center;gap:10px;flex:1;min-width:0}
+    .sessionChecks{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;min-width:0}
+    .sessionChecks label{display:inline-flex;align-items:center;gap:8px;color:rgba(215,224,234,.92);user-select:none;white-space:nowrap}
+    .sessionChecks .meta{color:var(--muted)}
+
+    /* Footer scale radios (bottom-right) */
+    .footerRight{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
+    .scaleRadios{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+    .scaleOpt{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.03);
+      color:rgba(215,224,234,.92);
+      font-size:12px;
+      user-select:none;
+      cursor:pointer;
+    }
+    .scaleOpt input{margin:0}
+    .scaleOpt.isDisabled{
+      opacity: .45;
+      cursor: not-allowed;
+      filter: grayscale(40%);
+    }
+    .scaleOpt.isDisabled input{pointer-events:none}
+    .scaleOpt.isHidden{display:none}
+
+    /* Custom dropdown (replaces native <select> so colors are consistent in dark theme) */
+    .dd{position:relative}
+    .ddBtn{
+      cursor:pointer;
+      padding:6px 10px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.20);
+      color:var(--text);
+      outline:none;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      font-size:12px;
+    }
+    .ddBtn:focus{border-color:rgba(90,150,255,.65)}
+    .ddBtn:disabled{opacity:.55; cursor:not-allowed}
+    .ddChevron{opacity:.8;font-size:10px;transform: translateY(-1px)}
+    .ddMenu{
+      position:absolute;
+      top:calc(100% + 6px);
+      left:0;
+      min-width:84px;
+      z-index:50;
+      padding:6px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(8,12,18,.98);
+      box-shadow:0 18px 50px rgba(0,0,0,.55);
+      display:none;
+    }
+    .dd.open .ddMenu{display:block}
+    .ddItem{
+      cursor:pointer;
+      user-select:none;
+      padding:7px 10px;
+      border-radius:10px;
+      font-size:12px;
+      color:rgba(215,224,234,.92);
+      white-space:nowrap;
+    }
+    .ddItem:hover{background:rgba(255,255,255,.07)}
+    .ddItem.sel{background:rgba(90,150,255,.18); color:rgba(235,245,255,.98)}
+
+    /* Top-right status chip */
+    .statusChip{
+      position:fixed;
+      top:12px;
+      right:14px;
+      z-index:1000;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(8,12,18,.78);
+      backdrop-filter: blur(10px);
+      box-shadow:0 12px 34px rgba(0,0,0,.45);
+      font-size:12px;
+      color:rgba(215,224,234,.92);
+      user-select:none;
+      pointer-events:none;
+    }
+    .statusDot{
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:rgba(140,150,165,.8);
+      box-shadow:0 0 0 2px rgba(255,255,255,.06) inset;
+    }
+    .statusDot.ok{ background:rgba(80,220,140,.9); }
+    .statusDot.live{ background:rgba(90,150,255,.92); }
+    .statusDot.warn{ background:rgba(255,200,90,.95); }
+    .statusDot.err{ background:rgba(255,110,110,.92); }
+    .statusMono{ font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
+  
+
+/* --- */
+
+    /* Static demo tweaks */
+    /* When embedded/served by Flask as an API-backed band chart, we flip body->.api in JS. */
+    body.api #pickStaticDir{display:none !important;}
+    body.api #pickBarsFile{display:none !important;}
