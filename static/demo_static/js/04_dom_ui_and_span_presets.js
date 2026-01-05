@@ -60,6 +60,14 @@
     // Continuous detrend overlay controls (sidebar)
     toggleDetrend: document.getElementById('toggleDetrend'),
     detrendHours: document.getElementById('detrendHours'),
+    // Continuous trend / de-noise controls (sidebar)
+    toggleTrendLP: document.getElementById('toggleTrendLP'),
+    toggleTrendLin: document.getElementById('toggleTrendLin'),
+    trendSlopeLabel: document.getElementById('trendSlopeLabel'),
+    // Feature registry UI (sidebar)
+    featEnable: document.getElementById('featEnable'),
+    featList: document.getElementById('featList'),
+    featReadout: document.getElementById('featReadout'),
     // Footer session toggles
     sessPreMarket: document.getElementById('sessPreMarket'),
     sessAfterHours: document.getElementById('sessAfterHours'),
@@ -92,6 +100,13 @@
   // Optional sidebar controls (may not exist in all modes/layouts).
   if(!ui.toggleDetrend) ui.toggleDetrend = { checked: false, addEventListener: function(){ /* no-op */ } };
   if(!ui.detrendHours) ui.detrendHours = { value: '2.0', addEventListener: function(){ /* no-op */ } };
+  if(!ui.toggleTrendLP) ui.toggleTrendLP = { checked: false, addEventListener: function(){ /* no-op */ } };
+  if(!ui.toggleTrendLin) ui.toggleTrendLin = { checked: false, addEventListener: function(){ /* no-op */ } };
+  if(!ui.trendSlopeLabel) ui.trendSlopeLabel = { style: { display: 'none' }, textContent: '' };
+  // Feature UI elements are optional (older layouts).
+  if(!ui.featEnable) ui.featEnable = { checked: true, addEventListener: function(){ /* no-op */ } };
+  if(!ui.featList) ui.featList = null;
+  if(!ui.featReadout) ui.featReadout = null;
   enforceAlwaysOnOptions();
 
   // Scale preset (requested window span) helpers.

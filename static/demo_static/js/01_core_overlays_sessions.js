@@ -425,6 +425,14 @@
       state.overlays = [];
     }
 
+    // Feature registry (optional): compute per-bar features for RL/diagnostics.
+    // We run this AFTER rebuilding state.data + state.overlays so VWAP/EMA and session filtering are consistent.
+    try{
+      if(typeof window.FEATURES_onStateUpdated === 'function'){
+        window.FEATURES_onStateUpdated({ reason: 'applySessionFilter' });
+      }
+    } catch(_eFeat){}
+
     // Keep view policy consistent with loads: followLatest stays right-aligned, otherwise re-center on anchor time.
     try{
       if(!Number.isFinite(state.xZoom) || state.xZoom <= 0) state.xZoom = 1;

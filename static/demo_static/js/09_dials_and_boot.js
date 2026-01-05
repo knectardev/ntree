@@ -33,8 +33,14 @@
       var color = opts.color || '';
 
       // 270° sweep centered at bottom (like many audio knobs)
-      var START = (-225) * Math.PI/180;
-      var END   = (  45) * Math.PI/180;
+      var TWO_PI = Math.PI * 2;
+      // Work in an "unwrapped" [0, 2π) space so pointer angles from atan2() can cover the full sweep.
+      // Note: atan2 returns [-π, π], so any sweep starting below -π would be unreachable without this normalization.
+      var START0 = (-225) * Math.PI/180;
+      var END0   = (  45) * Math.PI/180;
+      var START = ((START0 % TWO_PI) + TWO_PI) % TWO_PI; // 135°
+      var END   = ((END0 % TWO_PI) + TWO_PI) % TWO_PI;   // 45°
+      if(END <= START) END += TWO_PI; // unwrap across 0°
       var SWEEP = END - START;
       var ctx = canvas.getContext('2d');
 
@@ -47,10 +53,29 @@
         return START + t * SWEEP;
       }
       function angleToValue(a){
-        var TWO_PI = Math.PI * 2;
         var aa = a;
-        while(aa > END) aa -= TWO_PI;
-        while(aa < START) aa += TWO_PI;
+        // Normalize atan2() output to [0, 2π).
+        if(aa < 0) aa += TWO_PI;
+
+        // This dial has a 270° sweep with a 90° "dead zone" (no values).
+        // If the pointer lands in the dead zone, clamp to the nearest endpoint instead of wrapping,
+        // otherwise values can jump from min to max when crossing the gap.
+        var endMod = END % TWO_PI;   // END folded into [0, 2π)
+        var startMod = START;        // START is already in [0, 2π)
+        if(endMod < startMod){
+          // Sweep crosses 0°, so the dead zone is (endMod, startMod).
+          if(aa > endMod && aa < startMod){
+            var dToEnd = aa - endMod;
+            var dToStart = startMod - aa;
+            return (dToStart <= dToEnd) ? snap(min) : snap(max);
+          }
+        }
+
+        // Unwrap into the [START, END] interval when the sweep crosses 0°.
+        if(aa < START) aa += TWO_PI;
+        // Hard clamp to sweep endpoints (safety).
+        if(aa < START) aa = START;
+        if(aa > END) aa = END;
         var t = (aa - START) / (SWEEP || 1);
         t = clamp01(t);
         return snap(min + t * (max - min));
@@ -203,7 +228,8 @@
     if(!detrendCanvas || !scanCanvas || !detrendInput || !scanInput) return;
 
     function updateLabels(){
-      var dh = Number(detrendInput.value) || 2.0;
+      var dh = Number(detrendInput.value);
+      if(!Number.isFinite(dh)) dh = 2.0;
       var sw = Math.round(Number(scanInput.value) || 780);
       if(detrendLabel) detrendLabel.textContent = (dh).toFixed(1) + 'h';
       if(scanLabel) scanLabel.textContent = fmtLookbackShort(sw);
@@ -212,10 +238,13 @@
     // Create dials (UI-only: update labels/hidden inputs)
     var detrendDial = createDial({
       canvas: detrendCanvas,
-      min: 0.25,
+      min: 0.0,
       max: 8.0,
       step: 0.25,
-      value: Number(detrendInput.value) || 2.0,
+      value: (function(){
+        var v = Number(detrendInput.value);
+        return Number.isFinite(v) ? v : 2.0;
+      })(),
       color: 'rgba(122,227,255,0.95)',
       format: function(v){ return Number(v).toFixed(1) + 'h'; },
       onChange: function(v){

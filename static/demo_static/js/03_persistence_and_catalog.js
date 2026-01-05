@@ -316,6 +316,44 @@
         setCandleStyle(cfg.candleStyle);
       }
 
+      // Continuous detrend overlay + trend de-noise (optional sidebar panel).
+      if(cfg.detrend_overlay !== undefined && ui.toggleDetrend) ui.toggleDetrend.checked = coerceBool(cfg.detrend_overlay, !!ui.toggleDetrend.checked);
+      if(cfg.detrend_hours !== undefined && ui.detrendHours){
+        var dh = Number(cfg.detrend_hours);
+        // Allow 0.0 as a valid "no smoothing" value.
+        if(!Number.isFinite(dh) || dh < 0) dh = 2.0;
+        ui.detrendHours.value = String(dh);
+      }
+      // New: independent de-noise functions.
+      if(cfg.trend_lp !== undefined && ui.toggleTrendLP) ui.toggleTrendLP.checked = coerceBool(cfg.trend_lp, !!ui.toggleTrendLP.checked);
+      if(cfg.trend_lin !== undefined && ui.toggleTrendLin) ui.toggleTrendLin.checked = coerceBool(cfg.trend_lin, !!ui.toggleTrendLin.checked);
+      // Back-compat: older config used a single show flag + mode dropdown.
+      // If present, map it onto the new checkboxes (only if the new keys are absent).
+      if((cfg.trend_lp === undefined && cfg.trend_lin === undefined) && (cfg.trend_show !== undefined || cfg.trend_mode !== undefined)){
+        var show = (cfg.trend_show !== undefined) ? coerceBool(cfg.trend_show, false) : false;
+        var tm = String(cfg.trend_mode || '').trim();
+        if(tm !== 'lp' && tm !== 'lin') tm = 'lp';
+        if(ui.toggleTrendLP) ui.toggleTrendLP.checked = !!(show && tm === 'lp');
+        if(ui.toggleTrendLin) ui.toggleTrendLin.checked = !!(show && tm === 'lin');
+      }
+
+      // Feature registry config (optional; used by static/demo_static/js/10_features.js).
+      // Stored as an opaque object so we can evolve it without breaking older configs.
+      try{
+        if(cfg && cfg.feat_cfg && typeof cfg.feat_cfg === 'object'){
+          window.__feature_cfg_saved = cfg.feat_cfg;
+        }
+      } catch(_eFeatCfg){}
+
+      // Feature UI (checkbox selections / enable flag).
+      // This is used by static/demo_static/js/11_feature_ui.js.
+      try{
+        window.__feature_ui_saved = {
+          enabled: (cfg && typeof cfg.feat_enable === 'boolean') ? cfg.feat_enable : true,
+          selected: (cfg && Array.isArray(cfg.feat_selected)) ? cfg.feat_selected.slice() : []
+        };
+      } catch(_eFeatUi){}
+
       syncCandleStyleEnabled();
       enforceAlwaysOnOptions();
       return true;
@@ -354,7 +392,39 @@
       ind_ema21: !!(ui.indEma21 && ui.indEma21.checked),
       ind_ema50: !!(ui.indEma50 && ui.indEma50.checked),
       ind_vwap: !!(ui.indVwap && ui.indVwap.checked),
-      ind_candle_bias: false
+      ind_candle_bias: false,
+      // Continuous detrend / trends (sidebar)
+      detrend_overlay: !!(ui.toggleDetrend && ui.toggleDetrend.checked),
+      detrend_hours: ui.detrendHours ? (Math.round((Number(ui.detrendHours.value) || 0) * 100) / 100) : 0,
+      trend_lp: !!(ui.toggleTrendLP && ui.toggleTrendLP.checked),
+      trend_lin: !!(ui.toggleTrendLin && ui.toggleTrendLin.checked),
+
+      // Feature registry (opaque config blob; optional)
+      feat_cfg: (function(){
+        try{
+          return (window.__feature_cfg_saved && typeof window.__feature_cfg_saved === 'object') ? window.__feature_cfg_saved : null;
+        } catch(_e){
+          return null;
+        }
+      })(),
+
+      // Feature UI selections
+      feat_enable: (function(){
+        try{
+          if(window.__feature_cfg_saved && typeof window.__feature_cfg_saved.enabled === 'boolean') return !!window.__feature_cfg_saved.enabled;
+          if(window.__feature_ui_saved && typeof window.__feature_ui_saved.enabled === 'boolean') return !!window.__feature_ui_saved.enabled;
+          return true;
+        } catch(_e){
+          return true;
+        }
+      })(),
+      feat_selected: (function(){
+        try{
+          return (window.__feature_ui_saved && Array.isArray(window.__feature_ui_saved.selected)) ? window.__feature_ui_saved.selected.slice() : [];
+        } catch(_e){
+          return [];
+        }
+      })()
     };
   }
 
@@ -559,7 +629,8 @@
       if(!Number.isFinite(barS) || barS <= 0) barS = 60;
 
       var dh = ui.detrendHours ? Number(ui.detrendHours.value) : NaN;
-      if(!Number.isFinite(dh) || dh <= 0) dh = 2.0;
+      // Allow 0.0 as "no smoothing" (overlay should become raw closes).
+      if(!Number.isFinite(dh) || dh < 0) dh = 2.0;
 
       // Convert hours to window in bars based on current bar size.
       var winBars = Math.floor((dh * 3600) / barS);
@@ -587,6 +658,14 @@
         closes[i] = Number.isFinite(c) ? c : 0;
       }
 
+      // Special-case: 0h means "no smoothing", so the overlay just matches raw closes.
+      if(dh === 0){
+        try{
+          state._render.detrendOverlay = { key: key, y: closes.slice() };
+        } catch(_eStore0){}
+        return closes;
+      }
+
       var resid = detrendRollingLinear(closes, winBars);
       var base = smaRolling(closes, winBars);
       var y = new Array(n);
@@ -596,6 +675,119 @@
         state._render.detrendOverlay = { key: key, y: y };
       } catch(_eStore){}
       return y;
+    } catch(_e){
+      return null;
+    }
+  }
+
+  // --- Trend (de-noised) overlay helpers ---
+  // Trend modes:
+  //  - lp: low-pass filtering (SMA trend level)
+  //  - lin: local linear trend extraction (trend level + slope)
+  function rollingLinearTrend(closes, win){
+    var N = closes.length;
+    var w = clamp(Math.floor(Number(win) || 0), 5, N);
+    var level = new Array(N);
+    var slopePerBar = new Array(N);
+    for(var i=0;i<N;i++){ level[i] = 0; slopePerBar[i] = 0; }
+
+    for(var i2=0; i2<N; i2++){
+      var start = clamp(i2 - w + 1, 0, N-1);
+      var end = i2;
+      var nn = end - start + 1;
+
+      var sX = (nn-1)*nn/2;
+      var sX2 = (nn-1)*nn*(2*nn-1)/6;
+
+      var sY = 0, sXY = 0;
+      for(var j=0; j<nn; j++){
+        var y = Number(closes[start + j]);
+        if(!Number.isFinite(y)) y = 0;
+        sY += y;
+        sXY += j * y;
+      }
+
+      var denom = (nn * sX2 - sX*sX) || 1e-9;
+      var a = (nn*sXY - sX*sY) / denom;
+      var b = (sY - a*sX) / nn;
+      var yhat = a*(nn-1) + b;
+      level[i2] = yhat;
+      slopePerBar[i2] = a;
+    }
+    return { level: level, slopePerBar: slopePerBar };
+  }
+
+  function getTrendOverlayData(){
+    try{
+      var wantLP = !!(ui && ui.toggleTrendLP && ui.toggleTrendLP.checked);
+      var wantLin = !!(ui && ui.toggleTrendLin && ui.toggleTrendLin.checked);
+      if(!wantLP && !wantLin) return null;
+      if(!state || !Array.isArray(state.data) || !state.data.length) return null;
+      var n = state.data.length;
+      if(n < 2) return null;
+
+      var barS = Math.floor(Number(state.windowSec) || 60);
+      if(!Number.isFinite(barS) || barS <= 0) barS = 60;
+
+      // Reuse the same "smoothing strength" lookback window (hours) as the detrend overlay.
+      var dh = ui.detrendHours ? Number(ui.detrendHours.value) : NaN;
+      // Allow 0.0 as a valid "no smoothing" value.
+      if(!Number.isFinite(dh) || dh < 0) dh = 2.0;
+
+      var winBars = Math.floor((dh * 3600) / barS);
+      if(!Number.isFinite(winBars) || winBars <= 0) winBars = 5;
+      var minBars = Math.max(5, Math.ceil((30 * 60) / barS));
+      winBars = clamp(winBars, minBars, n);
+
+      var t0 = Number(state.data[0] && state.data[0].t) || 0;
+      var t1 = Number(state.data[n-1] && state.data[n-1].t) || 0;
+      var key = [n, t0, t1, barS, Math.round(dh*100)/100, winBars, wantLP?1:0, wantLin?1:0].join('|');
+
+      try{
+        if(!state._render) state._render = {};
+        if(state._render.trendOverlay && state._render.trendOverlay.key === key){
+          return state._render.trendOverlay;
+        }
+      } catch(_eCache){}
+
+      var closes = new Array(n);
+      for(var i=0;i<n;i++){
+        var d = state.data[i];
+        var c = d ? Number(d.c) : NaN;
+        closes[i] = Number.isFinite(c) ? c : 0;
+      }
+
+      var out = { key: key, yLP: null, yLin: null, slopePerHr: null, lastSlopePerHr: NaN };
+      // Special-case: 0h means "no smoothing".
+      // - LP becomes raw closes
+      // - LIN level becomes raw closes; slope is 0
+      if(dh === 0){
+        if(wantLP) out.yLP = closes.slice();
+        if(wantLin){
+          out.yLin = closes.slice();
+          out.slopePerHr = new Array(n);
+          for(var z=0; z<n; z++) out.slopePerHr[z] = 0;
+          out.lastSlopePerHr = 0;
+        }
+        try{ state._render.trendOverlay = out; } catch(_eStoreZ){}
+        return out;
+      }
+      if(wantLP){
+        out.yLP = smaRolling(closes, winBars);
+      }
+      if(wantLin){
+        var lin = rollingLinearTrend(closes, winBars);
+        out.yLin = lin.level;
+        out.slopePerHr = new Array(n);
+        var mult = (barS > 0) ? (3600 / barS) : 60; // bars/hr
+        for(var k=0;k<n;k++){
+          var s = Number(lin.slopePerBar[k]);
+          out.slopePerHr[k] = Number.isFinite(s) ? (s * mult) : NaN;
+        }
+        out.lastSlopePerHr = Number(out.slopePerHr[n-1]);
+      }
+      try{ state._render.trendOverlay = out; } catch(_eStore){}
+      return out;
     } catch(_e){
       return null;
     }

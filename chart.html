@@ -84,6 +84,31 @@
         </div>
       </details>
 
+      <details class="sideCard sideCard--collapsible" aria-label="Feature controls">
+        <summary class="sideCardTitle">Features</summary>
+        <div class="sideCardBody">
+          <p class="hint" style="margin: 0 0 10px 0;">
+            Select computed feature series (for RL/diagnostics). Readout follows the hovered bar (or the latest bar when not hovering).
+          </p>
+          <div class="sideList">
+            <label class="chkRow" title="Enable/disable feature computation (state.features)">
+              <input id="featEnable" type="checkbox" checked />
+              <span class="chkLbl">
+                <span class="chkName">Enable feature compute</span>
+              </span>
+            </label>
+          </div>
+          <div class="sideDivider"></div>
+
+          <!-- Populated by static/demo_static/js/11_feature_ui.js -->
+          <div class="sideList" id="featList"></div>
+
+          <div class="sideDivider"></div>
+          <div class="hint" style="margin-top: 6px;">Readout</div>
+          <pre class="hint mono" id="featReadout" style="white-space: pre; max-height: 220px; overflow: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px; background: rgba(0,0,0,0.25);"></pre>
+        </div>
+      </details>
+
       <!-- Candlestick bias overlay is intentionally hidden/disabled for now. -->
       <details class="sideCard sideCard--collapsible" aria-label="Practice mode">
         <summary class="sideCardTitle">Practice</summary>
@@ -191,18 +216,41 @@
               <label class="chkRow" title="Show detrended overlay">
                 <input id="toggleDetrend" type="checkbox" checked />
                 <span class="chkLbl">
-                  <span class="chkName">Show detrended overlay</span>
+                  <span class="chkNameRow">
+                    <span class="chkName">Show detrended overlay</span>
+                    <span class="swatch swatch--detrendOverlay" aria-hidden="true"></span>
+                  </span>
                 </span>
               </label>
 
-              <label class="chkRow" title="Show de-noised trend">
-                <input id="toggleTurns" type="checkbox" />
+            </div>
+          </div>
+
+          <div class="subCard" aria-label="De-noising functions" style="margin-top:10px;">
+            <div class="subCardTitle">De-noising functions</div>
+            <div class="sideList">
+              <label class="chkRow" title="Low-pass filtering (trend level)">
+                <input id="toggleTrendLP" type="checkbox" />
                 <span class="chkLbl">
-                  <span class="chkName">Show de-noised trend</span>
+                  <span class="chkNameRow">
+                    <span class="chkName">Low-pass (SMA trend level)</span>
+                    <span class="swatch swatch--trendLP" aria-hidden="true"></span>
+                  </span>
                 </span>
               </label>
 
+              <label class="chkRow" title="Local linear trend extraction (trend level + slope)">
+                <input id="toggleTrendLin" type="checkbox" />
+                <span class="chkLbl">
+                  <span class="chkNameRow">
+                    <span class="chkName">Local linear (trend level + slope)</span>
+                    <span class="swatch swatch--trendLin" aria-hidden="true"></span>
+                  </span>
+                </span>
+              </label>
 
+              <div class="dialHelp" id="trendSlopeLabel" style="display:none;"></div>
+              <div class="dialHelp">Uses the Smoothing strength lookback window.</div>
             </div>
           </div>
 
@@ -216,7 +264,7 @@
                 <div class="dialWrap">
                   <canvas class="dialCanvas" id="detrendDial" width="220" height="220"></canvas>
                 </div>
-                <input id="detrendHours" class="hiddenInput" type="number" min="0.25" step="0.25" value="2.0" />
+                <input id="detrendHours" class="hiddenInput" type="number" min="0" step="0.25" value="2.0" />
                 <div class="dialHelp">How aggressively we ignore slow drift before scanning for rhythms.</div>
               </div>
 
@@ -345,9 +393,11 @@
   <script src="static/demo_static/js/04_dom_ui_and_span_presets.js"></script>
   <script src="static/demo_static/js/05_state_and_chart_math.js"></script>
   <script src="static/demo_static/js/06_loaders_and_fetch.js"></script>
+  <script src="static/demo_static/js/10_features.js"></script>
   <script src="static/demo_static/js/07_render_and_interactions.js"></script>
   <script src="static/demo_static/js/08_replay_and_file_io.js"></script>
   <script src="static/demo_static/js/09_dials_and_boot.js"></script>
+  <script src="static/demo_static/js/11_feature_ui.js"></script>
 </body>
 </html>
 

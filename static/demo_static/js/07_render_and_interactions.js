@@ -699,6 +699,50 @@
       } catch(_e){}
     })();
 
+    // De-noised trend overlay (optional): render as a price-space line on the main chart.
+    (function drawTrendOverlay(){
+      try{
+        var td = (typeof getTrendOverlayData === 'function') ? getTrendOverlayData() : null;
+        var drewAny = false;
+        // Low-pass SMA trend level (cyan)
+        if(td && td.yLP && td.yLP.length === state.data.length){
+          var ptsLP = [];
+          for(var bi=start; bi<=end; bi++){
+            var x = xForIndex(bi + 0.5, plot, barsVisible);
+            var yv = Number(td.yLP[bi]);
+            if(!Number.isFinite(yv)) ptsLP.push([NaN, NaN]);
+            else ptsLP.push([x, yForPrice(yv, pricePlot, yMin, yMax)]);
+          }
+          strokePolyline(ctx, ptsLP, 'rgba(122, 227, 255, 0.92)', 2.2, !!doSmooth);
+          drewAny = true;
+        }
+        // Local linear trend level (gold-ish so both can be seen together)
+        if(td && td.yLin && td.yLin.length === state.data.length){
+          var ptsLin = [];
+          for(var bi2=start; bi2<=end; bi2++){
+            var x2 = xForIndex(bi2 + 0.5, plot, barsVisible);
+            var yv2 = Number(td.yLin[bi2]);
+            if(!Number.isFinite(yv2)) ptsLin.push([NaN, NaN]);
+            else ptsLin.push([x2, yForPrice(yv2, pricePlot, yMin, yMax)]);
+          }
+          strokePolyline(ctx, ptsLin, 'rgba(255, 215, 0, 0.88)', 2.0, !!doSmooth);
+          drewAny = true;
+        }
+
+        // If local-linear mode is active, show a small slope readout (per hour) in the sidebar.
+        try{
+          if(ui && ui.trendSlopeLabel){
+            if(td && td.slopePerHr && Number.isFinite(td.lastSlopePerHr)){
+              ui.trendSlopeLabel.style.display = '';
+              ui.trendSlopeLabel.textContent = 'Slope (last): ' + td.lastSlopePerHr.toFixed(4) + ' / hr';
+            } else {
+              ui.trendSlopeLabel.style.display = 'none';
+            }
+          }
+        } catch(_eLbl){}
+      } catch(_e){}
+    })();
+
     // Indicator overlays (EMA/VWAP), aligned 1:1 with state.data.
     (function drawOverlays(){
       try{
@@ -1475,6 +1519,19 @@
     scheduleSaveUiConfig();
   }
 
+  // Trend overlay UX (spaghetti prevention): only allow ONE trend overlay at a time.
+  function onTrendToggleChanged(e){
+    try{
+      var tgt = e && e.target ? e.target : null;
+      if(tgt === ui.toggleTrendLP && ui.toggleTrendLP && ui.toggleTrendLP.checked){
+        if(ui.toggleTrendLin) ui.toggleTrendLin.checked = false;
+      } else if(tgt === ui.toggleTrendLin && ui.toggleTrendLin && ui.toggleTrendLin.checked){
+        if(ui.toggleTrendLP) ui.toggleTrendLP.checked = false;
+      }
+    } catch(_e){}
+    onToggleDraw();
+  }
+
   function onSessionFilterChanged(e){
     // Use TradingView-style filtering: remove off-hours bars from the rendered dataset.
     // Guard: never allow all sessions to be disabled (otherwise the chart becomes empty/blank).
@@ -1553,6 +1610,8 @@
   ui.outer.addEventListener('change', onToggleDraw);
   ui.avgline.addEventListener('change', onToggleDraw);
   if(ui.toggleDetrend) ui.toggleDetrend.addEventListener('change', onToggleDraw);
+  if(ui.toggleTrendLP) ui.toggleTrendLP.addEventListener('change', onTrendToggleChanged);
+  if(ui.toggleTrendLin) ui.toggleTrendLin.addEventListener('change', onTrendToggleChanged);
   if(ui.indEma9) ui.indEma9.addEventListener('change', onOverlayToggleChanged);
   if(ui.indEma21) ui.indEma21.addEventListener('change', onOverlayToggleChanged);
   if(ui.indEma50) ui.indEma50.addEventListener('change', onOverlayToggleChanged);
