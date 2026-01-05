@@ -862,6 +862,7 @@
             <label class="scaleOpt"><input type="radio" name="spanPreset" value="1y" /> 1Y</label>
             <label class="scaleOpt"><input type="radio" name="spanPreset" value="3y" /> 3Y</label>
             <label class="scaleOpt"><input type="radio" name="spanPreset" value="5y" /> 5Y</label>
+            <label class="scaleOpt"><input type="radio" name="spanPreset" value="all" /> ALL</label>
           </div>
         </div>
       </div>
@@ -2467,9 +2468,11 @@
     '6m': 180 * 24 * 60 * 60 * 1000,
     '1y': 365 * 24 * 60 * 60 * 1000,
     '3y': 3 * 365 * 24 * 60 * 60 * 1000,
-    '5y': 5 * 365 * 24 * 60 * 60 * 1000
+    '5y': 5 * 365 * 24 * 60 * 60 * 1000,
+    // Special: "show everything available" (resolved against dataset bounds when known).
+    'all': Number.POSITIVE_INFINITY
   };
-  var SPAN_PRESET_ORDER = ['1d','5d','1m','3m','6m','1y','3y','5y'];
+  var SPAN_PRESET_ORDER = ['1d','5d','1m','3m','6m','1y','3y','5y','all'];
 
   function normalizeSpanPreset(v){
     var k = String(v || '').trim().toLowerCase();
@@ -2483,6 +2486,19 @@
     // - This matches the user expectation that the selector reflects the nearest *bucket above*.
     var s = Number(spanMs);
     if(!Number.isFinite(s) || s <= 0) return '1d';
+    // If span effectively covers the full dataset history, call it "ALL".
+    // (This keeps the selector truthful when we auto-expand to full history.)
+    try{
+      var ds0 = Number(state && state.datasetStartMs);
+      var de0 = Number(state && state.datasetEndMs);
+      var deMax = Number(state && state.datasetMaxEndMs);
+      var endForHistory = (Number.isFinite(deMax) && Number.isFinite(ds0) && deMax > ds0) ? deMax : de0;
+      if(Number.isFinite(ds0) && Number.isFinite(endForHistory) && endForHistory > ds0){
+        var datasetSpan = endForHistory - ds0;
+        var slack = 6 * 60 * 60 * 1000; // 6h
+        if(s + slack >= datasetSpan) return 'all';
+      }
+    } catch(_e){}
     var items = [];
     for(var ii=0; ii<SPAN_PRESET_ORDER.length; ii++){
       var kk = SPAN_PRESET_ORDER[ii];
@@ -2516,7 +2532,7 @@
       for(var i=0;i<keys.length;i++){
         var k = keys[i];
         var need = Number(SPAN_PRESETS[k]) || 0;
-        var ok = (need <= 0) ? true : ((datasetSpan + slack) >= need);
+        var ok = (k === 'all') ? true : ((need <= 0) ? true : ((datasetSpan + slack) >= need));
         // Replay: we set a default span preset on start, but do NOT hard-lock the UI.
         enabled[k] = !!ok;
         // Update DOM controls if present.
@@ -2528,8 +2544,13 @@
             if(!ok) lab.classList.add('isDisabled');
             else lab.classList.remove('isDisabled');
             // Hide non-applicable options entirely (instead of showing disabled/grayed out).
-            if(!ok) lab.classList.add('isHidden');
-            else lab.classList.remove('isHidden');
+            if(k !== 'all'){
+              if(!ok) lab.classList.add('isHidden');
+              else lab.classList.remove('isHidden');
+            } else {
+              // ALL is always applicable.
+              lab.classList.remove('isHidden');
+            }
             lab.setAttribute('aria-disabled', (!ok) ? 'true' : 'false');
           }
         }
@@ -2648,7 +2669,21 @@
       }
     } catch(_e){}
     state.spanPreset = key;
-    state.viewSpanMs = Number(SPAN_PRESETS[key]) || DEFAULT_INIT_SPAN_MS;
+    if(key === 'all'){
+      // Resolve to the currently known full dataset span; if unknown, fall back to a small default
+      // and we'll expand after bounds are learned from the first response.
+      var ds0 = Number(state && state.datasetStartMs);
+      var de0 = Number(state && state.datasetEndMs);
+      var deMax = Number(state && state.datasetMaxEndMs);
+      var endForHistory = (Number.isFinite(deMax) && Number.isFinite(ds0) && deMax > ds0) ? deMax : de0;
+      if(Number.isFinite(ds0) && Number.isFinite(endForHistory) && endForHistory > ds0){
+        state.viewSpanMs = endForHistory - ds0;
+      } else {
+        state.viewSpanMs = DEFAULT_INIT_SPAN_MS;
+      }
+    } else {
+      state.viewSpanMs = Number(SPAN_PRESETS[key]) || DEFAULT_INIT_SPAN_MS;
+    }
     // Picking a preset should show (roughly) that preset span immediately.
     state.xZoom = 1;
     // Preset selection implies "show me the latest N"; keep following latest.
@@ -3138,6 +3173,23 @@
     return steps[steps.length-1];
   }
 
+  function chooseMonthStep(monthCount, plotW, minPxPerTick){
+    // Choose a month stride so labels don't overlap when zoomed out.
+    var m = Math.max(0, Math.floor(Number(monthCount) || 0));
+    if(m <= 0) return 1;
+    var plotWidth = Number(plotW);
+    var minPx = Number(minPxPerTick);
+    if(!Number.isFinite(plotWidth) || plotWidth <= 0) plotWidth = 900;
+    if(!Number.isFinite(minPx) || minPx <= 10) minPx = 140;
+    var maxTicks = Math.max(2, Math.floor(plotWidth / minPx));
+    var target = Math.max(1, Math.ceil(m / maxTicks));
+    var steps = [1, 2, 3, 6, 12];
+    for(var i=0;i<steps.length;i++){
+      if(steps[i] >= target) return steps[i];
+    }
+    return steps[steps.length-1];
+  }
+
   function computeTimeTicksBySpan(t0, t1, plotW, minPxPerTick){
     var a = Number(t0), b = Number(t1);
     if(!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
@@ -3193,6 +3245,8 @@
 
   function formatAxisTimeUtc(ms, stepMs){
     // (Name kept for minimal diff) Compact axis label in ET.
+    // If we're zoomed out to multi-week+ spans, day-of-month is noisy; show month+year.
+    if(Number(stepMs) >= 14*24*60*60_000) return fmtEt(ms, { month:'short', year:'numeric' });
     if(Number(stepMs) >= 24*60*60_000) return fmtEt(ms, { month:'short', day:'numeric' });
     return fmtEt(ms, { hour:'numeric', minute:'2-digit', hour12:true });
   }
@@ -3580,6 +3634,41 @@
         syncBarPresetUi();
         updateUrlBarSize();
       }
+
+      // If the dataset contains more history than the current window, and the full history
+      // would still fit within the max bars budget at the current bar size, auto-expand
+      // the requested window to include the full dataset.
+      //
+      // This fixes the common "I imported multiple years but only 1Y is visible" issue for
+      // coarse bars (e.g. 1D equities) where fetching everything is still cheap.
+      try{
+        var spanQ0 = String(getQueryParam('span', '') || '').trim().toLowerCase();
+        var cap0 = Math.max(1, Math.floor(Number(effMaxBars || j.max_bars || j.limit || 0) || 1));
+        var dsA = Number(state && state.datasetStartMs);
+        var deA = Number(state && state.datasetEndMs);
+        if(!explicitWindow && Number.isFinite(dsA) && Number.isFinite(deA) && deA > dsA){
+          var fullSpanMs = deA - dsA;
+          var secPerBar = Math.max(1, Math.floor(Number(effBar) || Math.floor(state.windowSec) || 60));
+          var approxBars = Math.ceil(fullSpanMs / (secPerBar * 1000));
+          var wantsAll = (String(state && state.spanPreset || '').toLowerCase() === 'all') || (spanQ0 === 'all') || (spanQ0 === '1y');
+          var curSpan0 = Number(state && state.viewSpanMs);
+          if(wantsAll && !state._autoExpandedFullHistoryOnce && Number.isFinite(approxBars) && approxBars <= cap0){
+            if(!Number.isFinite(curSpan0) || curSpan0 < fullSpanMs - 60*1000){
+              state._autoExpandedFullHistoryOnce = true;
+              state.spanPreset = 'all';
+              state.viewSpanMs = fullSpanMs;
+              state.viewEndMs = deA;
+              state.followLatest = true;
+              state.xZoom = 1;
+              syncSpanPresetUi();
+              updateSpanPresetAvailability();
+              updateUrlBarSize();
+              loadFromAPI(true);
+              return;
+            }
+          }
+        }
+      } catch(_eAutoAll){}
 
       if(!Array.isArray(t) || !Array.isArray(o) || !Array.isArray(h) || !Array.isArray(l) || !Array.isArray(c) || !Array.isArray(v)){
         throw new Error('Unexpected JSON shape. Expected arrays: t_ms,o,h,l,c,v');
@@ -4324,10 +4413,78 @@
       ctx.textBaseline = 'top';
 
       var labelY = plot.y + plot.h + 8;
-      var isDayMode = stepMs >= 24*60*60_000;
+      // Webull-style zoomed-out axis: show months only; show year instead of "Dec".
+      var isMonthMode = stepMs >= 14*24*60*60_000;
+      var isDayMode = !isMonthMode && (stepMs >= 24*60*60_000);
       var prevTm = null;
       var lastLabelRight = -1e18;
       var labelPadPx = 6;
+
+      if(isMonthMode){
+        // Find the first bar of each visible month in ET.
+        var monthStarts = [];
+        var prevYm = '';
+        for(var bi=start; bi<=end; bi++){
+          var bt = Number(state.data[bi] && state.data[bi].t);
+          if(!Number.isFinite(bt)) continue;
+          var ym = fmtEt(bt, { year:'numeric', month:'2-digit' });
+          if(!prevYm || ym !== prevYm){
+            monthStarts.push({ idx: bi, t: bt });
+            prevYm = ym;
+          }
+        }
+
+        var mStep = chooseMonthStep(monthStarts.length, plot.w, 140);
+
+        function _monthNumEt(ms){
+          var m = fmtEt(ms, { month:'numeric' });
+          var n = parseInt(String(m), 10);
+          return Number.isFinite(n) ? n : NaN;
+        }
+
+        function _shouldShowMonth(mNum, step){
+          // Always include December so we can show year labels (Webull pattern).
+          if(mNum === 12) return true;
+          if(step <= 1) return true;
+          if(step === 2) return (mNum % 2 === 0);
+          if(step === 3) return (mNum === 4 || mNum === 7 || mNum === 10);
+          if(step === 6) return (mNum === 6);
+          // step >= 12: only show December (handled above)
+          return false;
+        }
+
+        for(var mi=0; mi<monthStarts.length; mi++){
+          var m0 = monthStarts[mi];
+          if(!m0) continue;
+          var mNum = _monthNumEt(m0.t);
+          if(!Number.isFinite(mNum)) continue;
+          if(!_shouldShowMonth(mNum, mStep)) continue;
+
+          var x0 = xForIndex(m0.idx + 0.5, plot, barsVisible);
+          if(x0 < plot.x - 2 || x0 > plot.x + plot.w + 2) continue;
+
+          // tick
+          ctx.beginPath();
+          ctx.moveTo(x0, plot.y + plot.h);
+          ctx.lineTo(x0, plot.y + plot.h + 6);
+          ctx.stroke();
+
+          var label0 = (mNum === 12) ? fmtEt(m0.t, { year:'numeric' }) : fmtEt(m0.t, { month:'short' });
+          if(label0){
+            var lw0 = ctx.measureText(label0).width;
+            var lleft0 = x0 - (lw0/2) - labelPadPx;
+            var lright0 = x0 + (lw0/2) + labelPadPx;
+            if(lleft0 >= lastLabelRight){
+              ctx.fillText(label0, x0, labelY);
+              lastLabelRight = lright0;
+            }
+          }
+        }
+
+        ctx.restore();
+        return;
+      }
+
       for(var tm = first; tm <= t1; tm += stepMs){
         var idx = findIndexByTimeMs(state.data, tm);
         if(idx < start) idx = start;
