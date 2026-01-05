@@ -743,7 +743,7 @@
             <div class="dialRow">
               <div class="dialCol">
                 <label>
-                  Smoothing strength <span class="dialValue" id="detrendLabel">2.0h</span>
+                  Smoothing strength
                 </label>
                 <div class="dialWrap">
                   <canvas class="dialCanvas" id="detrendDial" width="220" height="220"></canvas>
@@ -754,7 +754,7 @@
 
               <div class="dialCol">
                 <label>
-                  Lookback window <span class="dialValue" id="scanLabel">last 780m</span>
+                  Lookback window
                 </label>
                 <div class="dialWrap">
                   <canvas class="dialCanvas" id="scanDial" width="220" height="220"></canvas>
@@ -7651,14 +7651,14 @@
     }
     function fmtLookbackShort(min){
       var m = Math.max(0, Math.round(Number(min) || 0));
-      if(m < 60) return 'last ' + m + 'm';
+      if(m < 60) return String(m) + 'm';
       if(m % 60 === 0){
         var h = m/60;
-        if(h < 24) return 'last ' + h + 'h';
+        if(h < 24) return String(h) + 'h';
         var d = h/24;
-        return 'last ' + (Number.isInteger(d) ? d : d.toFixed(1)) + 'd';
+        return (Number.isInteger(d) ? d : d.toFixed(1)) + 'd';
       }
-      return 'last ' + (m/60).toFixed(1) + 'h';
+      return (m/60).toFixed(1) + 'h';
     }
 
     // Minimal dial implementation (canvas knob + pointer interactions)
