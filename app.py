@@ -18,6 +18,7 @@ from strategies import compute_vwap_ema_crossover_signals, compute_fools_paradis
 from backtesting import run_backtest, RiskRewardExecutionModel
 from candlestick_analysis import compute_candlestick_bias, count_pattern_instances
 from replay.session import ReplaySession, ReplaySessionConfig
+from synthetic_generators import get_generator, write_synthetic_series_to_db
 
 # Optional imports for predictive analytics - won't break app if not installed
 try:
@@ -220,8 +221,13 @@ def api_window():
     Chart contract endpoint (bandchart-style).
     Returns arrays: t_ms,o,h,l,c,v plus dataset_start/dataset_end and served start/end.
     """
-    symbol = (request.args.get("symbol") or "").strip().upper()
-    if not symbol:
+    # NOTE:
+    # - For real tickers we normalize to uppercase.
+    # - For synthetic dataset "symbol" we allow mixed-case names, so we keep both the raw and an
+    #   uppercased variant for case-insensitive lookup.
+    symbol_raw = (request.args.get("symbol") or "").strip()
+    symbol = symbol_raw.upper()
+    if not symbol_raw:
         return _bad_request("missing_params", "symbol is required", fields=["symbol"])
 
     bar_s = request.args.get("bar_s", type=int) or 60
@@ -244,10 +250,203 @@ def api_window():
     start_q = (request.args.get("start") or "").strip()
     end_q = (request.args.get("end") or "").strip()
 
+    # Optional selection hints (useful when symbol exists in both real + synthetic worlds).
+    # - source=real|synthetic|auto (default auto)
+    # - scenario/timeframe only apply to synthetic selection
+    source = (request.args.get("source") or "auto").strip().lower()
+    scenario_q = (request.args.get("scenario") or "").strip()
+    timeframe_q = (request.args.get("timeframe") or "").strip()
+
     conn = get_db_connection()
     try:
         cur = conn.cursor()
 
+        def respond_empty(dataset_start=None, dataset_end=None):
+            return jsonify(
+                {
+                    "symbol": symbol,
+                    "bar_s": int(bar_s),
+                    "dataset_start": dataset_start,
+                    "dataset_end": dataset_end,
+                    "start": None,
+                    "end": None,
+                    "t_ms": [],
+                    "o": [],
+                    "h": [],
+                    "l": [],
+                    "c": [],
+                    "v": [],
+                    "truncated": False,
+                }
+            )
+
+        # Auto-detect whether this symbol is present in real stock_data at 1Min.
+        # If not, fall back to synthetic (bars_synth).
+        use_real = True
+        if source == "synthetic":
+            use_real = False
+        elif source == "real":
+            use_real = True
+        else:
+            cur.execute(
+                """
+                SELECT 1
+                FROM stock_data
+                WHERE ticker = ? AND interval = '1Min'
+                LIMIT 1
+                """,
+                (symbol,),
+            )
+            use_real = cur.fetchone() is not None
+
+        if not use_real:
+            # -------- Synthetic datasets (bars_synth) --------
+            # Determine which (scenario,timeframe) group to use:
+            # - If scenario/timeframe provided: use them.
+            # - Else: pick the most recent group for this symbol (max ts_start).
+            if scenario_q and not timeframe_q:
+                # if only scenario provided, choose most recent timeframe within it
+                cur.execute(
+                    """
+                    SELECT timeframe
+                    FROM bars_synth
+                    WHERE UPPER(symbol) = UPPER(?)
+                      AND scenario = ?
+                    ORDER BY ts_start DESC
+                    LIMIT 1
+                    """,
+                    (symbol_raw, scenario_q),
+                )
+                r = cur.fetchone()
+                timeframe_q = r[0] if r else ""
+
+            if not scenario_q or not timeframe_q:
+                cur.execute(
+                    """
+                    SELECT scenario, timeframe, MIN(ts_start) AS ts_min, MAX(ts_start) AS ts_max
+                    FROM bars_synth
+                    WHERE UPPER(symbol) = UPPER(?)
+                    GROUP BY scenario, timeframe
+                    ORDER BY ts_max DESC
+                    LIMIT 1
+                    """,
+                    (symbol_raw,),
+                )
+                pick = cur.fetchone()
+                if not pick:
+                    return respond_empty()
+                if not scenario_q:
+                    scenario_q = pick[0] or ""
+                if not timeframe_q:
+                    timeframe_q = pick[1] or ""
+
+            # Map timeframe to base duration.
+            tf_to_s = {"1m": 60, "5m": 300, "15m": 900}
+            base_bar_s = tf_to_s.get(timeframe_q, 60)
+
+            if int(bar_s) < int(base_bar_s):
+                bar_s = int(base_bar_s)
+
+            # Dataset bounds
+            cur.execute(
+                """
+                SELECT MIN(ts_start) AS min_ts, MAX(ts_start) AS max_ts
+                FROM bars_synth
+                WHERE UPPER(symbol) = UPPER(?)
+                  AND scenario = ?
+                  AND timeframe = ?
+                """,
+                (symbol_raw, scenario_q, timeframe_q),
+            )
+            row = cur.fetchone()
+            if not row or not row[0] or not row[1]:
+                return respond_empty()
+
+            ds_start_ms = _parse_iso_to_epoch_ms(row[0])
+            ds_end_ms = _parse_iso_to_epoch_ms(row[1])
+            if ds_start_ms is None or ds_end_ms is None:
+                return _bad_request("dataset_parse_error", "Could not parse synthetic dataset bounds timestamps from DB")
+
+            dataset_start = _epoch_ms_to_iso_z(ds_start_ms)
+            dataset_end = _epoch_ms_to_iso_z(ds_end_ms)
+
+            # Window selection policy (same as real).
+            default_span_ms = 60 * 60 * 1000
+            start_ms = _parse_iso_to_epoch_ms(start_q) if start_q else None
+            end_ms = _parse_iso_to_epoch_ms(end_q) if end_q else None
+            if start_ms is None and end_ms is None:
+                end_ms = ds_end_ms
+                start_ms = max(ds_start_ms, end_ms - default_span_ms)
+            elif start_ms is not None and end_ms is None:
+                end_ms = ds_end_ms
+            elif start_ms is None and end_ms is not None:
+                start_ms = max(ds_start_ms, end_ms - default_span_ms)
+            assert start_ms is not None and end_ms is not None
+            if end_ms < start_ms:
+                return _bad_request("invalid_range", "start must be <= end")
+            start_ms = max(ds_start_ms, int(start_ms))
+            end_ms = min(ds_end_ms, int(end_ms))
+
+            start_sec = int(start_ms // 1000)
+            end_sec = int(end_ms // 1000)
+            cur.execute(
+                """
+                SELECT ts_start, open, high, low, close, COALESCE(volume, 0) AS v
+                FROM bars_synth
+                WHERE UPPER(symbol) = UPPER(?)
+                  AND scenario = ?
+                  AND timeframe = ?
+                  AND strftime('%s', ts_start) >= ?
+                  AND strftime('%s', ts_start) <= ?
+                ORDER BY ts_start ASC
+                """,
+                (symbol_raw, scenario_q, timeframe_q, str(start_sec), str(end_sec)),
+            )
+            base_rows = cur.fetchall()
+            parsed: List[Tuple[int, float, float, float, float, float]] = []
+            for (ts, o, h, l, c, v) in base_rows:
+                t_ms = _parse_iso_to_epoch_ms(ts)
+                if t_ms is None:
+                    continue
+                parsed.append((t_ms, float(o), float(h), float(l), float(c), float(v or 0.0)))
+
+            agg = _aggregate_ohlcv(parsed, int(bar_s))
+            truncated = False
+            if len(agg["t_ms"]) > eff_max_bars:
+                truncated = True
+                keep = eff_max_bars
+                for k in ["t_ms", "o", "h", "l", "c", "v"]:
+                    agg[k] = agg[k][-keep:]
+                if agg["t_ms"]:
+                    start_ms = int(agg["t_ms"][0])
+
+            served_start = _epoch_ms_to_iso_z(int(start_ms)) if start_ms is not None else None
+            served_end = _epoch_ms_to_iso_z(int(end_ms)) if end_ms is not None else None
+
+            return jsonify(
+                {
+                    "symbol": symbol,
+                    "bar_s": int(bar_s),
+                    "dataset_start": dataset_start,
+                    "dataset_end": dataset_end,
+                    "start": served_start,
+                    "end": served_end,
+                    "t_ms": agg["t_ms"],
+                    "o": agg["o"],
+                    "h": agg["h"],
+                    "l": agg["l"],
+                    "c": agg["c"],
+                    "v": agg["v"],
+                    "truncated": truncated,
+                    "max_bars": eff_max_bars,
+                    "live_merged": False,
+                    "source": "synthetic",
+                    "scenario": scenario_q,
+                    "timeframe": timeframe_q,
+                }
+            )
+
+        # -------- Real datasets (stock_data) --------
         # Alpaca-only mode: base resolution is 1-minute.
         base_interval = "1Min"
         base_bar_s = 60
@@ -267,23 +466,7 @@ def api_window():
         )
         row = cur.fetchone()
         if not row or not row[0] or not row[1]:
-            return jsonify(
-                {
-                    "symbol": symbol,
-                    "bar_s": int(bar_s),
-                    "dataset_start": None,
-                    "dataset_end": None,
-                    "start": None,
-                    "end": None,
-                    "t_ms": [],
-                    "o": [],
-                    "h": [],
-                    "l": [],
-                    "c": [],
-                    "v": [],
-                    "truncated": False,
-                }
-            )
+            return respond_empty()
 
         ds_start_ms = _parse_iso_to_epoch_ms(row[0])
         ds_end_ms = _parse_iso_to_epoch_ms(row[1])
@@ -381,6 +564,7 @@ def api_window():
                 "truncated": truncated,
                 "max_bars": eff_max_bars,
                 "live_merged": False,
+                "source": "real",
             }
         )
     finally:
@@ -393,6 +577,26 @@ def index():
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    # Pre-compute per-ticker date ranges (min/max timestamps) for the dashboard's real symbols.
+    # The dashboard uses 1-minute data as the canonical "real" series (see list_chart_tickers()).
+    per_ticker_range = {}
+    try:
+        cursor.execute(
+            """
+            SELECT ticker, MIN(timestamp) AS ts_min, MAX(timestamp) AS ts_max
+            FROM stock_data
+            WHERE interval = '1Min'
+            GROUP BY ticker
+            """
+        )
+        for (t, ts_min, ts_max) in cursor.fetchall():
+            if not t:
+                continue
+            per_ticker_range[str(t).strip().upper()] = (ts_min, ts_max)
+    except Exception:
+        # If anything goes wrong, keep ranges empty and fall back to '-' in the UI.
+        per_ticker_range = {}
+
     # Get latest price for each ticker
     tickers_data = []
     real_tickers = list_chart_tickers()
@@ -406,19 +610,24 @@ def index():
         ''', (ticker,))
         
         result = cursor.fetchone()
+        ts_min, ts_max = per_ticker_range.get(str(ticker).strip().upper(), (None, None))
         if result:
             tickers_data.append({
                 'ticker': result[0],
                 'price': result[1],
                 'timestamp': result[2],
-                'interval': result[3]
+                'interval': result[3],
+                'range_start': ts_min,
+                'range_end': ts_max,
             })
         else:
             tickers_data.append({
                 'ticker': ticker,
                 'price': None,
                 'timestamp': None,
-                'interval': None
+                'interval': None,
+                'range_start': ts_min,
+                'range_end': ts_max,
             })
     
     # Get date range of imported data
@@ -465,6 +674,259 @@ def api_synthetic_datasets():
     """List available synthetic datasets (symbol/scenario/timeframe groups)."""
     datasets = get_synthetic_datasets()
     return jsonify(datasets)
+
+
+@app.route("/api/synthetic_dataset", methods=["DELETE"])
+def api_synthetic_dataset_delete():
+    """Delete an entire synthetic dataset group (symbol + scenario + timeframe)."""
+    symbol = (request.args.get("symbol") or "").strip()
+    scenario = (request.args.get("scenario") or "").strip()
+    timeframe = (request.args.get("timeframe") or "").strip()
+
+    if not symbol or not scenario or not timeframe:
+        return _bad_request(
+            "missing_params",
+            "symbol, scenario, and timeframe are required",
+            fields=["symbol", "scenario", "timeframe"],
+        )
+
+    if timeframe not in VALID_SYNTH_TIMEFRAMES:
+        return _bad_request(
+            "invalid_timeframe",
+            "timeframe is not allowed",
+            allowed=sorted(VALID_SYNTH_TIMEFRAMES),
+        )
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        # Delete bars for this dataset group; l2_state rows cascade delete via FK.
+        cur.execute(
+            """
+            DELETE FROM bars
+            WHERE data_source = 'synthetic'
+              AND UPPER(symbol) = UPPER(?)
+              AND scenario = ?
+              AND timeframe = ?
+            """,
+            (symbol, scenario, timeframe),
+        )
+        deleted = cur.rowcount or 0
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify({"ok": True, "deleted_bars": int(deleted), "symbol": symbol, "scenario": scenario, "timeframe": timeframe})
+
+
+@app.route("/api/synthetic_generate", methods=["POST"])
+def api_synthetic_generate():
+    """
+    Generate a new synthetic dataset and persist it to SQLite (`bars` + `l2_state`).
+
+    Notes:
+    - This is an opt-in endpoint. The core app remains read-only for synthetic unless called explicitly.
+    - Default generator is trend_regime_v2 (market hours + overnight gaps + diurnal volume).
+    """
+    body = request.get_json(silent=True) or {}
+
+    dataset_name = str(body.get("dataset_name") or "").strip()
+    if not dataset_name:
+        return _bad_request("missing_params", "dataset_name is required", fields=["dataset_name"])
+
+    generator_name = str(body.get("generator") or "trend_regime_v2").strip()
+    try:
+        gen = get_generator(generator_name)
+    except KeyError:
+        return _bad_request("invalid_generator", "unknown generator", generator=generator_name)
+
+    timeframe = str(body.get("timeframe") or "1m").strip()
+    if timeframe not in VALID_SYNTH_TIMEFRAMES:
+        return _bad_request(
+            "invalid_timeframe",
+            "timeframe is not allowed",
+            allowed=sorted(VALID_SYNTH_TIMEFRAMES),
+        )
+
+    # Optional "reference" symbol for calibration/labeling (stored on each bar).
+    ref_symbol = body.get("ref_symbol")
+    ref_symbol = str(ref_symbol).strip().upper() if ref_symbol else None
+
+    # Horizon:
+    # - Accept `trading_days` (preferred) or legacy `n_days`.
+    # - Cap to a safe upper bound to avoid accidental multi-million-row inserts.
+    raw_days = body.get("trading_days", body.get("n_days", 1))
+    try:
+        trading_days = int(raw_days)
+    except Exception:
+        return _bad_request("invalid_trading_days", "trading_days must be an integer", trading_days=raw_days)
+    trading_days = max(1, min(1_000, trading_days))  # ~4 years of trading sessions max
+
+    # Start date interpreted in America/New_York trading day terms.
+    start_date = str(body.get("start_date") or "").strip()  # YYYY-MM-DD
+    start_date_local = None
+    if start_date:
+        try:
+            y, m, d = start_date.split("-")
+            start_date_local = datetime(int(y), int(m), int(d)).date()
+        except Exception:
+            return _bad_request("invalid_start_date", "start_date must be YYYY-MM-DD", start_date=start_date)
+
+    seed = body.get("seed")
+    seed = int(seed) if seed is not None and str(seed).strip() != "" else None
+
+    start_price = body.get("start_price")
+    if start_price is None or str(start_price).strip() == "":
+        # Convenience: if user picked a ref_symbol, default to its latest stored price.
+        if ref_symbol:
+            conn = get_db_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT price
+                    FROM stock_data
+                    WHERE ticker = ? AND interval = '1Min'
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                    """,
+                    (ref_symbol,),
+                )
+                row = cur.fetchone()
+            finally:
+                conn.close()
+            if row and row[0] is not None:
+                start_price = float(row[0])
+        if start_price is None:
+            start_price = 100.0
+    try:
+        start_price_f = float(start_price)
+    except Exception:
+        return _bad_request("invalid_start_price", "start_price must be a number", start_price=start_price)
+    if start_price_f <= 0:
+        return _bad_request("invalid_start_price", "start_price must be > 0", start_price=start_price_f)
+
+    # Optional advanced knobs. We keep this intentionally whitelisted.
+    params_in = body.get("params") or {}
+    if params_in is None or not isinstance(params_in, dict):
+        return _bad_request("invalid_params", "params must be an object if provided")
+
+    # Generate (v2 supports market hours, gaps, diurnal volume).
+    try:
+        if generator_name in ("trend_regime_v2", "trend_regime_v3"):
+            from dataclasses import replace
+            if generator_name == "trend_regime_v2":
+                from synthetic_generators.trend_regime_v2 import DEFAULT_PARAMS as D, TrendRegimeV2Params
+
+                regimes = {
+                    "UP": {"drift": float(params_in.get("up_drift", D.regimes["UP"]["drift"])), "vol": float(params_in.get("up_vol", D.regimes["UP"]["vol"]))},
+                    "DOWN": {"drift": float(params_in.get("down_drift", D.regimes["DOWN"]["drift"])), "vol": float(params_in.get("down_vol", D.regimes["DOWN"]["vol"]))},
+                    "CHOP": {"drift": float(params_in.get("chop_drift", D.regimes["CHOP"]["drift"])), "vol": float(params_in.get("chop_vol", D.regimes["CHOP"]["vol"]))},
+                }
+
+                p: TrendRegimeV2Params = replace(
+                    D,
+                    regimes=regimes,
+                    stay_prob=float(params_in.get("stay_prob", D.stay_prob)),
+                    overnight_gap_sigma=float(params_in.get("overnight_gap_sigma", D.overnight_gap_sigma)),
+                    overnight_gap_mu=float(params_in.get("overnight_gap_mu", D.overnight_gap_mu)),
+                    diurnal_volume_strength=float(params_in.get("diurnal_volume_strength", D.diurnal_volume_strength)),
+                    diurnal_vol_strength=float(params_in.get("diurnal_vol_strength", D.diurnal_vol_strength)),
+                    base_volume=float(params_in.get("base_volume", D.base_volume)),
+                    base_spread=float(params_in.get("base_spread", D.base_spread)),
+                    spread_diurnal_strength=float(params_in.get("spread_diurnal_strength", D.spread_diurnal_strength)),
+                    depth_scale=float(params_in.get("depth_scale", D.depth_scale)),
+                )
+
+                bars, l2 = gen(
+                    dataset_name=dataset_name,
+                    ref_symbol=ref_symbol,
+                    start_price=start_price_f,
+                    n_trading_days=trading_days,
+                    timeframe=timeframe,
+                    scenario=generator_name,
+                    start_date_local=start_date_local,
+                    seed=seed,
+                    params=p,
+                )
+            else:
+                from synthetic_generators.trend_regime_v3 import DEFAULT_PARAMS as D, TrendRegimeV3Params
+
+                regimes = {
+                    "UP": {"drift": float(params_in.get("up_drift", D.regimes["UP"]["drift"])), "vol": float(params_in.get("up_vol", D.regimes["UP"]["vol"]))},
+                    "DOWN": {"drift": float(params_in.get("down_drift", D.regimes["DOWN"]["drift"])), "vol": float(params_in.get("down_vol", D.regimes["DOWN"]["vol"]))},
+                    "CHOP": {"drift": float(params_in.get("chop_drift", D.regimes["CHOP"]["drift"])), "vol": float(params_in.get("chop_vol", D.regimes["CHOP"]["vol"]))},
+                }
+
+                p: TrendRegimeV3Params = replace(
+                    D,
+                    regimes=regimes,
+                    stay_prob=float(params_in.get("stay_prob", D.stay_prob)),
+                    overnight_gap_sigma=float(params_in.get("overnight_gap_sigma", D.overnight_gap_sigma)),
+                    overnight_gap_mu=float(params_in.get("overnight_gap_mu", D.overnight_gap_mu)),
+                    diurnal_volume_strength=float(params_in.get("diurnal_volume_strength", D.diurnal_volume_strength)),
+                    diurnal_vol_strength=float(params_in.get("diurnal_vol_strength", D.diurnal_vol_strength)),
+                    base_volume=float(params_in.get("base_volume", D.base_volume)),
+                    base_spread=float(params_in.get("base_spread", D.base_spread)),
+                    spread_diurnal_strength=float(params_in.get("spread_diurnal_strength", D.spread_diurnal_strength)),
+                    depth_scale=float(params_in.get("depth_scale", D.depth_scale)),
+                    daily_vol_sigma=float(params_in.get("daily_vol_sigma", D.daily_vol_sigma)),
+                    daily_vol_rho=float(params_in.get("daily_vol_rho", D.daily_vol_rho)),
+                    daily_vol_mu=float(params_in.get("daily_vol_mu", D.daily_vol_mu)),
+                    event_prob=float(params_in.get("event_prob", D.event_prob)),
+                    event_sigma=float(params_in.get("event_sigma", D.event_sigma)),
+                    vol_ret_coupling=float(params_in.get("vol_ret_coupling", D.vol_ret_coupling)),
+                )
+
+                bars, l2 = gen(
+                    dataset_name=dataset_name,
+                    ref_symbol=ref_symbol,
+                    start_price=start_price_f,
+                    n_trading_days=trading_days,
+                    timeframe=timeframe,
+                    scenario=generator_name,
+                    start_date_local=start_date_local,
+                    seed=seed,
+                    params=p,
+                )
+        else:
+            # Legacy generators: best-effort mapping.
+            # NOTE: these do not implement market-hours/overnight-gap semantics.
+            n_bars = int(body.get("n_bars") or 500)
+            n_bars = max(1, min(200_000, n_bars))
+            bars, l2 = gen(
+                symbol=dataset_name,
+                start_price=start_price_f,
+                n_bars=n_bars,
+                timeframe=timeframe,
+                duration_sec={"1m": 60, "5m": 300, "15m": 900}[timeframe],
+                scenario=generator_name,
+                seed=seed,
+            )
+    except Exception as e:
+        return _bad_request("generation_failed", str(e))
+
+    try:
+        write_synthetic_series_to_db(bars, l2)
+    except Exception as e:
+        # Most common: unique constraint violation when reusing the same name/timeframe/timestamps.
+        return _bad_request("persist_failed", str(e))
+
+    # Return the dataset group info (what the dashboard expects).
+    ts_start_min = bars[0].ts_start.isoformat().replace("+00:00", "Z") if bars else None
+    ts_start_max = bars[-1].ts_start.isoformat().replace("+00:00", "Z") if bars else None
+    return jsonify(
+        {
+            "ok": True,
+            "symbol": dataset_name,
+            "scenario": generator_name,
+            "timeframe": timeframe,
+            "ref_symbol": ref_symbol,
+            "bar_count": len(bars),
+            "ts_start_min": ts_start_min,
+            "ts_start_max": ts_start_max,
+        }
+    )
 
 
 @app.route("/api/synthetic_bars")

@@ -108,6 +108,13 @@
             font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
             font-size: 12px;
         }
+
+        /* Timestamp column is currently repurposed to show per-symbol data range. */
+        .range {
+            color: rgba(138,160,181,.92);
+            font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+            font-size: 12px;
+        }
         
         .no-data {
             text-align: center;
@@ -305,6 +312,152 @@
             font-weight: 750;
         }
 
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin: 0 0 10px 0;
+        }
+        .panel-header h2 {
+            margin: 0;
+        }
+        .icon-btn {
+            width: 30px;
+            height: 30px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,.10);
+            background: rgba(255,255,255,.06);
+            color: rgba(215,224,234,.92);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 750;
+            line-height: 1;
+            user-select: none;
+            transition: background 0.15s, transform 0.15s;
+        }
+        .icon-btn:hover {
+            background: rgba(255,255,255,.09);
+            transform: translateY(-1px);
+        }
+        .icon-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Modal (synthetic generator) */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.55);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            z-index: 2000;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            width: min(720px, 100%);
+            background: rgba(15,22,32,.98);
+            border: 1px solid rgba(255,255,255,.10);
+            border-radius: 16px;
+            box-shadow: 0 18px 60px rgba(0,0,0,.55);
+            overflow: hidden;
+        }
+        .modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(255,255,255,.08);
+            background: rgba(255,255,255,.03);
+        }
+        .modal-title {
+            font-size: 14px;
+            font-weight: 800;
+            color: rgba(215,224,234,.95);
+        }
+        .modal-body { padding: 14px 16px; }
+        .modal-foot {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            padding: 14px 16px;
+            border-top: 1px solid rgba(255,255,255,.08);
+            background: rgba(255,255,255,.02);
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .form-field { display: flex; flex-direction: column; gap: 6px; }
+        .form-field label {
+            font-size: 11px;
+            color: rgba(138,160,181,.92);
+            user-select: none;
+        }
+        .form-field input,
+        .form-field select {
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,.10);
+            background: rgba(8,12,18,.78);
+            color: rgba(215,224,234,.92);
+            outline: none;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .form-field input::placeholder { color: rgba(138,160,181,.75); }
+        .form-help {
+            margin-top: 10px;
+            font-size: 12px;
+            color: rgba(138,160,181,.92);
+            line-height: 1.35;
+        }
+        .modal-status {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,.10);
+            background: rgba(8,12,18,.78);
+            font-size: 12px;
+            display: none;
+        }
+        .modal-status[data-state="loading"] { display: block; color: rgba(90,150,255,.92); border-color: rgba(90,150,255,.25); }
+        .modal-status[data-state="error"] { display: block; color: rgba(255,110,110,.92); border-color: rgba(255,110,110,.22); }
+        .modal-status[data-state="success"] { display: block; color: rgba(80,220,140,.92); border-color: rgba(80,220,140,.25); }
+        details.advanced {
+            margin-top: 12px;
+            border: 1px solid rgba(255,255,255,.10);
+            border-radius: 12px;
+            background: rgba(255,255,255,.02);
+            padding: 10px 12px;
+        }
+        details.advanced summary {
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            color: rgba(215,224,234,.92);
+            user-select: none;
+        }
+        .advanced-grid {
+            margin-top: 10px;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+        @media (max-width: 640px){
+            .form-grid { grid-template-columns: 1fr; }
+            .advanced-grid { grid-template-columns: 1fr; }
+        }
+
         .synthetic-status {
             padding: 10px 12px;
             border-radius: 8px;
@@ -343,6 +496,38 @@
         .synthetic-table-wrapper {
             max-height: 320px;
             overflow-y: auto;
+        }
+
+        .row-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .delete-btn {
+            width: 26px;
+            height: 26px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,.10);
+            background: rgba(255,255,255,.05);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            flex: 0 0 auto;
+        }
+        .delete-btn:hover {
+            background: rgba(255,110,110,.12);
+            border-color: rgba(255,110,110,.22);
+        }
+        .delete-btn svg {
+            width: 14px;
+            height: 14px;
+            fill: rgba(215,224,234,.85);
+        }
+        .delete-btn:hover svg {
+            fill: rgba(255,110,110,.92);
         }
 
     </style>
@@ -405,12 +590,12 @@
                             <tr>
                                 <th>Ticker</th>
                                 <th>Latest Price</th>
-                                <th>Timestamp</th>
+                                <th>Range</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for ticker_data in tickers %}
-                            <tr onclick="window.location.href='/ticker/{{ ticker_data.ticker }}?band'">
+                            <tr onclick="window.location.href='/demo_static.html?mode=api&symbol={{ ticker_data.ticker }}'">
                                 <td class="ticker">{{ ticker_data.ticker }}</td>
                                 <td class="price">
                                     {% if ticker_data.price %}
@@ -419,9 +604,11 @@
                                         <span class="no-data">No data available</span>
                                     {% endif %}
                                 </td>
-                                <td class="timestamp">
-                                    {% if ticker_data.timestamp %}
-                                        {{ ticker_data.timestamp }}
+                                <td class="range">
+                                    {% if ticker_data.range_start and ticker_data.range_end %}
+                                        {{ ticker_data.range_start[:10] }} → {{ ticker_data.range_end[:10] }}
+                                    {% elif ticker_data.range_start %}
+                                        {{ ticker_data.range_start[:10] }}
                                     {% else %}
                                         <span class="no-data">-</span>
                                     {% endif %}
@@ -433,7 +620,10 @@
                 </div>
             </div>
             <div class="panel">
-                <h2>Synthetic Data Sets</h2>
+                <div class="panel-header">
+                    <h2>Synthetic Data Sets</h2>
+                    <button type="button" id="openSynthModalBtn" class="icon-btn" aria-label="Create synthetic dataset">+</button>
+                </div>
                 <div id="syntheticStatus" class="synthetic-status" data-state="loading">Loading datasets…</div>
                 <div class="grid-container synthetic-table-wrapper">
                     <table id="synthetic-datasets-table">
@@ -452,6 +642,172 @@
             </div>
         </div>
 
+    </div>
+
+    <!-- Synthetic generator modal -->
+    <div id="synthModalOverlay" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="synthModalTitle">
+        <div class="modal">
+            <div class="modal-head">
+                <div class="modal-title" id="synthModalTitle">Generate Synthetic Dataset</div>
+                <button type="button" class="icon-btn" id="closeSynthModalBtn" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="synthDatasetName">Dataset name (stored as symbol)</label>
+                        <input id="synthDatasetName" type="text" placeholder="e.g. SPY_SYNTH_5D_V1" autocomplete="off" />
+                    </div>
+                    <div class="form-field">
+                        <label for="synthRefSymbol">Reference underlying (optional)</label>
+                        <select id="synthRefSymbol">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="synthTimeframe">Timeframe</label>
+                        <select id="synthTimeframe">
+                            <option value="1m">1m</option>
+                            <option value="5m">5m</option>
+                            <option value="15m">15m</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label for="synthTradingDays">Trading days (Mon–Fri sessions)</label>
+                        <select id="synthTradingDays">
+                            <option value="5">5 (1 week)</option>
+                            <option value="20">20 (~1 month)</option>
+                            <option value="60">60 (~3 months)</option>
+                            <option value="252">252 (~1 year)</option>
+                            <option value="504">504 (~2 years)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="synthStartDate">Start date (market local day)</label>
+                        <input id="synthStartDate" type="date" />
+                    </div>
+                    <div class="form-field">
+                        <label for="synthStartPrice">Start price (optional)</label>
+                        <input id="synthStartPrice" type="number" step="0.01" placeholder="If empty, uses latest ref price (if set) or 100" />
+                    </div>
+
+                    <div class="form-field">
+                        <label for="synthSeed">Seed (optional, reproducible)</label>
+                        <input id="synthSeed" type="number" step="1" placeholder="e.g. 42" />
+                    </div>
+                    <div class="form-field">
+                        <label for="synthGenerator">Generator</label>
+                        <select id="synthGenerator">
+                            <option value="trend_regime_v3">trend_regime_v3 (market hours + gaps + realistic volume)</option>
+                            <option value="trend_regime_v2">trend_regime_v2 (market hours + gaps + diurnal volume)</option>
+                            <option value="trend_regime_v1">trend_regime_v1 (legacy)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <details class="advanced">
+                    <summary>Advanced parameters</summary>
+                    <div class="advanced-grid">
+                        <div class="form-field">
+                            <label for="pStayProb" title="Probability of staying in the same regime (UP/DOWN/CHOP) each bar. Higher = longer-lasting regimes; lower = more frequent switching.">stay_prob</label>
+                            <input id="pStayProb" type="number" step="0.01" placeholder="0.92" title="Probability of staying in the same regime (UP/DOWN/CHOP) each bar. Higher = longer-lasting regimes; lower = more frequent switching." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pOvernightSigma" title="Overnight gap volatility (sigma of log-return) applied between trading days (close→next open). Higher = larger overnight jumps.">overnight_gap_sigma</label>
+                            <input id="pOvernightSigma" type="number" step="0.0001" placeholder="0.0030" title="Overnight gap volatility (sigma of log-return) applied between trading days (close→next open). Higher = larger overnight jumps." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pOvernightMu" title="Overnight gap drift (mean log-return) applied between trading days. Use small values; 0 means no systematic overnight bias.">overnight_gap_mu</label>
+                            <input id="pOvernightMu" type="number" step="0.0001" placeholder="0.0000" title="Overnight gap drift (mean log-return) applied between trading days. Use small values; 0 means no systematic overnight bias." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pDiurnalVol" title="Strength of the U-shaped intraday volatility effect. 0 disables diurnal vol; higher increases vol near open/close and lowers it mid-session.">diurnal_vol_strength</label>
+                            <input id="pDiurnalVol" type="number" step="0.1" placeholder="0.8" title="Strength of the U-shaped intraday volatility effect. 0 disables diurnal vol; higher increases vol near open/close and lowers it mid-session." />
+                        </div>
+
+                        <div class="form-field">
+                            <label for="pDiurnalVolume" title="Strength of the U-shaped intraday volume profile. 0 disables diurnal volume; higher makes volume higher near open/close and lower mid-session.">diurnal_volume_strength</label>
+                            <input id="pDiurnalVolume" type="number" step="0.1" placeholder="1.0" title="Strength of the U-shaped intraday volume profile. 0 disables diurnal volume; higher makes volume higher near open/close and lower mid-session." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pBaseVolume" title="Baseline volume level per bar (arbitrary units). Actual volume is base_volume × diurnal profile × noise.">base_volume</label>
+                            <input id="pBaseVolume" type="number" step="1" placeholder="1000" title="Baseline volume level per bar (arbitrary units). Actual volume is base_volume × diurnal profile × noise." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pDailyVolSigma" title="(v3) Day-to-day volume variability in log-space. Higher = more variation in daily totals. Typical: 0.15–0.35.">daily_vol_sigma</label>
+                            <input id="pDailyVolSigma" type="number" step="0.01" placeholder="0.25" title="(v3) Day-to-day volume variability in log-space. Higher = more variation in daily totals. Typical: 0.15–0.35." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pDailyVolRho" title="(v3) Day-to-day volume clustering (persistence) in log-space. 0 = independent days, ~0.6 = clustered. Range: 0–0.95.">daily_vol_rho</label>
+                            <input id="pDailyVolRho" type="number" step="0.01" placeholder="0.65" title="(v3) Day-to-day volume clustering (persistence) in log-space. 0 = independent days, ~0.6 = clustered. Range: 0–0.95." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pDailyVolMu" title="(v3) Mean of the daily log-volume multiplier. 0 means no systematic shift in overall volume level.">daily_vol_mu</label>
+                            <input id="pDailyVolMu" type="number" step="0.01" placeholder="0.00" title="(v3) Mean of the daily log-volume multiplier. 0 means no systematic shift in overall volume level." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pEventProb" title="(v3) Probability a trading day is an 'event' day with unusually high volume. Example: 0.03 ≈ 1 in 33 days.">event_prob</label>
+                            <input id="pEventProb" type="number" step="0.01" placeholder="0.03" title="(v3) Probability a trading day is an 'event' day with unusually high volume. Example: 0.03 ≈ 1 in 33 days." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pEventSigma" title="(v3) Event-day extra log-space spread for daily volume multipliers. Higher = bigger event spikes.">event_sigma</label>
+                            <input id="pEventSigma" type="number" step="0.05" placeholder="0.60" title="(v3) Event-day extra log-space spread for daily volume multipliers. Higher = bigger event spikes." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pVolRetCoupling" title="(v3) Coupling of volume to absolute returns. 0 disables. Higher makes big-move bars trade more volume (more SPY-like).">vol_ret_coupling</label>
+                            <input id="pVolRetCoupling" type="number" step="0.5" placeholder="12.0" title="(v3) Coupling of volume to absolute returns. 0 disables. Higher makes big-move bars trade more volume (more SPY-like)." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pBaseSpread" title="Baseline spread (price units) used for synthetic microstructure features (spr, microprice). Actual spread varies with diurnal + noise.">base_spread</label>
+                            <input id="pBaseSpread" type="number" step="0.0001" placeholder="0.015" title="Baseline spread (price units) used for synthetic microstructure features (spr, microprice). Actual spread varies with diurnal + noise." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pSpreadDiurnal" title="How much spread widens at open/close relative to base_spread. 0 = flat spread; higher = wider spread near open/close.">spread_diurnal_strength</label>
+                            <input id="pSpreadDiurnal" type="number" step="0.1" placeholder="0.6" title="How much spread widens at open/close relative to base_spread. 0 = flat spread; higher = wider spread near open/close." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pDepthScale" title="Scale of synthetic depth (bbs/bas). Higher = deeper book (lower frag); lower = thinner book.">depth_scale</label>
+                            <input id="pDepthScale" type="number" step="1" placeholder="1000" title="Scale of synthetic depth (bbs/bas). Higher = deeper book (lower frag); lower = thinner book." />
+                        </div>
+
+                        <div class="form-field">
+                            <label for="pUpDrift" title="UP regime drift (per 1-minute bar) as log-return. Scaled by timeframe. Higher = stronger upward bias during UP regime.">UP drift</label>
+                            <input id="pUpDrift" type="number" step="0.0001" placeholder="0.0006" title="UP regime drift (per 1-minute bar) as log-return. Scaled by timeframe. Higher = stronger upward bias during UP regime." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pUpVol" title="UP regime volatility (per 1-minute bar) as log-return sigma. Scaled by sqrt(timeframe). Higher = choppier bars in UP regime.">UP vol</label>
+                            <input id="pUpVol" type="number" step="0.0001" placeholder="0.0022" title="UP regime volatility (per 1-minute bar) as log-return sigma. Scaled by sqrt(timeframe). Higher = choppier bars in UP regime." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pDownDrift" title="DOWN regime drift (per 1-minute bar) as log-return. Typically negative. Scaled by timeframe.">DOWN drift</label>
+                            <input id="pDownDrift" type="number" step="0.0001" placeholder="-0.0006" title="DOWN regime drift (per 1-minute bar) as log-return. Typically negative. Scaled by timeframe." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pDownVol" title="DOWN regime volatility (per 1-minute bar) as log-return sigma. Scaled by sqrt(timeframe).">DOWN vol</label>
+                            <input id="pDownVol" type="number" step="0.0001" placeholder="0.0022" title="DOWN regime volatility (per 1-minute bar) as log-return sigma. Scaled by sqrt(timeframe)." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pChopDrift" title="CHOP regime drift (per 1-minute bar) as log-return. Usually ~0 to avoid directional bias in chop.">CHOP drift</label>
+                            <input id="pChopDrift" type="number" step="0.0001" placeholder="0.0000" title="CHOP regime drift (per 1-minute bar) as log-return. Usually ~0 to avoid directional bias in chop." />
+                        </div>
+                        <div class="form-field">
+                            <label for="pChopVol" title="CHOP regime volatility (per 1-minute bar) as log-return sigma. Higher = noisier/rangier chop.">CHOP vol</label>
+                            <input id="pChopVol" type="number" step="0.0001" placeholder="0.0014" title="CHOP regime volatility (per 1-minute bar) as log-return sigma. Higher = noisier/rangier chop." />
+                        </div>
+                    </div>
+                </details>
+
+                <div class="form-help">
+                    Generated series follow **US extended hours** (Pre‑Market 4:00–9:30 ET, Regular 9:30–16:00 ET, After‑Hours 16:00–20:00 ET), Mon–Fri, and include **overnight gaps** between trading days. Regular-session volume follows a **U-shaped diurnal profile**.
+                </div>
+                <div id="synthModalStatus" class="modal-status"></div>
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="fetch-button" id="cancelSynthBtn">Cancel</button>
+                <button type="button" class="fetch-button" id="createSynthBtn">Create dataset</button>
+            </div>
+        </div>
     </div>
     
     <script>
@@ -666,17 +1022,68 @@
                     tr.dataset.scenario = ds.scenario;
                     tr.dataset.timeframe = ds.timeframe;
 
-                    const label = `${ds.symbol} – ${ds.scenario}`;
+                    const ref = ds.ref_symbol ? ` (ref: ${ds.ref_symbol})` : '';
+                    const label = `${ds.symbol} – ${ds.scenario}${ref}`;
                     const range = `${(ds.ts_start_min || '').slice(0, 10)} → ${(ds.ts_start_max || '').slice(0, 10)}`;
 
                     tr.innerHTML = `
-                        <td>${label}</td>
+                        <td>
+                            <div class="row-actions">
+                                <span>${label}</span>
+                                <button type="button" class="delete-btn" aria-label="Delete synthetic dataset" title="Delete dataset">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M9 3a1 1 0 0 0-1 1v1H5.5a1 1 0 1 0 0 2H6v13a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7h.5a1 1 0 1 0 0-2H16V4a1 1 0 0 0-1-1H9Zm1 2h4v0H10V5Zm-1 5a1 1 0 0 1 1 1v8a1 1 0 1 1-2 0v-8a1 1 0 0 1 1-1Zm6 1a1 1 0 1 0-2 0v8a1 1 0 1 0 2 0v-8Z"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </td>
                         <td>${ds.bar_count}</td>
                         <td>${range}</td>
                     `;
 
+                    const delBtn = tr.querySelector('.delete-btn');
+                    if (delBtn) {
+                        delBtn.addEventListener('click', async (e) => {
+                            e.stopPropagation();
+                            const tf = ds.timeframe || SYNTHETIC_DEFAULT_TIMEFRAME;
+                            const msg = `Delete synthetic dataset?\n\n${ds.symbol} – ${ds.scenario} (${tf})\n\nThis will delete all bars (and aligned L2 rows) for this dataset.`;
+                            if (!confirm(msg)) return;
+                            try {
+                                setSyntheticStatus('Deleting dataset…', 'loading');
+                                const params = new URLSearchParams({
+                                    symbol: ds.symbol,
+                                    scenario: ds.scenario,
+                                    timeframe: tf
+                                });
+                                const res = await fetch(`/api/synthetic_dataset?${params.toString()}`, { method: 'DELETE' });
+                                const data = await res.json().catch(() => null);
+                                if (!res.ok) {
+                                    const m = data?.error?.message || 'Failed to delete dataset';
+                                    throw new Error(m);
+                                }
+                                setSyntheticStatus(`Deleted ${data.deleted_bars || 0} bars`, '');
+                                await loadSyntheticDatasets();
+                                // Clear status after a moment to reduce clutter.
+                                setTimeout(() => setSyntheticStatus('', ''), 1200);
+                            } catch (err) {
+                                console.error(err);
+                                setSyntheticStatus(`Delete failed: ${err.message || err}`, 'error');
+                            }
+                        });
+                    }
+
                     tr.addEventListener('click', () => {
-                        const url = `/synthetic/${encodeURIComponent(ds.symbol)}?scenario=${encodeURIComponent(ds.scenario)}&timeframe=${encodeURIComponent(ds.timeframe || SYNTHETIC_DEFAULT_TIMEFRAME)}`;
+                        // Prefer the newer bandchart-style view (demo_static.html) for both real + synthetic.
+                        // For synthetic we pass source/scenario/timeframe so /window selects the correct group.
+                        const tf = ds.timeframe || SYNTHETIC_DEFAULT_TIMEFRAME;
+                        const params = new URLSearchParams({
+                            mode: 'api',
+                            symbol: ds.symbol,
+                            source: 'synthetic',
+                            scenario: ds.scenario,
+                            timeframe: tf
+                        });
+                        const url = `/demo_static.html?${params.toString()}`;
                         window.location.href = url;
                     });
 
@@ -691,6 +1098,177 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             loadSyntheticDatasets();
+        });
+    </script>
+    <script>
+        let _cachedUnderlyingSymbols = null;
+
+        function _setSynthModalStatus(text, state) {
+            const el = document.getElementById('synthModalStatus');
+            if (!el) return;
+            el.textContent = text || '';
+            el.dataset.state = state || '';
+            el.style.display = state ? 'block' : (text ? 'block' : 'none');
+        }
+
+        async function _ensureUnderlyingSymbolsLoaded() {
+            if (_cachedUnderlyingSymbols) return _cachedUnderlyingSymbols;
+            const res = await fetch('/api/symbols');
+            if (!res.ok) throw new Error(await res.text());
+            const items = await res.json();
+            _cachedUnderlyingSymbols = Array.isArray(items) ? items.map(x => x.symbol).filter(Boolean) : [];
+            return _cachedUnderlyingSymbols;
+        }
+
+        async function openSynthModal() {
+            const overlay = document.getElementById('synthModalOverlay');
+            if (!overlay) return;
+            overlay.classList.add('open');
+            _setSynthModalStatus('', '');
+
+            // Default start date to today (local browser date). Backend interprets as market local day.
+            const startDateEl = document.getElementById('synthStartDate');
+            if (startDateEl && (!startDateEl.value || String(startDateEl.value).trim() === '')) {
+                const today = new Date();
+                const iso = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))
+                    .toISOString()
+                    .slice(0, 10);
+                startDateEl.value = iso;
+            }
+
+            // Populate underlying symbol list
+            const sel = document.getElementById('synthRefSymbol');
+            if (sel && sel.options.length <= 1) {
+                try {
+                    const syms = await _ensureUnderlyingSymbolsLoaded();
+                    syms.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s;
+                        opt.textContent = s;
+                        sel.appendChild(opt);
+                    });
+                } catch (e) {
+                    console.warn('Failed to load underlying symbols', e);
+                }
+            }
+
+            const nameEl = document.getElementById('synthDatasetName');
+            if (nameEl) nameEl.focus();
+        }
+
+        function closeSynthModal() {
+            const overlay = document.getElementById('synthModalOverlay');
+            if (!overlay) return;
+            overlay.classList.remove('open');
+            _setSynthModalStatus('', '');
+        }
+
+        function _numOrUndef(id) {
+            const el = document.getElementById(id);
+            if (!el) return undefined;
+            const v = String(el.value || '').trim();
+            if (!v) return undefined;
+            const n = Number(v);
+            if (!Number.isFinite(n)) return undefined;
+            return n;
+        }
+
+        async function submitSynthModal() {
+            const createBtn = document.getElementById('createSynthBtn');
+            if (createBtn) createBtn.disabled = true;
+            _setSynthModalStatus('Generating synthetic dataset…', 'loading');
+
+            try {
+                const datasetName = String(document.getElementById('synthDatasetName')?.value || '').trim();
+                if (!datasetName) throw new Error('Dataset name is required.');
+
+                const payload = {
+                    dataset_name: datasetName,
+                    ref_symbol: String(document.getElementById('synthRefSymbol')?.value || '').trim() || null,
+                    timeframe: String(document.getElementById('synthTimeframe')?.value || '1m').trim(),
+                    trading_days: Number(document.getElementById('synthTradingDays')?.value || 252),
+                    start_date: String(document.getElementById('synthStartDate')?.value || '').trim() || null,
+                    start_price: String(document.getElementById('synthStartPrice')?.value || '').trim() || null,
+                    seed: String(document.getElementById('synthSeed')?.value || '').trim() || null,
+                    generator: String(document.getElementById('synthGenerator')?.value || 'trend_regime_v2').trim(),
+                    params: {}
+                };
+
+                // Advanced knobs (only sent if provided)
+                const p = payload.params;
+                const map = [
+                    ['stay_prob', 'pStayProb'],
+                    ['overnight_gap_sigma', 'pOvernightSigma'],
+                    ['overnight_gap_mu', 'pOvernightMu'],
+                    ['diurnal_vol_strength', 'pDiurnalVol'],
+                    ['diurnal_volume_strength', 'pDiurnalVolume'],
+                    ['base_volume', 'pBaseVolume'],
+                    ['daily_vol_sigma', 'pDailyVolSigma'],
+                    ['daily_vol_rho', 'pDailyVolRho'],
+                    ['daily_vol_mu', 'pDailyVolMu'],
+                    ['event_prob', 'pEventProb'],
+                    ['event_sigma', 'pEventSigma'],
+                    ['vol_ret_coupling', 'pVolRetCoupling'],
+                    ['base_spread', 'pBaseSpread'],
+                    ['spread_diurnal_strength', 'pSpreadDiurnal'],
+                    ['depth_scale', 'pDepthScale'],
+                    ['up_drift', 'pUpDrift'],
+                    ['up_vol', 'pUpVol'],
+                    ['down_drift', 'pDownDrift'],
+                    ['down_vol', 'pDownVol'],
+                    ['chop_drift', 'pChopDrift'],
+                    ['chop_vol', 'pChopVol'],
+                ];
+                map.forEach(([k, id]) => {
+                    const n = _numOrUndef(id);
+                    if (n !== undefined) p[k] = n;
+                });
+                if (Object.keys(p).length === 0) delete payload.params;
+
+                const res = await fetch('/api/synthetic_generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json().catch(() => null);
+                if (!res.ok) {
+                    const msg = data?.error?.message || (typeof data === 'string' ? data : 'Failed to generate dataset');
+                    throw new Error(msg);
+                }
+
+                _setSynthModalStatus(`Created ${data.symbol} (${data.bar_count} bars).`, 'success');
+                await loadSyntheticDatasets();
+                setTimeout(() => closeSynthModal(), 450);
+            } catch (e) {
+                _setSynthModalStatus(String(e.message || e), 'error');
+            } finally {
+                if (createBtn) createBtn.disabled = false;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const openBtn = document.getElementById('openSynthModalBtn');
+            const closeBtn = document.getElementById('closeSynthModalBtn');
+            const cancelBtn = document.getElementById('cancelSynthBtn');
+            const createBtn = document.getElementById('createSynthBtn');
+            const overlay = document.getElementById('synthModalOverlay');
+
+            if (openBtn) openBtn.addEventListener('click', openSynthModal);
+            if (closeBtn) closeBtn.addEventListener('click', closeSynthModal);
+            if (cancelBtn) cancelBtn.addEventListener('click', closeSynthModal);
+            if (createBtn) createBtn.addEventListener('click', submitSynthModal);
+
+            // Click outside closes.
+            if (overlay) {
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) closeSynthModal();
+                });
+            }
+
+            // Escape closes.
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closeSynthModal();
+            });
         });
     </script>
     <script>

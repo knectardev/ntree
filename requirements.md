@@ -122,16 +122,54 @@ There are two ways real data enters `stock_data`:
 
 ### Synthetic data generation
 
-Synthetic series are generated in Python and persisted into `bars` + `l2_state`.
+Synthetic datasets in this repo are **generated offline in Python** and then **persisted into SQLite** (canonical tables: `bars` + `l2_state`). The Flask app does **not** currently generate synthetic data on demand; it only **discovers and serves** synthetic datasets that already exist in the DB.
+
+#### What “synthetic” means in the DB
+
+- Base OHLCV bars are inserted into `bars` with:
+  - `data_source = 'synthetic'`
+  - `scenario = <scenario_name>` (non-null)
+  - `symbol`, `timeframe`, `ts_start`, `duration_sec`, OHLCV, `trades`, `vwap`
+- L2-derived features are inserted into `l2_state` and are keyed by `bar_id` (FK to `bars.id`).
+- Convenience views separate real vs synthetic:
+  - `bars_synth` = `SELECT * FROM bars WHERE data_source='synthetic'`
+  - `l2_state_synth` = `l2_state` joined to synthetic `bars`
+
+#### Generator code (Python)
+
+- **Package**: `synthetic_generators/`
+- **Registry**: `synthetic_generators.__init__.py` exposes `GENERATOR_REGISTRY` + `get_generator()`
+- **Concrete generator**: `synthetic_generators/trend_regime_v1.py`
+  - Function: `generate_trend_regime_series(...)`
+  - Produces two aligned lists: `List[SyntheticBar]` and `List[SyntheticL2]`
+  - Scenario name default: `trend_regime_v1`
+  - Timestamps are UTC (`datetime` with `timezone.utc`), and are persisted via `.isoformat()`
+
+#### Persistence helper (Python → SQLite)
+
+- `synthetic_generators/base.py`:
+  - Data models: `SyntheticBar`, `SyntheticL2`
+  - Writer: `write_synthetic_series_to_db(bars, l2_states, conn=None)`
+    - Inserts rows into `bars`, then inserts matching `l2_state` row using `lastrowid`.
+    - **Important**: this uses plain `INSERT` (no upsert). Re-running the same scenario/timeframe/timestamps can trip the unique index on `(symbol, timeframe, ts_start, data_source, scenario)`.
+
+#### How to generate a dataset (current workflow)
 
 - Example script: `python test_synth.py`
-- Generator: `synthetic_generators/trend_regime_v1.py`
-  - Produces OHLCV bars and aligned L2 feature rows
-  - Scenario name: `trend_regime_v1`
-  - Supported timeframes: `1m`, `5m`, `15m` (app validation)
+  - Calls `generate_trend_regime_series(...)`
+  - Persists via `write_synthetic_series_to_db(...)`
+  - After inserting, the dataset appears on the dashboard (via `bars_synth`) and can be viewed at:
+    - `/synthetic/<SYMBOL>?scenario=<scenario>&timeframe=<1m|5m|15m>`
 
-Persistence helper:
-- `synthetic_generators.base.write_synthetic_series_to_db()`
+#### How the web app serves synthetic data (read-only)
+
+- Dataset discovery: **`GET /api/synthetic_datasets`** (groups from `bars_synth`)
+- Bars: **`GET /api/synthetic_bars`** (rows from `bars_synth`)
+- L2: **`GET /api/synthetic_l2`** (join `bars_synth` → `l2_state`)
+
+#### Related but separate: oscillator page JS “synthetic”
+
+The standalone oscillation tool (`osc/index.html`) includes its own **client-side random-walk generator** (`osc/src/synth.js`) used for that page’s analysis/demo flows. This JS generator is **not** the same as the Python `synthetic_generators/` pipeline and does **not** persist into SQLite’s `bars`/`l2_state`.
 
 ---
 
@@ -141,6 +179,7 @@ Persistence helper:
 
 - **GET `/`**
   - Shows “Real Symbols” (from `stock_data`, interval `1Min`)
+    - Columns: Ticker, Latest Price, **Range** (per-symbol MIN→MAX timestamp, shown as dates)
   - Shows “Synthetic Data Sets” (from `bars_synth` view)
   - “Fetch Latest Data” triggers `POST /api/fetch-latest` (incremental)
   - “Add + Fetch Range” triggers `POST /api/fetch-latest` with a JSON payload (symbol + date range backfill)

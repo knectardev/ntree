@@ -154,10 +154,16 @@ def init_database():
             vwap REAL,
             data_source TEXT NOT NULL,           -- alpaca_live | alpaca_hist | synthetic | ...
             scenario TEXT,                       -- NULL for real sources
+            ref_symbol TEXT,                     -- optional "reference" real symbol for synthetic datasets
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # Migration: add ref_symbol column if this DB already existed.
+    try:
+        cursor.execute("ALTER TABLE bars ADD COLUMN ref_symbol TEXT")
+    except sqlite3.OperationalError:
+        pass
     # Ensure unique bars per source/scenario (drop old expression index if present)
     cursor.execute('DROP INDEX IF EXISTS idx_bars_unique')
     cursor.execute('''
@@ -250,7 +256,8 @@ def get_synthetic_datasets() -> List[Dict[str, Any]]:
                 timeframe,
                 MIN(ts_start) AS ts_start_min,
                 MAX(ts_start) AS ts_start_max,
-                COUNT(*)      AS bar_count
+                COUNT(*)      AS bar_count,
+                MAX(ref_symbol) AS ref_symbol
             FROM bars_synth
             GROUP BY symbol, scenario, timeframe
             ORDER BY symbol, scenario, timeframe
@@ -268,6 +275,7 @@ def get_synthetic_datasets() -> List[Dict[str, Any]]:
             "ts_start_min": row[3],
             "ts_start_max": row[4],
             "bar_count": row[5],
+            "ref_symbol": row[6],
         }
         for row in rows
     ]

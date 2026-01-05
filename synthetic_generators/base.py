@@ -23,6 +23,8 @@ class SyntheticBar:
     vwap: float
     data_source: str
     scenario: str
+    # Optional metadata: which real symbol this synthetic dataset is meant to be "like" (if any).
+    ref_symbol: str | None = None
 
 
 @dataclass
@@ -60,31 +62,60 @@ def write_synthetic_series_to_db(
         cur = conn.cursor()
 
         for bar, l2 in zip(bars, l2_states):
-            cur.execute(
-                """
-                INSERT INTO bars (
-                    symbol, timeframe, ts_start, duration_sec,
-                    open, high, low, close, volume,
-                    trades, vwap,
-                    data_source, scenario
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    bar.symbol,
-                    bar.timeframe,
-                    bar.ts_start.isoformat(),
-                    bar.duration_sec,
-                    bar.open,
-                    bar.high,
-                    bar.low,
-                    bar.close,
-                    bar.volume,
-                    bar.trades,
-                    bar.vwap,
-                    bar.data_source,
-                    bar.scenario,
-                ),
-            )
+            # Support older DBs without the optional ref_symbol column.
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO bars (
+                        symbol, timeframe, ts_start, duration_sec,
+                        open, high, low, close, volume,
+                        trades, vwap,
+                        data_source, scenario, ref_symbol
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        bar.symbol,
+                        bar.timeframe,
+                        bar.ts_start.isoformat(),
+                        bar.duration_sec,
+                        bar.open,
+                        bar.high,
+                        bar.low,
+                        bar.close,
+                        bar.volume,
+                        bar.trades,
+                        bar.vwap,
+                        bar.data_source,
+                        bar.scenario,
+                        bar.ref_symbol,
+                    ),
+                )
+            except sqlite3.OperationalError:
+                cur.execute(
+                    """
+                    INSERT INTO bars (
+                        symbol, timeframe, ts_start, duration_sec,
+                        open, high, low, close, volume,
+                        trades, vwap,
+                        data_source, scenario
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        bar.symbol,
+                        bar.timeframe,
+                        bar.ts_start.isoformat(),
+                        bar.duration_sec,
+                        bar.open,
+                        bar.high,
+                        bar.low,
+                        bar.close,
+                        bar.volume,
+                        bar.trades,
+                        bar.vwap,
+                        bar.data_source,
+                        bar.scenario,
+                    ),
+                )
             bar_id = cur.lastrowid
 
             cur.execute(

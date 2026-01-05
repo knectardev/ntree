@@ -715,26 +715,14 @@
                 </span>
               </label>
 
-              <label class="chkRow" title="Show cycle turning points">
+              <label class="chkRow" title="Show de-noised trend">
                 <input id="toggleTurns" type="checkbox" />
                 <span class="chkLbl">
-                  <span class="chkName">Show cycle turning points</span>
+                  <span class="chkName">Show de-noised trend</span>
                 </span>
               </label>
 
-              <label class="chkRow" title="Show best-fit wave">
-                <input id="toggleSineFit" type="checkbox" checked />
-                <span class="chkLbl">
-                  <span class="chkName">Show best-fit wave</span>
-                </span>
-              </label>
-
-              <label class="chkRow" title="Show local match strength">
-                <input id="toggleLocalMatch" type="checkbox" checked />
-                <span class="chkLbl">
-                  <span class="chkName">Show local match strength</span>
-                </span>
-              </label>
+              
             </div>
           </div>
 
@@ -4200,7 +4188,12 @@
       ctx.save();
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.font = '14px system-ui';
-      ctx.fillText('No data', plot.x + 8, plot.y + 18);
+      // Center the message so it doesn't look clipped.
+      // If a request is in-flight, prefer "Loading…" over "No data".
+      var msg = (ui.regen && ui.regen.disabled) ? 'Loading…' : 'No data';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(msg, plot.x + plot.w/2, plot.y + plot.h/2);
       ctx.restore();
       ctx.restore(); // clip
 
@@ -4292,8 +4285,10 @@
         roundRect(ctx, plot.x + clipInset2, plot.y + clipInset2, plot.w - clipInset2*2, plot.h - clipInset2*2, 14 - clipInset2);
         ctx.clip();
         ctx.save();
-        ctx.strokeStyle = 'rgba(255,255,255,1)';
-        ctx.lineWidth = 1;
+        // Crosshair width: use ~1 physical pixel (not 1 CSS pixel) so it doesn't look too thick on HiDPI.
+        var _dprCH = Math.max(1, window.devicePixelRatio || 1);
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 0.5;
         ctx.beginPath();
         ctx.moveTo(hx2, plot.y);
         ctx.lineTo(hx2, plot.y + plot.h);
@@ -4810,8 +4805,9 @@
 
       ctx.save();
       // Crosshair lines: vertical snapped to bar time, horizontal follows cursor price.
-      ctx.strokeStyle = 'rgba(255,255,255,1)';
-      ctx.lineWidth = 1;
+      var _dprCH2 = Math.max(1, window.devicePixelRatio || 1);
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1 / _dprCH2;
       ctx.beginPath();
       ctx.moveTo(hx, plot.y);
       ctx.lineTo(hx, plot.y + plot.h);
