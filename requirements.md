@@ -122,7 +122,9 @@ There are two ways real data enters `stock_data`:
 
 ### Synthetic data generation
 
-Synthetic datasets in this repo are **generated offline in Python** and then **persisted into SQLite** (canonical tables: `bars` + `l2_state`). The Flask app does **not** currently generate synthetic data on demand; it only **discovers and serves** synthetic datasets that already exist in the DB.
+Synthetic datasets in this repo are primarily **generated in Python** and then **persisted into SQLite** (canonical tables: `bars` + `l2_state`).
+
+The Flask app is **read-only by default** for synthetic data, but it also includes an **opt-in** endpoint (**`POST /api/synthetic_generate`**) that can generate and persist a synthetic dataset into the DB when explicitly called.
 
 #### What “synthetic” means in the DB
 
@@ -139,11 +141,14 @@ Synthetic datasets in this repo are **generated offline in Python** and then **p
 
 - **Package**: `synthetic_generators/`
 - **Registry**: `synthetic_generators.__init__.py` exposes `GENERATOR_REGISTRY` + `get_generator()`
-- **Concrete generator**: `synthetic_generators/trend_regime_v1.py`
-  - Function: `generate_trend_regime_series(...)`
-  - Produces two aligned lists: `List[SyntheticBar]` and `List[SyntheticL2]`
-  - Scenario name default: `trend_regime_v1`
-  - Timestamps are UTC (`datetime` with `timezone.utc`), and are persisted via `.isoformat()`
+- **Generators (current)**:
+  - `synthetic_generators/trend_regime_v1.py`: `generate_trend_regime_series(...)`
+  - `synthetic_generators/trend_regime_v2.py`: `generate_trend_regime_series_v2(...)` (**default for `POST /api/synthetic_generate`**)
+    - Emits **RTH-only** bars in `America/New_York`, includes **overnight gaps**, and includes **diurnal** volume/vol/spread shaping
+  - `synthetic_generators/trend_regime_v3.py`: `generate_trend_regime_series_v3(...)` (experimental)
+
+All generators produce two aligned lists: `List[SyntheticBar]` and `List[SyntheticL2]`.
+Timestamps are persisted as UTC ISO strings (via `.isoformat()`).
 
 #### Persistence helper (Python → SQLite)
 
@@ -156,16 +161,18 @@ Synthetic datasets in this repo are **generated offline in Python** and then **p
 #### How to generate a dataset (current workflow)
 
 - Example script: `python test_synth.py`
-  - Calls `generate_trend_regime_series(...)`
+  - Calls one of the `synthetic_generators/*` functions
   - Persists via `write_synthetic_series_to_db(...)`
   - After inserting, the dataset appears on the dashboard (via `bars_synth`) and can be viewed at:
     - `/synthetic/<SYMBOL>?scenario=<scenario>&timeframe=<1m|5m|15m>`
 
-#### How the web app serves synthetic data (read-only)
+You can also generate a dataset via the web app (opt-in):
+- **`POST /api/synthetic_generate`** (persists to `bars` + `l2_state`)
 
 - Dataset discovery: **`GET /api/synthetic_datasets`** (groups from `bars_synth`)
 - Bars: **`GET /api/synthetic_bars`** (rows from `bars_synth`)
 - L2: **`GET /api/synthetic_l2`** (join `bars_synth` → `l2_state`)
+- Delete dataset group: **`DELETE /api/synthetic_dataset`** (symbol + scenario + timeframe)
 
 #### Related but separate: oscillator page JS “synthetic”
 
@@ -217,6 +224,99 @@ The standalone oscillation tool (`osc/index.html`) includes its own **client-sid
   - **Bar size UX note**:
     - The UI will **auto-pick** a reasonable `bar_s` (Auto W) and will also **enforce** a minimum `bar_s` to stay within `max_bars` (default `5000`).
     - Minimum bar size is **1 minute** in the Alpaca-only setup.
+  - **Feature registry (RL precompute; optional, no build step)**:
+    - The `chart.html` demo includes an RL-friendly **feature registry** (`static/demo_static/js/10_features.js`) plus a **feature UI** (`static/demo_static/js/11_feature_ui.js`).
+    - Features are computed client-side and stored at **`state.features`** (and cached per-window using a `baseKey` so they don’t recompute unnecessarily).
+    - Feature configuration and UI selections are persisted via the existing UI config system (`static/demo_static/js/03_persistence_and_catalog.js`): `feat_cfg`, `feat_enable`, `feat_selected`.
+    - URL overrides:
+      - `?feat=0` disables feature compute, `?feat=1` enables
+      - `?feat_dbg=1` enables basic console logging
+    - UI behavior:
+      - The readout follows the **hovered bar** (or the latest bar when not hovering).
+      - The checkbox list is populated by `11_feature_ui.js` and reads series via `getFeatureSeries("<dot.path>")`.
+
+#### Feature registry — computed series (keys + semantics)
+
+The feature registry is designed for **fixed-schema** RL / diagnostics:
+- It computes **every key** every time; “warmup”/quality is represented via `*.is_warm` and `*.fit_ok` flags (do not hard-gate).
+- Config windows are expressed in **minutes**, then converted to bars based on the current `bar_s` so behavior is consistent across bar sizes.
+
+**Core**
+- `sigma`: rolling stddev of **log returns** \(r_t = \log P_t - \log P_{t-1}\) with floor (`sigma_floor`)
+- `vol_z`: short/long sigma ratio (`sigma_short / sigma`)
+- `vwap_dev_z`: normalized VWAP deviation in return-units: \(\log(\text{close}/\text{vwap}) / \sigma\)
+  - VWAP is read from the overlay series key `vwap_session`; if VWAP overlay is missing/disabled, this series is `NaN`.
+
+**Kalman (local linear trend on log price)**
+- `kalman.level`: price-level from Kalman level (`exp(level_log)`)
+- `kalman.slope_per_bar`: slope in log-price units (≈ return per bar)
+- `kalman.slope_z`: `slope_per_bar / slope_std`
+- `kalman.is_warm`: `1` after 20 bars, else `0`
+- `kalman.fit_ok`: `1` when `slope_z` is finite, else `0`
+
+**OLS (rolling drift on returns)**
+- `ols.mu_hat.k1|k3|k10`: `k * mean(returns)` over `ols_window`
+- `ols.t_stat.k1|k3|k10`: crude t-stat of mean return (computed from window stddev and `sqrt(N)`)
+- `ols.is_warm`: `1` after `ols_window + 5` bars, else `0`
+- `ols.fit_ok`: `1` when `abs(ols.t_stat.k1) >= ols_fit_ok_t_min` (default 1.0), else `0`
+
+**AR(p) on returns (p in {1,2,3} by default)**
+- `ar.ar1.mu_hat_k1`, `ar.ar2.mu_hat_k1`, `ar.ar3.mu_hat_k1`: one-step forecast of next return (emitted every bar; refit on stride)
+- `ar.ar*.innov_z`: normalized innovation (realized error): `(r_t - prev_forecast) / sigma`
+- `ar.ar*.is_stable`: stability flag based on characteristic roots (held constant between refits)
+- `ar.ar*.stability_margin`: `1 - max(|root|)` (positive => stable)
+
+**Classifier (logistic regression; per horizon k in {1,3,10} by default)**
+- Targets: `y_up(k) = 1` if \(\sum_{i=1..k} r_{t+i} > 0\) else `0`
+- Features used: `[kalman.slope_z, vwap_dev_z, vol_z]` + intercept
+- No-lookahead training constraint:
+  - when computing at bar `t`, the training set only uses indices `<= t-k` so labels don’t peek past `t`
+- Output keys:
+  - `clf.k1.p_up`, `clf.k3.p_up`, `clf.k10.p_up`
+  - `clf.k*.entropy` (Bernoulli entropy of `p_up`)
+  - `clf.k*.brier` (rolling Brier score over label-known examples)
+  - `clf.k*.cal_ok` (simple calibration flag: brier < 0.25)
+
+#### RL export contract (recommended)
+
+This section describes a **recommended** fixed-schema interface for exporting `state.features` into an RL environment.
+
+**Observation vector schema**
+- Use a fixed, ordered schema (no optional/toggle-dependent shape changes).
+- Emit `0.0` for any non-finite feature value and rely on the quality flags.
+
+Recommended `OBS_SCHEMA_V1` order:
+- `sigma`
+- `vol_z`
+- `vwap_dev_z`
+- `kalman.slope_z`
+- `kalman.fit_ok`
+- `kalman.is_warm`
+- `ols.t_stat.k1`
+- `ols.fit_ok`
+- `ols.is_warm`
+- `ar.ar1.innov_z`
+- `ar.ar1.is_stable`
+- `ar.ar1.stability_margin`
+- `clf.k3.p_up`
+- `clf.k3.entropy`
+- `clf.k3.brier`
+- `clf.k3.cal_ok`
+
+Notes:
+- Prefer `k3` classifier outputs as a “middle horizon” default; keep `k1`/`k10` as optional alternative schemas, not mixed ad hoc.
+- `vwap_dev_z` requires the VWAP overlay series (`vwap_session`); if VWAP is disabled, it will be `NaN` and exported as `0.0` (agent can learn to ignore it via `kalman/ols` + regime features).
+
+**Action space (simple baseline)**
+- Discrete: `0=flat`, `1=long`, `2=short`
+- Position sizing fixed at 1× for v1.
+
+**Reward (conservative baseline)**
+- Next-step log return reward with trading cost on position changes:
+  \[
+  r_{t+1} = \text{pos}_t \cdot (\log P_{t+1} - \log P_t) \;-\; \text{cost} \cdot |\text{pos}_t - \text{pos}_{t-1}|
+  \]
+- This matches the registry’s core normalization (log returns) and discourages churn.
 
 ### Oscillation Signal Analysis (Static Web Page)
 
@@ -398,19 +498,30 @@ Purpose:
 Query parameters:
 - `symbol` (required): symbol/ticker (uppercased)
 - `bar_s` (optional, default `60`): aggregation size in seconds.
-  - Enforced minimum is **60s** (Alpaca-only base resolution)
-  - Values not divisible by 60 are rounded down to the nearest 60s multiple (and clamped to >= 60)
+  - Enforced minimum is the **base resolution**:
+    - **Real** (`stock_data`): 60s (Alpaca-only base resolution, interval `1Min`)
+    - **Synthetic** (`bars_synth`): based on timeframe (`1m`→60s, `5m`→300s, `15m`→900s)
+  - Values not divisible by 60 are rounded down to the nearest 60s multiple (and clamped to the base resolution)
 - `start`, `end` (optional ISO timestamps): window selection; if both omitted, defaults to **last 1 hour**
 - `max_bars` (optional) or legacy `limit` (optional): truncation cap (clamped to `[1, 200000]`)
+- `source` (optional, default `auto`): `real|synthetic|auto`
+  - `auto` uses `stock_data` if the symbol exists at `interval='1Min'`; otherwise falls back to `bars_synth`
+- `scenario`, `timeframe` (optional): only used when selecting from **synthetic** datasets
+  - If omitted, the server picks the **most recent** `(scenario,timeframe)` group for the symbol.
 
 Data source:
-- Reads base rows from `stock_data` interval `1Min`, then aggregates to `bar_s`.
+- Reads base rows from either:
+  - `stock_data` interval `1Min` (real), or
+  - `bars_synth` (synthetic),
+  then aggregates to `bar_s`.
 
 Response shape (arrays aligned 1:1):
 - `t_ms`, `o`, `h`, `l`, `c`, `v`
 - `dataset_start`, `dataset_end` (bounds of available data for the symbol)
 - `start`, `end` (served window bounds)
 - `truncated`, `max_bars`
+- `source` (`real|synthetic`)
+- `scenario`, `timeframe` (present when `source='synthetic'`)
 
 ### Symbol discovery
 
@@ -443,6 +554,24 @@ Returns a JSON payload for `templates/detail.html` including:
 - **GET `/api/synthetic_datasets`**
   - Returns distinct (symbol, scenario, timeframe) groups from `bars_synth`
   - Includes min/max timestamps and bar counts
+
+### Synthetic dataset generation (opt-in)
+
+- **POST `/api/synthetic_generate`**
+  - Generates a synthetic dataset and persists it into `bars` + `l2_state`
+  - Default generator: `trend_regime_v2`
+  - Request body (most-used fields):
+    - `dataset_name` (required)
+    - `generator` (optional; one of `trend_regime_v1|trend_regime_v2|trend_regime_v3`)
+    - `timeframe` (optional; `1m|5m|15m`, default `1m`)
+    - `trading_days` (optional int; capped to avoid accidental huge inserts)
+    - `start_date` (optional `YYYY-MM-DD`, interpreted in America/New_York)
+    - `seed`, `start_price`, `ref_symbol` (optional)
+
+### Synthetic dataset deletion (opt-in)
+
+- **DELETE `/api/synthetic_dataset`**
+  - Deletes an entire synthetic dataset group: `symbol` + `scenario` + `timeframe`
 
 ### Synthetic bars
 

@@ -1,189 +1,357 @@
-At this point now planning on adding the following as discussed before, 
+reinforcement Learning engine notes: 
 
-1.1 Rolling OLS (Local Linear Regression)
-1.2 Autoregressive (AR / ARX) models
-1.3 State-space linear trend models (Kalman)
-1.4 Linear discriminant / logistic regression (classification, not regression)
 
-The purpose of adding all these alternative derived metrics is to provide a reinforcement learning engine with a range of readily available options to do its experimentation with. As well as to learn more about this type of quantitative analysis in general. Obviously if I keep adding lines I will end up with spaghetti and I'm well aware of that. 
+1) A clean observation vector per bar
 
-That plan makes sense, and the “spaghetti risk” is real — but you can avoid it if you treat these as features + diagnostics (for RL + analysis) rather than “more lines to stare at.”
+You need a function like:
 
-Here’s a structure that will let you add all four families without the UI collapsing, and it will also make the RL setup cleaner.
+getObservation(i) -> Float32Array | number[]
 
-1) Reframe: you’re building a feature factory, not an indicator zoo
+that returns a fixed-length, consistently ordered vector of features for bar i.
 
-Each item you listed can output two kinds of things:
+Key point: RL hates “optional” features. Avoid variable-length based on toggles. UI toggles should not change the observation schema unless you’re explicitly running an ablation experiment.
 
-Features (numbers for RL):
+Do this:
 
-drift estimate, slope, z-scores, probabilities, confidence, residual stats…
+Define a canonical ordered list of feature keys (the registry already gives you names).
 
-Diagnostics (a small number of visual overlays):
+Always emit them.
 
-ONE trend line (optional)
+For unavailable values (warmup), emit 0 plus a *.is_warm flag.
 
-a few markers/heatmaps that show “regime” and “confidence”
+2) Strict no-lookahead guarantees
 
-Your RL agent should see lots of features.
-Your eyeballs should see very few overlays.
+This is where most RL trading prototypes quietly fail.
 
-2) What to implement from each model (minimal, high-value outputs)
-1.1 Rolling OLS (Local linear regression)
+Make sure:
 
-Compute on returns (or price changes), not raw price.
-Outputs:
+any rolling stats use only <= i
 
-mu_hat = expected next-bar return (or next-k-bar)
+classifier refits use only past labels (and labels are only created when future exists)
 
-t_stat (or standardized mu_hat / se)
+Brier score windows don’t leak future outcomes
 
-R2 (or adj R²)
+A simple practical rule:
 
-sigma_hat (residual std)
+compute targets/labels in a separate pass, but when generating features at i, only use labels up to i - k_max.
 
-optional: beta to 1–3 core factors (VWAP dev, slope, vol)
+3) Normalization that doesn’t drift unpredictably
 
-Overlay: none by default (or just a tiny “drift meter” / arrow)
+You already have sigma — great. Use it as the global normalizer.
 
-1.2 AR / ARX
+Rules of thumb:
 
-Keep it simple: AR(1–3) (or ARX with 1–2 exogenous terms).
-Outputs:
+returns ÷ sigma
 
-phi_1..phi_p
+deviations (log(close/vwap)) ÷ sigma (you already do)
 
-mu_hat (1-step ahead return expectation)
+slopes should be in return units or z-units (like kalman.slope_z)
 
-innovation (residual / surprise)
+Also: clamp extreme z-values (e.g., to ±8 or ±10) so RL doesn’t blow up on rare spikes.
 
-stability (are roots inside unit circle?) OR just “model valid” flag
+4) Quality flags are features, not gates
 
-fit_quality (AIC/BIC or rolling loglik)
+You’re already computing fit_ok/stability/entropy — good.
 
-Overlay: none by default; maybe a “mean reversion vs momentum” badge.
+For RL:
 
-1.3 State-space (Kalman local linear trend)
+don’t hard-disable features based on fit_ok
 
-Outputs:
+do include fit_ok and is_warm in the observation vector
 
-level
+Let the agent learn:
 
-slope
+“this signal is trustworthy now”
 
-slope_uncertainty (std)
+“this signal is garbage now”
 
-level_uncertainty
+That’s part of the learning problem.
 
-normalized_slope = slope / slope_std ✅ extremely useful for gating
+5) Define the RL interface: reward + action space
 
-Overlay: one optional trend line (Kalman level), plus maybe slope confidence coloring.
+Before more models, lock these down:
 
-1.4 Logistic / LDA classification
+Action space (start simple)
 
-Define labels cleanly. Examples:
+0: flat
 
-y = 1 if next 3 bars return > 0 (or exceeds threshold)
+1: long
 
-or y = 1 if breakout occurs within next k bars
+2: short
 
-or multiclass: {down / flat / up}
+(Or long/flat only if you want simpler.)
 
-Outputs:
+Reward (start conservative)
 
-p_up (and p_down, p_flat)
+next-bar P&L minus costs:
 
-calibration (Brier score rolling)
+𝑟
+𝑡
++
+1
+=
+𝑝
+𝑜
+𝑠
+𝑖
+𝑡
+𝑖
+𝑜
+𝑛
+𝑡
+⋅
+Δ
+𝑙
+𝑜
+𝑔
+𝑃
+𝑡
++
+1
+−
+𝑐
+𝑜
+𝑠
+𝑡
+⋅
+∣
+𝑝
+𝑜
+𝑠
+𝑖
+𝑡
+𝑖
+𝑜
+𝑛
+𝑡
+−
+𝑝
+𝑜
+𝑠
+𝑖
+𝑡
+𝑖
+𝑜
+𝑛
+𝑡
+−
+1
+∣
+r
+t+1
+	​
 
-entropy (confidence)
+=position
+t
+	​
 
-decision_margin
+⋅ΔlogP
+t+1
+	​
 
-Overlay: a thin probability ribbon at the bottom, or background shading (much better than lines).
+−cost⋅∣position
+t
+	​
 
-3) Preventing spaghetti: use 3 display layers
-Layer A — Price overlays (max 1–2 lines at a time)
+−position
+t−1
+	​
 
-Trend line (choose ONE: SMA / linear / Kalman)
+∣
 
-Optional: one band (vol envelope or high/low band)
+Use logP for stability, and a cost term to prevent churn.
 
-Layer B — Regime & confidence (heatmaps / shading)
+This one formula will teach you more than another indicator line.
 
-Background shading for: trending / choppy / volatile / compressing
+What I’d do next (highest leverage)
 
-Small badges: “trend confidence high”, “AR stable”, “classifier confident”
+In priority order:
 
-Layer C — Panels (small multiples)
+Freeze a canonical feature schema (ordered list, fixed length)
 
-Instead of more lines, show small panels:
+Add is_warm everywhere (if not already)
 
-“Drift (mu)” line in its own panel
+Add a serializeDataset() function that exports:
 
-“Slope z-score” line
+per-bar observations
 
-“Classifier p(up)” line
+actions (optional baseline)
 
-“Volatility / residual energy” line
+rewards/returns
 
-This is how pros avoid spaghetti: separate axes.
+timestamps
 
-4) RL integration: make features “plug-and-play”
+Train RL outside the browser (Python), iterate faster
 
-Define a standard per-bar feature vector:
+Cool — 1m SPY is a perfectly fine place to start for range-cycle scalps, even if your cycle-scan outputs aren’t nailed down yet. You can build the RL loop without a “smart” scan by using simple proxy cycle features first, then swap in your fancy scan once it exists.
 
-x_t = {
-  price_features: ...
-  trend_features: ...
-  ols_features: ...
-  ar_features: ...
-  kalman_features: ...
-  clf_features: ...
-  quality_features: ...
-}
+Here’s the clean plan.
 
-Two things to include that many people forget (but RL needs)
+What to use right now
+RL algorithm
 
-Feature quality flags
+Start: PPO (Stable-Baselines3)
 
-is_warm (enough history?)
+Upgrade (likely needed for cycles): RecurrentPPO (sb3-contrib, LSTM)
 
-fit_ok (R² above min? AR stable? Kalman converged?)
+Reason: at 1m, the “state” of a range (phase-ish context + whether it’s degrading) benefits from memory.
 
-confidence (entropy / z-score / t-stat)
+A cycle-scalp environment that doesn’t require your scan yet
+1) Observations (feature vector) — minimum viable
 
-Normalization
+You want features that represent:
 
-almost everything should be scaled by volatility or ATR-like measure
+where we are inside the range
 
-RL hates changing units/regimes
+whether the range is stable
 
-5) A pragmatic build order
+whether we’re about to break out
 
-If you want fastest learning per hour of work:
+Use these:
 
-Kalman trend (level + slope + slope_z)
+A. Mean-reversion position in range
 
-Rolling OLS on returns with mu_hat, t_stat, R²
+z = (price - rolling_mean) / rolling_std with window 60–120 min
 
-Logistic for p_up + calibration metric
+dist_to_mid = price - rolling_mean (or normalized)
 
-AR(1–3) last (easy to overfit, but useful once you have gating)
+band_width = rolling_std (or ATR)
 
-That order gives you clean regime + drift + probability before adding AR complexity.
+B. “Cycle-ish” proxy (no scan required)
 
-6) One extra suggestion: add a “Feature Registry” and a “Viz Registry”
+Use a band-pass filtered component (cheap and works surprisingly well):
 
-Feature registry: everything computed, named, normalized, quality-flagged
+bp = EMA_fast(price) - EMA_slow(price) (e.g., 10 vs 60)
 
-Viz registry: very small curated set of overlays/panels
+bp_z = (bp - mean(bp))/std(bp) over rolling window
 
-Then your UI controls become:
+bp_slope = bp - bp_prev
 
-“Pick trend overlay: SMA / linear / Kalman”
+This is basically “oscillation component” without FFT.
 
-“Show panels: drift / p(up) / slope_z / vol”
+Optional but very useful:
 
-“Developer mode: show raw lines” (optional)
+autocorr at a few lags (e.g., 15, 30, 60 min) on returns or on bp
+(these become your “is it rhythmically bouncing?” signals)
 
-If you want, paste (or point me to) the part of your JS where you assemble overlays/series for rendering, and I’ll suggest a clean “feature registry + panel” structure that lets you add all four model families without turning the chart into a hairball.
+C. Breakout suppressors (critical)
+
+trend_slope: rolling OLS slope of price over 60–180 min, normalized by volatility
+
+range_break_flag: close outside rolling_mean ± k*rolling_std (k=2ish)
+
+vol_regime: realized vol ratio (short vol / long vol), e.g. vol_15 / vol_120
+
+D. Execution realism
+
+position (current: -1/0/+1)
+
+time_in_position
+
+optional: time_of_day as sin/cos of minutes since open
+
+That’s enough for an agent to learn “fade extremes when stable, stop when breaking”.
+
+2) Actions (simple + explainable)
+
+Discrete actions:
+
+0 HOLD
+
+1 ENTER_LONG (or maintain long)
+
+2 ENTER_SHORT
+
+3 EXIT
+
+Keep size fixed (1x) at first.
+
+3) Reward (shaped for scalping)
+
+At 1m, if you reward raw PnL only, PPO often learns churn.
+
+Use:
+
+reward = ΔPnL − cost − churn_penalty − breakout_penalty
+
+ΔPnL = change in equity from t→t+1
+
+cost = fixed per-trade cost (start conservative)
+
+churn_penalty = small penalty when action changes position (e.g. 0.01)
+
+breakout_penalty = if you’re in a MR position while range_break_flag is on (bigger penalty)
+
+That last term is what keeps it from dying in trend days.
+
+What “cycle scan outputs” should be (so RL can use your real scan later)
+
+When you build the scan, have it output a small, stable set of numbers per bar:
+
+Core
+
+period_min (dominant period in minutes)
+
+coherence (0–1): “how sinusoidal/repeatable”
+
+amplitude (normalized by price volatility)
+
+phase_sin, phase_cos (phase encoded safely)
+
+Stability
+
+period_stability (e.g., std(period) over last N scans)
+
+coherence_stability (rolling mean/std)
+
+Breakout risk
+
+trend_dominance = low-freq power / cycle-band power
+
+innovation = shock magnitude (Kalman innovation works great)
+
+Even if you don’t know yet, this tells you what to standardize toward.
+
+Training protocol for 1m SPY (so it’s not a mirage)
+
+Episodes: sample contiguous chunks like 1–3 trading days
+
+Train/val/test: strict walk-forward by date
+
+Baselines (must beat after costs):
+
+z-score fade: enter at z>+2 short / z<-2 long, exit at z~0
+
+band fade: enter at upper/lower band, exit at mid
+
+If RL can’t beat those, the env/reward/features aren’t right yet.
+
+Practical “cost” model to start with (SPY 1m)
+
+Don’t overthink it, but don’t ignore it:
+
+per round-trip: something like 1–2 bps equivalent (tunable)
+
+or fixed cents per share approximations if you prefer
+
+The point is: force the agent to need clean edges, not noise-chop.
+
+What I’d implement next in ntree (order that tends to work)
+
+Add the proxy cycle features (band-pass EMA diff + autocorr lags)
+
+Build the Gymnasium env + PPO training loop
+
+Validate vs the two baselines
+
+Then replace proxy cycle features with your “real” scan outputs
+
+Upgrade PPO → RecurrentPPO once the env is stable
+
+If you paste one row of what your current feature factory emits (column names), I’ll:
+
+propose the exact observation vector for cycle scalps,
+
+define the env step logic (including position accounting),
+
+and give you a ready-to-run SB3 training config (PPO → RecurrentPPO).
