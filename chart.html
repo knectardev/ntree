@@ -10,6 +10,7 @@
 <body>
   <div class="appNav" id="appNav">
     <a href="/" title="Back to Dashboard">Dashboard</a>
+    <a href="/backtest-config" title="Backtest Configurations">Backtest Config</a>
   </div>
   <div class="statusChip" id="updateChip" aria-live="polite">
     <span class="statusDot" id="updateDot"></span>
@@ -192,17 +193,36 @@
         <summary class="sideCardTitle">Strategy</summary>
         <div class="sideCardBody">
           <div class="formGroup">
-            <label class="fieldLabel" for="strategySelect">Strategy</label>
-            <select class="select" id="strategySelect" disabled>
-              <option selected>None</option>
-            </select>
+            <label class="fieldLabel">Strategy</label>
+            <div class="dd" id="strategyDD">
+              <button class="ddBtn" id="strategyBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+                <span id="strategyLabel">None</span>
+                <span class="ddChevron">▾</span>
+              </button>
+              <div class="ddMenu" id="strategyMenu" role="listbox">
+                <div class="ddItem sel" role="option" data-value="none">None</div>
+                <div class="ddItem" role="option" data-value="vwap_ema_crossover_v1">VWAP / EMA Crossover (v1)</div>
+                <div class="ddItem" role="option" data-value="fools_paradise">Fools Paradise</div>
+              </div>
+            </div>
+            <div id="strategyDesc" class="hint" style="margin-top: 6px; display: none;"></div>
 
-            <label class="fieldLabel" for="btConfigSelect">Backtest config</label>
-            <select class="select" id="btConfigSelect" disabled>
-              <option selected>Default (risk 0.5%, RR 2.0, fee 0)</option>
-            </select>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label class="fieldLabel" style="margin-bottom: 0;">Backtest config</label>
+              <a href="/backtest-config" class="hint" style="text-decoration: underline; font-size: 0.85em;" target="_blank">Manage</a>
+            </div>
+            <div class="dd" id="btConfigDD">
+              <button class="ddBtn" id="btConfigBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+                <span id="btConfigLabel">Default (risk 0.5%, RR 2.0, fee 0)</span>
+                <span class="ddChevron">▾</span>
+              </button>
+              <div class="ddMenu" id="btConfigMenu" role="listbox">
+                <div class="ddItem sel" role="option" data-value="">Default (risk 0.5%, RR 2.0, fee 0)</div>
+              </div>
+            </div>
 
-            <button class="btnPrimary" type="button" disabled>Run Backtest</button>
+            <button class="btnPrimary" type="button" id="runBacktestBtn" style="margin-top: 10px;">Run Backtest</button>
+            <div id="strategyResults" class="hint" style="margin-top: 10px; display: none; white-space: pre-line; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;"></div>
           </div>
         </div>
       </details>
@@ -398,6 +418,7 @@
   <script src="static/demo_static/js/08_replay_and_file_io.js"></script>
   <script src="static/demo_static/js/09_dials_and_boot.js"></script>
   <script src="static/demo_static/js/11_feature_ui.js"></script>
+  <script src="static/demo_static/js/12_strategy_backtest.js"></script>
 </body>
 </html>
 

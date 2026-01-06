@@ -5,20 +5,56 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Backtest Config</title>
     <style>
+        * { box-sizing: border-box; }
         body {
             font-family: Arial, sans-serif;
             margin: 24px;
             background: #0f172a;
             color: #e2e8f0;
         }
+        .page {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 8px 16px;
+        }
         h1 { margin-bottom: 8px; }
+        /* Table-like two-column layout to ensure clean side-by-side without overlap */
+        .layout {
+            display: table;
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: separate;
+            border-spacing: 24px 0;
+            margin-top: 16px;
+        }
+        .col-left,
+        .col-right {
+            display: table-cell;
+            vertical-align: top;
+            width: 50%;
+        }
         .card {
             background: #1e293b;
             border: 1px solid #334155;
             border-radius: 8px;
             padding: 16px;
-            max-width: 720px;
+            width: 100%;
             box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+        }
+        .cardTitle {
+            margin: 0 0 8px 0;
+            font-size: 20px;
+        }
+        @media (max-width: 1200px) {
+            .layout {
+                display: block;
+            }
+            .col-left,
+            .col-right {
+                display: block;
+                width: 100%;
+                margin-bottom: 20px;
+            }
         }
         label {
             display: block;
@@ -92,6 +128,7 @@
     </style>
 </head>
 <body>
+  <div class="page">
     <div class="global-nav">
         <select id="globalNavSelect">
             <option value="/">Dashboard</option>
@@ -102,41 +139,80 @@
     <h1>Backtest Configuration</h1>
     <p>Define strategy-neutral backtest parameters to reuse elsewhere.</p>
 
-    <div class="card">
-        <form id="backtestForm">
-            <label for="backtest_name">Configuration Name</label>
-            <input id="backtest_name" name="backtest_name" type="text" placeholder="e.g., Default 2:1" required>
+    <div class="layout">
+      <div class="col-left">
+        <div class="card">
+            <div class="cardTitle">Backtest Parameters</div>
+            <form id="backtestForm">
+                <label for="backtest_name">Configuration Name</label>
+                <input id="backtest_name" name="backtest_name" type="text" placeholder="e.g., Default 2:1" required>
 
-            <div class="row">
-                <div>
-                    <label for="risk_percent">Risk % (per trade)</label>
-                    <input id="risk_percent" name="risk_percent" type="number" step="0.01" min="0" value="0.5">
+                <div class="row">
+                    <div>
+                        <label for="risk_percent">Risk % (per trade)</label>
+                        <input id="risk_percent" name="risk_percent" type="number" step="0.01" min="0" value="0.5">
+                    </div>
+                    <div>
+                        <label for="reward_multiple">Reward multiple (profit-to-loss)</label>
+                        <input id="reward_multiple" name="reward_multiple" type="number" step="0.1" min="0" value="2.0">
+                    </div>
+                    <div>
+                        <label for="fee_bp">Fees (basis points)</label>
+                        <input id="fee_bp" name="fee_bp" type="number" step="0.01" value="0">
+                    </div>
                 </div>
-                <div>
-                    <label for="reward_multiple">Reward multiple (profit-to-loss)</label>
-                    <input id="reward_multiple" name="reward_multiple" type="number" step="0.1" min="0" value="2.0">
-                </div>
-                <div>
-                    <label for="fee_bp">Fees (basis points)</label>
-                    <input id="fee_bp" name="fee_bp" type="number" step="0.01" value="0">
-                </div>
-            </div>
 
-            <button type="button" id="saveBtn">Save Configuration</button>
+                <button type="button" id="saveBtn">Save Configuration</button>
 
-            <label for="savedSelect">Saved Configurations</label>
-            <div class="row">
-                <select id="savedSelect">
-                    <option value="">-- choose saved configuration --</option>
+                <label for="savedSelect">Saved Configurations</label>
+                <div class="row">
+                    <select id="savedSelect">
+                        <option value="">-- choose saved configuration --</option>
+                    </select>
+                    <button type="button" id="refreshSavedBtn">Refresh</button>
+                    <button type="button" id="deleteSavedBtn">Delete Selected</button>
+                </div>
+
+                <div id="errorBox" class="error" style="display:none;"></div>
+            </form>
+
+            <div id="results" class="results" style="display:none;"></div>
+        </div>
+      </div>
+
+      <div class="col-right">
+        <div class="card">
+            <h2 class="cardTitle">Strategy Code Editor</h2>
+            <p style="margin-top:0;margin-bottom:8px;">Edit strategy source files (whitelisted) directly from the browser.</p>
+            <label for="strategyCodeSelect">Strategy</label>
+            <div class="row" style="max-width: 520px;">
+                <select id="strategyCodeSelect">
+                    <option value="">-- choose a strategy --</option>
                 </select>
-                <button type="button" id="refreshSavedBtn">Refresh</button>
-                <button type="button" id="deleteSavedBtn">Delete Selected</button>
+                <button type="button" id="strategyLoadBtn" style="width: auto;">Load</button>
+                <button type="button" id="strategySaveBtn" style="width: auto;">Save</button>
             </div>
 
-            <div id="errorBox" class="error" style="display:none;"></div>
-        </form>
-
-        <div id="results" class="results" style="display:none;"></div>
+            <div style="padding:10px; border:1px solid #334155; border-radius:8px; background:#0b1220; margin-bottom:12px;">
+                <div style="font-weight:700; margin-bottom:8px;">Metadata</div>
+                <label for="strategyMetaName">Name</label>
+                <input id="strategyMetaName" type="text" placeholder="e.g., my_strategy_v1" />
+                <label for="strategyMetaDisplay">Display name</label>
+                <input id="strategyMetaDisplay" type="text" placeholder="e.g., My Strategy (v1)" />
+                <label for="strategyMetaDesc">Description</label>
+                <input id="strategyMetaDesc" type="text" placeholder="Shown in chart strategy tooltip" />
+                <label style="display:flex; gap:10px; align-items:center; font-weight:600;">
+                    <input id="strategyMetaEnabled" type="checkbox" checked style="width:auto; margin:0;" />
+                    Enabled
+                </label>
+                <div class="hint" style="font-size: 12px; opacity: 0.9; margin-top: 8px;">
+                    Tip: select <strong>Create new…</strong> in the dropdown to create a new strategy.
+                </div>
+            </div>
+            <div id="strategyStatus" class="results" style="display:none;"></div>
+            <textarea id="strategyCodeArea" style="width: 100%; min-height: 320px; background:#0b1220; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:10px; font-family: Consolas, monospace; font-size: 13px;"></textarea>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -147,6 +223,22 @@
         const refreshSavedBtn = document.getElementById('refreshSavedBtn');
         const deleteSavedBtn = document.getElementById('deleteSavedBtn');
         let savedBacktests = [];
+
+        // Strategy code editor
+        const stratSelect = document.getElementById('strategyCodeSelect');
+        const stratLoadBtn = document.getElementById('strategyLoadBtn');
+        const stratSaveBtn = document.getElementById('strategySaveBtn');
+        const stratCodeArea = document.getElementById('strategyCodeArea');
+        const stratStatus = document.getElementById('strategyStatus');
+        let strategyList = [];
+
+        // Strategy metadata fields
+        const metaName = document.getElementById('strategyMetaName');
+        const metaDisplay = document.getElementById('strategyMetaDisplay');
+        const metaDesc = document.getElementById('strategyMetaDesc');
+        const metaEnabled = document.getElementById('strategyMetaEnabled');
+
+        const CREATE_NEW_VALUE = '__new__';
 
         function collectPayload() {
             return {
@@ -178,6 +270,216 @@
         function setLoading(isLoading, targetBtn, label) {
             targetBtn.disabled = isLoading;
             targetBtn.textContent = isLoading ? `${label}...` : label;
+        }
+
+        function setStratStatus(msg, ok=true) {
+            if (!stratStatus) return;
+            stratStatus.style.display = msg ? 'block' : 'none';
+            stratStatus.style.color = ok ? '#a5f3fc' : '#f87171';
+            stratStatus.textContent = msg || '';
+        }
+
+        async function fetchStrategiesForEditor() {
+            try {
+                const resp = await fetch('/api/strategies');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                strategyList = Array.isArray(data) ? data : [];
+                // Rebuild options using DOM APIs (more reliable for <select> across browsers)
+                while (stratSelect && stratSelect.firstChild) stratSelect.removeChild(stratSelect.firstChild);
+                if (stratSelect) {
+                    const opt0 = document.createElement('option');
+                    opt0.value = '';
+                    opt0.textContent = '-- choose a strategy --';
+                    stratSelect.appendChild(opt0);
+
+                    const optNew = document.createElement('option');
+                    optNew.value = CREATE_NEW_VALUE;
+                    optNew.textContent = 'Create new…';
+                    stratSelect.appendChild(optNew);
+
+                    strategyList.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.name;
+                        opt.textContent = s.display_name || s.name;
+                        opt.title = s.description || '';
+                        stratSelect.appendChild(opt);
+                    });
+                }
+
+                if (strategyList.length) setStratStatus(`Loaded ${strategyList.length} strategies.`, true);
+
+                // Default selection to first strategy if nothing selected yet.
+                if (!stratSelect.value && strategyList.length) {
+                    stratSelect.value = strategyList[0].name;
+                    await onStrategySelected(stratSelect.value);
+                }
+            } catch (err) {
+                console.error('Failed to load strategies', err);
+                setStratStatus('Failed to load strategies: ' + (err && err.message ? err.message : err), false);
+            }
+        }
+
+        function findMeta(name) {
+            return (strategyList || []).find(s => String(s.name) === String(name)) || null;
+        }
+
+        function templateForNewStrategy(name, displayName, description) {
+            const nm = (name || 'my_strategy_v1').trim();
+            const dn = (displayName || nm).trim();
+            const desc = (description || 'TODO: Describe this strategy.').trim();
+            // IMPORTANT: build via array join to avoid accidental stray "\\n" tokens outside strings.
+            return [
+                `"""${dn}`,
+                ``,
+                `${desc}`,
+                ``,
+                `Strategy contract:`,
+                `- Input: pandas.DataFrame with index timestamps and columns: open, high, low, close, volume`,
+                `- Output: dict of same-length arrays. Minimum required by engine/UI:`,
+                `  - long_entry: list[bool]`,
+                `  - direction: list['bullish'|'bearish'|None]`,
+                `"""`,
+                ``,
+                `import pandas as pd`,
+                ``,
+                ``,
+                `def compute_${nm}_signals(df_prices, rth_mask=None):`,
+                `    """Skeleton strategy: no entries by default."""`,
+                `    if df_prices is None or getattr(df_prices, 'empty', False):`,
+                `        return {}`,
+                ``,
+                `    df = df_prices.copy()`,
+                `    df.index = pd.to_datetime(df.index)`,
+                ``,
+                `    n = len(df)`,
+                `    long_entry = [False] * n`,
+                `    direction = [None] * n`,
+                ``,
+                `    return {`,
+                `        'long_entry': long_entry,`,
+                `        'direction': direction,`,
+                `        'timestamp': [ts.isoformat() for ts in df.index],`,
+                `    }`,
+                ``,
+            ].join('\\n');
+        }
+
+        async function onStrategySelected(val) {
+            setStratStatus('');
+            if (!val) return;
+
+            if (val === CREATE_NEW_VALUE) {
+                if (metaName) { metaName.disabled = false; metaName.value = ''; }
+                if (metaDisplay) metaDisplay.value = '';
+                if (metaDesc) metaDesc.value = '';
+                if (metaEnabled) metaEnabled.checked = true;
+                if (stratCodeArea) stratCodeArea.value = templateForNewStrategy('', '', '');
+                return;
+            }
+
+            const meta = findMeta(val);
+            if (metaName) { metaName.value = meta ? meta.name : val; metaName.disabled = true; }
+            if (metaDisplay) metaDisplay.value = meta ? (meta.display_name || meta.name) : val;
+            if (metaDesc) metaDesc.value = meta ? (meta.description || '') : '';
+            if (metaEnabled) metaEnabled.checked = meta ? !!meta.enabled : true;
+
+            await loadStrategyCode();
+        }
+
+        async function saveStrategyAll() {
+            const sel = stratSelect.value;
+            if (!sel) {
+                setStratStatus('Choose a strategy first.', false);
+                return;
+            }
+
+            const name = (sel === CREATE_NEW_VALUE) ? (metaName ? metaName.value.trim() : '') : sel;
+            const display_name = metaDisplay ? metaDisplay.value.trim() : '';
+            const description = metaDesc ? metaDesc.value.trim() : '';
+            const enabled = metaEnabled ? !!metaEnabled.checked : true;
+            const code = stratCodeArea ? (stratCodeArea.value || '') : '';
+
+            if (!name) {
+                setStratStatus('Name is required for a new strategy.', false);
+                return;
+            }
+
+            setLoading(true, stratSaveBtn, 'Save');
+            setStratStatus('');
+            try {
+                if (sel === CREATE_NEW_VALUE) {
+                    const resp = await fetch('/api/strategies/create', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, display_name, description, code })
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || data.error) throw new Error(data.error || 'Create failed');
+                    setStratStatus(`Created ${data.name}.`, true);
+                    await fetchStrategiesForEditor();
+                    stratSelect.value = data.name;
+                    await onStrategySelected(data.name);
+                    return;
+                }
+
+                // Update metadata
+                const respMeta = await fetch(`/api/strategy/${encodeURIComponent(name)}/meta`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ display_name, description, enabled })
+                });
+                const metaResp = await respMeta.json();
+                if (!respMeta.ok || metaResp.error) throw new Error(metaResp.error || 'Meta update failed');
+
+                // Update code
+                const respCode = await fetch(`/api/strategy/${encodeURIComponent(name)}/code`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code })
+                });
+                const codeResp = await respCode.json();
+                if (!respCode.ok || codeResp.error) throw new Error(codeResp.error || 'Code save failed');
+
+                setStratStatus('Saved metadata + code.', true);
+                await fetchStrategiesForEditor();
+                stratSelect.value = name;
+            } catch (err) {
+                setStratStatus(err.message || 'Save failed', false);
+            } finally {
+                setLoading(false, stratSaveBtn, 'Save');
+            }
+        }
+
+        async function loadStrategyCode() {
+            const sel = stratSelect.value;
+            if (sel === CREATE_NEW_VALUE) {
+                setStratStatus('Create new strategy: edit fields and click Save.', true);
+                return;
+            }
+            const name = sel;
+            if (!name) {
+                setStratStatus('Choose a strategy to load.', false);
+                return;
+            }
+            setLoading(true, stratLoadBtn, 'Load');
+            setStratStatus('');
+            try {
+                const resp = await fetch(`/api/strategy/${name}/code`);
+                const data = await resp.json();
+                if (!resp.ok || data.error) throw new Error(data.error || 'Load failed');
+                stratCodeArea.value = data.code || '';
+                setStratStatus('Loaded.', true);
+            } catch (err) {
+                setStratStatus(err.message || 'Load failed', false);
+            } finally {
+                setLoading(false, stratLoadBtn, 'Load');
+            }
+        }
+
+        async function saveStrategyCode() {
+            // Legacy handler kept for compatibility; route to unified save.
+            return await saveStrategyAll();
         }
 
         async function fetchSaved() {
@@ -280,8 +582,16 @@
             }
         });
 
+        if (stratLoadBtn) stratLoadBtn.addEventListener('click', loadStrategyCode);
+        if (stratSaveBtn) stratSaveBtn.addEventListener('click', saveStrategyAll);
+        if (stratSelect) stratSelect.addEventListener('change', async () => {
+            if (stratCodeArea) stratCodeArea.value = '';
+            await onStrategySelected(stratSelect.value);
+        });
+
         // Initial load
         fetchSaved();
+        fetchStrategiesForEditor();
 
         (function setupGlobalNav() {
             const nav = document.getElementById('globalNavSelect');

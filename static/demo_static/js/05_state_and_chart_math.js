@@ -291,7 +291,9 @@
 
     // Small padding to prevent wick/body clipping while keeping the chart "maxed" vertically.
     var span = (max - min);
-    var pad = span * 0.02;
+    // Increase padding if strategy markers are likely to be drawn to avoid clipping.
+    var hasStrategy = !!(state && state.backtest && state.backtest.selectedStrategy && state.backtest.selectedStrategy !== 'none');
+    var pad = span * (hasStrategy ? 0.12 : 0.02);
     if(!Number.isFinite(pad) || pad <= 0) pad = 1;
     return { min: min - pad, max: max + pad };
   }

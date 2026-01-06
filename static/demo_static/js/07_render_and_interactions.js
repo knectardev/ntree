@@ -766,6 +766,167 @@
       } catch(_e){}
     })();
 
+    // Strategy markers (Entry/Exit)
+    (function drawStrategyMarkers(){
+      try {
+        if (!state.strategies || !state.backtest || !state.backtest.selectedStrategy || state.backtest.selectedStrategy === 'none') return;
+        var selected = state.backtest.selectedStrategy;
+        var strat = state.strategies[selected];
+        if (!strat) return;
+
+        // Strategy-time artifacts (intent):
+        // - entry + side (preferred canonical)
+        // - long_entry + direction (back-compat)
+        // - discretionary exits: long_exit + exit_direction
+        var entryArr = strat.entry || strat.long_entry || [];
+        var sideArr = strat.side || []; // +1 long, -1 short (if present)
+        var directions = strat.direction || []; // back-compat: 'bullish'|'bearish'|None
+        var longExits = strat.long_exit || [];
+        var exitDirections = strat.exit_direction || [];
+        var yOverrides = strat.cross_y || [];
+        var exitYOverrides = strat.exit_y || [];
+
+        // Backtest-time artifacts: if a stop/TP fired on a bar, do not also draw a discretionary exit arrow there.
+        var execByT = {};
+        try{
+          var bt = state.backtest || {};
+          var showExec = (
+            bt.executionEvents
+            && Array.isArray(bt.executionEvents)
+            && bt.executionEvents.length
+            && String(bt.executionEventsStrategy || '') === String(selected || '')
+          );
+          if(showExec){
+            for(var ei=0; ei<bt.executionEvents.length; ei++){
+              var ev = bt.executionEvents[ei] || {};
+              var tms = Number(ev.t_ms);
+              if(Number.isFinite(tms)) execByT[String(tms)] = ev;
+            }
+          }
+        } catch(_eExec){}
+        
+        ctx.save();
+        
+        for(var bi=start; bi<=end; bi++){
+          var d = state.data[bi];
+          if(!d || d.idx === undefined) continue;
+          var fidx = d.idx;
+          
+          var cx = xForIndex(bi + 0.5, plot, barsVisible);
+          // Padding for markers to sit outside the candle
+          var candleRange = Math.abs(d.h - d.l) || 0.01;
+          var markerOffset = candleRange * 0.4;
+
+          // Entry intent markers (encoded direction+action):
+          // Entry:   long => ▲ green, short => ▼ red
+          if (entryArr[fidx]) {
+            var side = 1;
+            if(sideArr && sideArr.length){
+              var sv = Number(sideArr[fidx]);
+              if(Number.isFinite(sv)) side = (sv >= 0 ? 1 : -1);
+            } else {
+              var dir = directions[fidx];
+              side = (dir === 'bearish') ? -1 : 1;
+            }
+            var isShort = side < 0;
+            var color = isShort ? '#e74c3c' : '#2ecc71';
+            var yVal = (yOverrides[fidx] != null && !isNaN(yOverrides[fidx])) ? yOverrides[fidx] : (isShort ? d.h : d.l);
+            var markerY = yForPrice(isShort ? (yVal + markerOffset) : (yVal - markerOffset), pricePlot, yMin, yMax);
+            drawTriangle(ctx, cx, markerY, 12, color, isShort); // short => ▼, long => ▲
+          }
+
+          // Discretionary exit intent markers:
+          // Exit: long => ▼ green, short => ▲ red
+          // Suppress if this bar was actually closed by stop/TP in the backtest.
+          var tKey = String(Number(d.t));
+          var hasExecHere = !!(execByT && execByT[tKey]);
+          if (!hasExecHere && longExits[fidx]) {
+            var dirE = exitDirections[fidx];
+            var exitIsShort = (dirE === 'bearish'); // exiting short position
+            var colorE = exitIsShort ? '#e74c3c' : '#2ecc71';
+            var yValE = (exitYOverrides[fidx] != null && !isNaN(exitYOverrides[fidx])) ? exitYOverrides[fidx] : (exitIsShort ? d.l : d.h);
+            var markerYE = yForPrice(exitIsShort ? (yValE - markerOffset) : (yValE + markerOffset), pricePlot, yMin, yMax);
+            drawTriangle(ctx, cx, markerYE, 12, colorE, !exitIsShort); // long => ▼, short => ▲
+          }
+        }
+        
+        ctx.restore();
+      } catch(e) {
+        console.warn('Failed to draw strategy markers', e);
+      }
+    })();
+
+    // Backtest resolution markers (Stop/TP) — only after execution.
+    (function drawExecutionMarkers(){
+      try{
+        if(!state || !state.backtest) return;
+        var bt = state.backtest || {};
+        if(!bt.executionEvents || !Array.isArray(bt.executionEvents) || !bt.executionEvents.length) return;
+        if(!bt.selectedStrategy || bt.selectedStrategy === 'none') return;
+        if(String(bt.executionEventsStrategy || '') !== String(bt.selectedStrategy || '')) return;
+
+        // Hide execution markers if bar size doesn't match the interval used for backtest (prevents misleading overlays).
+        (function(){
+          try{
+            function barSecToInterval(s){
+              s = Math.floor(Number(s) || 60);
+              if(s <= 60) return '1Min';
+              if(s <= 300) return '5Min';
+              if(s <= 900) return '15Min';
+              if(s <= 3600) return '1h';
+              if(s <= 14400) return '4h';
+              if(s <= 86400) return '1d';
+              return '1Min';
+            }
+            var curInt = barSecToInterval(state.windowSec || 60);
+            if(bt.executionEventsInterval && String(bt.executionEventsInterval) !== String(curInt)){
+              // interval mismatch: don't draw
+              bt = null;
+            }
+          } catch(_e){}
+        })();
+        if(!bt) return;
+
+        // Index events by exact t_ms; current chart bars use `d.t` in epoch ms.
+        var evByT = {};
+        for(var ei=0; ei<bt.executionEvents.length; ei++){
+          var ev = bt.executionEvents[ei] || {};
+          var tms = Number(ev.t_ms);
+          if(!Number.isFinite(tms)) continue;
+          // If multiple events land on the same bar, keep the first.
+          if(!evByT[String(tms)]) evByT[String(tms)] = ev;
+        }
+
+        ctx.save();
+        for(var bi=start; bi<=end; bi++){
+          var d = state.data[bi];
+          if(!d) continue;
+          var ev2 = evByT[String(Number(d.t))];
+          if(!ev2) continue;
+
+          var cx = xForIndex(bi + 0.5, plot, barsVisible);
+          var candleRange = Math.abs(d.h - d.l) || 0.01;
+          var markerOffset = candleRange * 0.55;
+
+          var typ = String(ev2.event || '');
+          var price = Number(ev2.price);
+          var yBase = Number.isFinite(price) ? price : d.c;
+          // Place above for TP, below for SL (so you can quickly read the outcome).
+          var isTp = (typ === 'take_profit');
+          var markerY = yForPrice(isTp ? (yBase - markerOffset) : (yBase + markerOffset), pricePlot, yMin, yMax);
+
+          if(typ === 'stop_loss'){
+            drawX(ctx, cx, markerY, 12, '#e74c3c');
+          } else if(typ === 'take_profit'){
+            drawDiamond(ctx, cx, markerY, 12, '#2ecc71');
+          }
+        }
+        ctx.restore();
+      } catch(e){
+        console.warn('Failed to draw execution markers', e);
+      }
+    })();
+
     // Bid/ask dotted lines removed (not present in API data).
 
     // Hover label
@@ -1196,6 +1357,58 @@
     state.yDragging = false;
     requestDraw('hover');
   });
+
+  function drawTriangle(ctx, x, y, size, color, isDown) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (isDown) {
+      // Point down
+      ctx.moveTo(x - size/2, y - size/2);
+      ctx.lineTo(x + size/2, y - size/2);
+      ctx.lineTo(x, y + size/2);
+    } else {
+      // Point up
+      ctx.moveTo(x - size/2, y + size/2);
+      ctx.lineTo(x + size/2, y + size/2);
+      ctx.lineTo(x, y - size/2);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawX(ctx, x, y, size, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - size/2, y - size/2);
+    ctx.lineTo(x + size/2, y + size/2);
+    ctx.moveTo(x + size/2, y - size/2);
+    ctx.lineTo(x - size/2, y + size/2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawDiamond(ctx, x, y, size, color) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y - size/2);
+    ctx.lineTo(x + size/2, y);
+    ctx.lineTo(x, y + size/2);
+    ctx.lineTo(x - size/2, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
 
   canvas.addEventListener('mousedown', function(e){
     var r = canvas.getBoundingClientRect();

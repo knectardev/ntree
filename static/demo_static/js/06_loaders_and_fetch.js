@@ -378,7 +378,8 @@
           c: Number(c[i]),
           v: Number(v[i]),
           bid: NaN,
-          ask: NaN
+          ask: NaN,
+          idx: i
         };
       }
 
@@ -401,6 +402,7 @@
 
       // Store unfiltered window, then apply TradingView-style session filtering to build state.data.
       state.dataFull = out;
+      state.strategies = j.strategies || {};
       state.overlaysFull = overlaysFull || [];
       state.data = out;
       state._sessionType = computeSessionTypesForData(out);
@@ -625,11 +627,12 @@
 
       var out = new Array(n);
       for(var i=0;i<n;i++){
-        out[i] = { t:Number(t[i]), o:Number(o[i]), h:Number(h[i]), l:Number(l[i]), c:Number(c[i]), v:Number(v[i]), bid:NaN, ask:NaN };
+        out[i] = { t:Number(t[i]), o:Number(o[i]), h:Number(h[i]), l:Number(l[i]), c:Number(c[i]), v:Number(v[i]), bid:NaN, ask:NaN, idx: i };
       }
       state.followLatest = false;
       // Store full window, then filter displayed bars.
       state.dataFull = out;
+      state.strategies = j.strategies || {};
       state.overlaysFull = overlays || [];
       state.data = out;
       state._sessionType = computeSessionTypesForData(out);

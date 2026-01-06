@@ -184,6 +184,21 @@ def init_database():
         WHERE data_source = 'synthetic'
     ''')
 
+    # Strategy metadata (UI/description)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS strategies_meta (
+            name TEXT PRIMARY KEY,
+            display_name TEXT,
+            description TEXT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_strat_meta_enabled ON strategies_meta(enabled)
+    ''')
+
     # Level 2 state features keyed to bars
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS l2_state (

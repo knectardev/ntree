@@ -1,164 +1,181 @@
-Here’s a tight spec you can hand to Cursor to implement LLM-generated interpretation + callouts as a sidecar artifact (no pixel arrows, no CV, no fragility).
+The one big thing I’d tweak immediately
 
-LLM Annotation Sidecar Requirements (Option A)
-Goal
+Right now, the plot is still “dense” and the interpretation risks becoming generic. To keep it grounded, have the LLM summary quote numbers and refer to visible events on the chart:
 
-After generating a behavior timeline (baseline vs PPO), produce a human-readable interpretation summary grounded strictly in:
+Example of the tone you want the annotation engine to produce (this is the style target):
 
-the exported per-step timeline dataset (*.timeline.parquet/csv)
+“PPO spent 71.6% of the session short vs baseline 40.1% in market (baseline entered only twice).”
 
-the per-day summary metrics (*.summary.json)
+“Most PPO churn clustered around the first MR_Z excursion above +2; it flipped/exited repeatedly in that region.”
 
-config/meta (schema/env_cfg)
+“Despite higher turnover (19 vs 4), PPO netted better total reward on this day (–0.0021 vs –0.0117) — mainly from PnL being positive while baseline’s was negative.”
 
-No image parsing required.
+That kind of language is what will make this not feel like ML gobblygook.
 
-Outputs
+Yes: Cursor can do “Option A” (LLM-written interpretation) cleanly
 
-For each date rendered, create:
+Cursor doesn’t need to “understand the image” to do this. The easy, reliable method is:
 
-.../spy_1m_rth_YYYY-MM-DD.annotation.md
+Compute an interpretation payload from the timeline dataframe (not from pixels):
 
-(optional but nice) .../spy_1m_rth_YYYY-MM-DD.annotation.json (structured)
+totals: reward, pnl, cost, breakout penalty
 
-CLI Flags
+counts: holds/entries/exits, coerced flips
 
-Add to scripts/render_behavior_timeline.py:
+segments: contiguous position blocks (start/end times, duration, direction)
 
---llm_annotate (bool)
+“notable moments”: top 3 drawdowns, top 3 best runs, most churny 15-minute window, breakout-overlap windows
 
---llm_provider (string; default can be whatever you’re using)
+Send that payload + a short rubric prompt to the LLM.
 
---llm_model (string; optional)
+Render the response into the HTML under Interpretation.
 
---llm_max_tokens (int; e.g. 400)
+This stays deterministic, debuggable, and doesn’t require any vision model.
 
---llm_temperature (float; e.g. 0.2)
+Two additions that will make the “behavior domains” idea actually work
 
---llm_offline (bool)
+If you want the timeline to become a “skeletal framework with labeled regions,” you’ll need two simple pieces of extra structure in the dataset (no new trading logic required):
 
-If set (or if provider unavailable), write a deterministic “template-only” summary using metrics (no LLM).
+A) Regime labels per bar (derived from existing flags/values)
 
-Inputs to the LLM (the “digest”)
+domain = "MEAN_REVERT_LONG_SETUP" when mr_z <= -z_enter and breakout_flag == 0
 
-Before calling the LLM, build a compact JSON digest (and save it to disk for traceability):
+domain = "MEAN_REVERT_SHORT_SETUP" when mr_z >= +z_enter and breakout_flag == 0
 
-.../spy_1m_rth_YYYY-MM-DD.digest.json
+domain = "BREAKOUT_RISK" when breakout_flag == 1
 
-Digest fields
+domain = "NEUTRAL" otherwise
 
-identifiers:
+B) Segment summaries
+Whenever position changes, write a row like:
 
-symbol, bar_size, session_mode, date, timezone
+start_ts, end_ts, pos, duration_min, pnl_segment, cost_segment, breakout_exposure_in_segment, avg_mr_z
 
-schema_id
+Then the LLM can say things like:
+“PPO took 4 short segments; the longest ran 47m and overlapped breakout risk 0%.”
 
-model_id (ppo path or checkpoint id; “none” if baseline-only)
+That’s the bridge from “policy output” → “human story.”
 
-baseline metrics:
+Quick UI suggestion (optional)
 
-total_reward, pnl, cost, breakout_penalty
+Add a sticky “mini legend / cheat sheet” at the top of the HTML:
 
-turnover_changes, time_in_market_frac, avg_hold_min, breakout_exposure_pct
+mr_z: how stretched price is vs its mean (in sigma units)
 
-action_counts (H, L, S, X)
+breakout_flag: “mean reversion is less reliable here” warning
 
-ppo metrics (same keys; omit if not provided)
+baseline: rule strategy (z-fade)
 
-key “events” extracted deterministically from the timeline:
+PPO: learned policy (trained to maximize your reward function)
 
-top_trade_clusters: list of windows with unusually high turnover (e.g. [start_ts, end_ts, num_changes])
+This is tiny, but it prevents “wait what am I looking at?” every time you open the report.
 
-breakout_exposure_windows: windows where position!=0 and breakout_flag==1 (top 3 by duration)
+1. Example: “Good” LLM interpretation (grounded, non-mystical)
 
-largest_drawdown_window: [start_ts, end_ts] (approx; can be based on cumulative reward curve)
+Behavior Timeline Interpretation — SPY 1m RTH (2024-01-05)
 
-largest_pnl_gain_window: [start_ts, end_ts]
+Summary
+The learned policy (PPO) outperformed the baseline on this day by reducing losses from -1.17% to -0.21% in reward units, despite trading more frequently. This improvement came primarily from better price timing (positive raw PnL) and reduced exposure during breakout conditions, at the cost of higher transaction fees.
 
-notable_divergence_windows: windows where baseline is flat but PPO is in position (and vice versa), top 3 by duration
+What the baseline did
 
-Keep it small: 1–2 pages of JSON max.
+Took 2 trades, each held for the full 60-minute maximum, resulting in limited flexibility.
 
-LLM Prompt Template
+Was in the market 31% of the session and overlapped breakout conditions 25% of the time, which accounted for roughly half of its total loss.
 
-System: You are a trading analytics explainer. No ML jargon. No hype. Be specific.
-User: Given this digest JSON, write an interpretation of baseline vs PPO for a beginner.
-Constraints:
+Paid minimal transaction costs, but suffered from holding through unfavorable regimes.
 
-120–180 words max (configurable)
+What the learned policy did differently
 
-Bullet lists preferred
+Executed 10 shorter trades with an average hold time of 22.7 minutes, allowing it to adapt more quickly.
 
-Do not invent any metrics not in digest
+Reduced breakout exposure to 13%, cutting regime-related losses in half.
 
-Include 3 timestamped callouts using the digest windows
+Generated positive raw PnL (+0.49%), but gave some of it back via higher trading costs due to increased turnover.
 
-End with “One lever to try next” (one sentence) based on metrics (churn vs breakout vs hold time)
+Notable moments
 
-Annotation Markdown Format (exact)
-# Behavior Timeline Interpretation — {SYMBOL} {BAR} {SESSION} ({DATE})
+09:31–13:04 ET: Baseline experienced its largest drawdown while holding a fixed position through a breakout-prone period.
 
-## Summary
-{2–4 bullets comparing PPO vs baseline in plain English}
+10:01–10:11 ET: PPO exited and re-entered more actively during elevated volatility, limiting drawdown compared to the baseline.
 
-## What the baseline did
-{2–3 bullets}
+Mid-session: PPO avoided the deepest oversold region where the baseline committed to a full-length hold.
 
-## What the learned policy did differently
-{2–3 bullets}
+One lever to try next
+Introduce a slightly stronger penalty on rapid position changes to preserve PPO’s improved timing while reducing transaction cost drag.
 
-## Notable moments (callouts)
-- {HH:MM–HH:MM ET}: {callout}
-- {HH:MM–HH:MM ET}: {callout}
-- {HH:MM–HH:MM ET}: {callout}
+Nothing here requires knowing what PPO, gradients, or KL divergence are. It’s all behavior + consequences, derived directly from the metrics in the file. 
 
-## One lever to try next
-{single sentence, e.g. “reduce churn by …”}
+spy_1m_rth_2024-01-05.summary
 
-Determinism / Traceability
+2. How to make this automatic (Cursor-ready)
+A. What the LLM should actually receive (payload)
 
-Always save digest.json
+You already have almost everything. The payload can literally be:
 
-Save the exact prompt and LLM response metadata (model, temp, tokens) into annotation.json
+{
+  "date": "2024-01-05",
+  "baseline": { ... },
+  "ppo": { ... },
+  "data_context": { ... }
+}
 
-If --llm_offline, produce the same markdown using a deterministic rule-based template.
 
-Acceptance Criteria
+Exactly what’s in spy_1m_rth_2024-01-05.summary.json. No need to pass raw timelines unless you want finer callouts. 
 
-Running:
+spy_1m_rth_2024-01-05.summary
 
-python scripts/render_behavior_timeline.py --date 2024-01-05 --ppo_model_path ... --llm_annotate
+Optionally, you can add a few derived deltas before sending:
 
-Produces:
+delta_total_reward = ppo.total_reward - baseline.total_reward
 
-.timeline.png
+delta_breakout_exposure
 
-.timeline.parquet
+delta_avg_hold_time
 
-.summary.json
+delta_turnover
 
-.digest.json
+This helps the LLM focus.
 
-.annotation.md (and optionally .annotation.json)
+B. Prompt template (this is the critical piece)
 
-Annotation correctly references:
+You want the LLM constrained so it can’t drift into hype or abstraction.
 
-churn/turnover differences
+System
 
-breakout exposure differences
+You are a trading behavior analyst.
+Do not use machine learning jargon.
+Base all statements strictly on the provided metrics.
+Explain behavior in plain trading terms.
 
-hold time differences
+User
 
-and includes 3 timestamped callouts that correspond to extracted windows
+Given the following JSON summary of two trading policies evaluated on the same day:
 
-One extra suggestion (tiny but high value)
+Write a short interpretation (120–180 words).
 
-Add a --annotation_tone flag with options:
+Explain what the baseline did.
 
-plain (default)
+Explain what the learned policy did differently.
 
-clinical
+Include 2–3 notable moments inferred from the metrics (drawdown, breakout exposure, holding behavior).
 
-friendly
+End with one concrete lever to try next (costs, hold time, or regime exposure).
 
-Because you’ll quickly develop a preference.
+Do not invent data. Quote numbers where relevant.
+
+Paste the summary JSON below.
+
+C. Why this works for you
+
+You never have to read raw PPO logs again.
+
+Every run produces:
+
+a picture (timeline)
+
+a story (annotation)
+
+a knob to turn next (single sentence)
+
+That’s a design loop, not a research paper.

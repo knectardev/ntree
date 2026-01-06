@@ -66,6 +66,7 @@ class RiskRewardExecutionModel:
         reward_mult = self.reward_multiple if self.reward_multiple > 0 else 2.0
 
         trades = []
+        execution_events = []
         i = 0
         while i < len(df):
             if i < len(entry_signals) and entry_signals[i]:
@@ -87,6 +88,7 @@ class RiskRewardExecutionModel:
 
                     exit_idx = None
                     exit_price = None
+                    exit_reason: Optional[str] = None
 
                     for j in range(entry_idx + 1, len(df)):
                         bar_high = float(df.iloc[j]["high"])
@@ -106,22 +108,27 @@ class RiskRewardExecutionModel:
                             if dist_to_tp <= dist_to_sl:
                                 exit_idx = j
                                 exit_price = take_profit
+                                exit_reason = "take_profit"
                                 break
                             exit_idx = j
                             exit_price = stop_loss
+                            exit_reason = "stop_loss"
                             break
                         if hit_take_profit:
                             exit_idx = j
                             exit_price = take_profit
+                            exit_reason = "take_profit"
                             break
                         if hit_stop_loss:
                             exit_idx = j
                             exit_price = stop_loss
+                            exit_reason = "stop_loss"
                             break
 
                     if exit_idx is None:
                         exit_idx = len(df) - 1
                         exit_price = float(df.iloc[exit_idx]["close"])
+                        exit_reason = "end_of_data"
 
                     if is_long:
                         ret = (float(exit_price) - entry_price) / entry_price
@@ -130,6 +137,46 @@ class RiskRewardExecutionModel:
                     ret -= fee_bp / 10000.0
 
                     trades.append(ret)
+
+                    # Backtest-time artifact: only exists after execution.
+                    # Emit stop-loss / take-profit events for charting/debugging.
+                    try:
+                        if exit_reason in ("stop_loss", "take_profit"):
+                            t_ms = None
+                            ts_iso = None
+                            try:
+                                ts = df.index[exit_idx]
+                                if isinstance(ts, pd.Timestamp):
+                                    if ts.tzinfo is None:
+                                        ts = ts.tz_localize("UTC")
+                                    else:
+                                        ts = ts.tz_convert("UTC")
+                                    t_ms = int(ts.value // 1_000_000)
+                                    ts_iso = ts.isoformat()
+                                else:
+                                    # Best-effort: try pandas conversion
+                                    ts2 = pd.to_datetime(ts, utc=True, errors="coerce")
+                                    if pd.notna(ts2):
+                                        t_ms = int(pd.Timestamp(ts2).value // 1_000_000)
+                                        ts_iso = pd.Timestamp(ts2).isoformat()
+                            except Exception:
+                                t_ms = None
+                                ts_iso = None
+
+                            execution_events.append(
+                                {
+                                    "event": exit_reason,  # "stop_loss" | "take_profit"
+                                    "side": "long" if is_long else "short",
+                                    "t_ms": t_ms,
+                                    "ts": ts_iso,
+                                    "price": float(exit_price),
+                                    "entry_idx": int(entry_idx),
+                                    "exit_idx": int(exit_idx),
+                                }
+                            )
+                    except Exception:
+                        # Never let optional diagnostics break metrics.
+                        pass
 
                     # Skip to after exit to avoid overlapping trades
                     i = exit_idx + 1
@@ -154,11 +201,13 @@ class RiskRewardExecutionModel:
         else:
             median_ret = sorted_returns[n // 2]
 
-        return {
+        out = {
             "n_trades": int(len(trades)),
             "win_rate": float(win_rate),
             "avg_ret": float(avg_ret),
             "median_ret": float(median_ret),
         }
+        out["execution_events"] = execution_events
+        return out
 
 

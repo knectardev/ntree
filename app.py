@@ -6,6 +6,8 @@ import time
 import os
 import pandas as pd
 import json
+import re
+import importlib
 from typing import Optional
 from typing import Any, Dict, List, Tuple
 try:
@@ -14,7 +16,13 @@ except ImportError:
     ta = None
 import math
 from utils import calculate_vwap_per_trading_day, get_market_hours_info, get_market_open_times
-from strategies import compute_vwap_ema_crossover_signals, compute_fools_paradise_signals, STRATEGY_REGISTRY, build_regular_mask
+from strategies import (
+    compute_vwap_ema_crossover_signals,
+    compute_fools_paradise_signals,
+    STRATEGY_REGISTRY,
+    build_regular_mask,
+    normalize_signals,
+)
 from backtesting import run_backtest, RiskRewardExecutionModel
 from candlestick_analysis import compute_candlestick_bias, count_pattern_instances
 from replay.session import ReplaySession, ReplaySessionConfig
@@ -53,6 +61,95 @@ SYNTH_MAX_LIMIT = 5000
 
 # In-memory replay sessions (v1). Persist logs to SQLite; sessions are ephemeral.
 _REPLAY_SESSIONS: Dict[str, ReplaySession] = {}
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STRATEGIES_DIR = os.path.join(BASE_DIR, 'strategies')
+
+
+_STRAT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{2,50}$")
+
+
+def _is_valid_strategy_name(name: str) -> bool:
+    try:
+        nm = (name or "").strip()
+        if not nm:
+            return False
+        if "/" in nm or "\\" in nm or ".." in nm:
+            return False
+        return bool(_STRAT_NAME_RE.match(nm))
+    except Exception:
+        return False
+
+
+def _strategy_file_path(name: str) -> str:
+    return os.path.join(STRATEGIES_DIR, f"{name}.py")
+
+
+def _ensure_strategy_registered_in_init(strategy_name: str, compute_fn_name: str) -> None:
+    """
+    Best-effort persistence: patch `strategies/__init__.py` to import + export the new strategy and
+    add it to STRATEGY_REGISTRY. Keeps existing file structure intact.
+    """
+    init_path = os.path.join(STRATEGIES_DIR, "__init__.py")
+    if not os.path.exists(init_path):
+        return
+    try:
+        with open(init_path, "r", encoding="utf-8") as f:
+            src = f.read()
+    except Exception:
+        return
+
+    # Skip if already present
+    if f"'{strategy_name}'" in src or f"strategies.{strategy_name}" in src:
+        return
+
+    lines = src.splitlines(True)
+
+    # Insert import after existing strategy compute imports.
+    import_line = f"from strategies.{strategy_name} import {compute_fn_name}\n"
+    insert_at = 0
+    for i, ln in enumerate(lines):
+        if ln.startswith("from strategies.") and " import compute_" in ln and ".utils" not in ln and ".contracts" not in ln:
+            insert_at = i + 1
+    lines.insert(insert_at, import_line)
+
+    # Insert into __all__ before clean_series (keeps grouping)
+    try:
+        for i, ln in enumerate(lines):
+            if ln.strip() == "'clean_series'," or ln.strip() == '"clean_series",':
+                lines.insert(i, f"    '{compute_fn_name}',\n")
+                break
+    except Exception:
+        pass
+
+    # Insert into STRATEGY_REGISTRY dict before closing brace
+    try:
+        reg_start = None
+        reg_end = None
+        for i, ln in enumerate(lines):
+            if "STRATEGY_REGISTRY" in ln and "{" in ln:
+                reg_start = i
+            if reg_start is not None and reg_end is None and ln.strip() == "}":
+                reg_end = i
+                break
+        if reg_end is not None:
+            # Ensure previous entry has trailing comma (avoid breaking dict syntax)
+            j = reg_end - 1
+            while j >= 0 and (lines[j].strip() == "" or lines[j].strip().startswith("#")):
+                j -= 1
+            if j >= 0:
+                prev = lines[j].rstrip()
+                if prev and not prev.endswith(",") and not prev.endswith("{"):
+                    lines[j] = prev + ",\n"
+            lines.insert(reg_end, f"    '{strategy_name}': {compute_fn_name},\n")
+    except Exception:
+        pass
+
+    try:
+        with open(init_path, "w", encoding="utf-8") as f:
+            f.write("".join(lines))
+    except Exception:
+        return
 
 
 def _get_replay_session(session_id: str) -> Optional[ReplaySession]:
@@ -182,6 +279,8 @@ def _fetch_stock_data_ohlcv(
     *,
     ticker: str,
     interval: str,
+    start_iso: str | None = None,
+    end_iso: str | None = None,
 ) -> List[Tuple[str, float, float, float, float, float]]:
     """
     Fetch OHLCV rows from `stock_data` as:
@@ -190,15 +289,29 @@ def _fetch_stock_data_ohlcv(
     Note:
     - In the current Alpaca-only setup, we expect 1-minute data to be stored as `interval='1Min'`.
     """
-    cursor.execute(
-        """
-        SELECT timestamp, price, open_price, high_price, low_price, volume
-        FROM stock_data
-        WHERE ticker = ? AND interval = ?
-        ORDER BY timestamp ASC
-        """,
-        (ticker, interval),
-    )
+    if start_iso and end_iso:
+        cursor.execute(
+            """
+            SELECT timestamp, price, open_price, high_price, low_price, volume
+            FROM stock_data
+            WHERE ticker = ?
+              AND interval = ?
+              AND timestamp >= ?
+              AND timestamp <= ?
+            ORDER BY timestamp ASC
+            """,
+            (ticker, interval, start_iso, end_iso),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT timestamp, price, open_price, high_price, low_price, volume
+            FROM stock_data
+            WHERE ticker = ? AND interval = ?
+            ORDER BY timestamp ASC
+            """,
+            (ticker, interval),
+        )
     results = cursor.fetchall()
     out: List[Tuple[str, float, float, float, float, float]] = []
     for (ts, c, o, h, l, v) in results:
@@ -547,6 +660,31 @@ def api_window():
         served_start = _epoch_ms_to_iso_z(int(start_ms)) if start_ms is not None else None
         served_end = _epoch_ms_to_iso_z(int(end_ms)) if end_ms is not None else None
 
+        # Build strategy signals for the aggregated window.
+        # This ensures strategy markers appear when using /window (e.g. chart.html?mode=api).
+        strategy_payload = {}
+        try:
+            df_strategy = pd.DataFrame({
+                "open": agg["o"],
+                "high": agg["h"],
+                "low": agg["l"],
+                "close": agg["c"],
+                "volume": agg["v"]
+            })
+            df_strategy.index = pd.to_datetime(agg["t_ms"], unit="ms")
+            
+            # Use the same signal compute functions as get_ticker_data
+            signals_vwap_ema_cross = compute_vwap_ema_crossover_signals(df_strategy, rth_mask=None)
+            if signals_vwap_ema_cross:
+                strategy_payload["vwap_ema_crossover_v1"] = normalize_signals(signals_vwap_ema_cross, df_strategy)
+            
+            signals_fools_paradise = compute_fools_paradise_signals(df_strategy, rth_mask=None)
+            if signals_fools_paradise:
+                strategy_payload["fools_paradise"] = normalize_signals(signals_fools_paradise, df_strategy)
+        except Exception as e:
+            # print(f"Strategy compute in /window failed: {e}")
+            strategy_payload = {}
+
         return jsonify(
             {
                 "symbol": symbol,
@@ -565,6 +703,7 @@ def api_window():
                 "max_bars": eff_max_bars,
                 "live_merged": False,
                 "source": "real",
+                "strategies": strategy_payload,
             }
         )
     finally:
@@ -1184,8 +1323,242 @@ def backtest_config():
         default_ticker='SPY'
     )
 
+@app.route('/api/strategies', methods=['GET'])
+def list_strategies():
+    """Return strategy metadata (name, display_name, description, enabled)."""
+    defaults = {
+        'vwap_ema_crossover_v1': {
+            'display_name': 'VWAP / EMA Crossover (v1)',
+            'description': 'Entry on sign change of (VWAP - EMA21). Bullish when VWAP < EMA21, bearish otherwise.'
+        },
+        'fools_paradise': {
+            'display_name': 'Fools Paradise',
+            'description': 'EMA9/21/50 alignment + VWAP bias; enter on first candle in trend. Emits exits for visualization.'
+        }
+    }
 
-def perform_strategy_backtest(name, ticker, interval, fee_bp, risk_percent, reward_multiple):
+    reg_names = sorted(list(STRATEGY_REGISTRY.keys()))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT name, display_name, description, enabled FROM strategies_meta")
+    rows = {r[0]: {'display_name': r[1], 'description': r[2], 'enabled': int(r[3]) if r[3] is not None else 1} for r in cur.fetchall()}
+
+    out = []
+    for name in reg_names:
+        meta = rows.get(name)
+        if not meta:
+            dflt = defaults.get(name, {})
+            display_name = dflt.get('display_name', name)
+            description = dflt.get('description', '')
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO strategies_meta (name, display_name, description, enabled)
+                VALUES (?, ?, ?, 1)
+                """,
+                (name, display_name, description)
+            )
+            meta = {'display_name': display_name, 'description': description, 'enabled': 1}
+        out.append({
+            'name': name,
+            'display_name': meta.get('display_name') or name,
+            'description': meta.get('description') or '',
+            'enabled': bool(meta.get('enabled', 1))
+        })
+
+    conn.commit()
+    conn.close()
+    return jsonify(out)
+
+@app.route('/api/strategy/<name>/code', methods=['GET', 'POST'])
+def strategy_code(name):
+    """Read or update strategy source code for strategies in the registry."""
+    nm = (name or '').strip()
+    if nm not in STRATEGY_REGISTRY:
+        return jsonify({'error': 'Unknown strategy'}), 404
+    if not _is_valid_strategy_name(nm):
+        return jsonify({'error': 'Invalid strategy name'}), 400
+    path = _strategy_file_path(nm)
+    if not os.path.exists(path):
+        return jsonify({'error': 'Strategy file not found'}), 404
+
+    if request.method == 'GET':
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                code = f.read()
+            return jsonify({'name': nm, 'code': code})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    # POST: update
+    payload = request.get_json(silent=True) or {}
+    code = payload.get('code')
+    if code is None:
+        return jsonify({'error': 'code is required'}), 400
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(code)
+        return jsonify({'ok': True, 'name': nm})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/strategies/create', methods=['POST'])
+def create_strategy():
+    """
+    Create a new strategy:
+    - creates strategies/<name>.py
+    - inserts/updates strategies_meta
+    - dynamically imports and registers in STRATEGY_REGISTRY (available immediately)
+    - patches strategies/__init__.py for persistence across restarts
+    """
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get('name') or '').strip()
+    display_name = (payload.get('display_name') or '').strip()
+    description = (payload.get('description') or '').strip()
+    code_override = payload.get('code')
+
+    if not _is_valid_strategy_name(name):
+        return jsonify({'error': 'Invalid name. Use snake_case like my_strategy_v1.'}), 400
+    if name in STRATEGY_REGISTRY:
+        return jsonify({'error': 'Strategy already exists'}), 400
+
+    path = _strategy_file_path(name)
+    if os.path.exists(path):
+        return jsonify({'error': 'Strategy file already exists'}), 400
+
+    if not display_name:
+        display_name = name
+
+    compute_fn_name = f"compute_{name}_signals"
+
+    template = f"""\"\"\"{display_name}
+
+{description or 'TODO: Describe this strategy.'}
+
+Strategy contract:
+- Input: pandas.DataFrame with index timestamps and columns: open, high, low, close, volume
+- Output: dict of same-length arrays. Minimum required by engine/UI:
+  - long_entry: list[bool]
+  - direction: list['bullish'|'bearish'|None]
+Optional UI fields:
+  - cross_y (entry marker y), exit_y, long_exit, exit_direction
+\"\"\"
+
+import pandas as pd
+
+
+def {compute_fn_name}(df_prices, rth_mask=None):
+    \"\"\"Skeleton strategy: no entries by default.\"\"\"
+    if df_prices is None or getattr(df_prices, 'empty', False):
+        return {{}}
+
+    df = df_prices.copy()
+    df.index = pd.to_datetime(df.index)
+
+    n = len(df)
+    # TODO: replace with real logic
+    long_entry = [False] * n
+    direction = [None] * n
+
+    return {{
+        'long_entry': long_entry,
+        'direction': direction,
+        'timestamp': [ts.isoformat() for ts in df.index],
+    }}
+"""
+
+    code_to_write = template if code_override is None else str(code_override)
+
+    try:
+        os.makedirs(STRATEGIES_DIR, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(code_to_write)
+    except Exception as e:
+        return jsonify({'error': f'Failed to write strategy file: {e}'}), 500
+
+    # Insert/Update metadata
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO strategies_meta (name, display_name, description, enabled)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(name) DO UPDATE SET
+              display_name=excluded.display_name,
+              description=excluded.description,
+              enabled=excluded.enabled,
+              updated_at=CURRENT_TIMESTAMP
+            """,
+            (name, display_name, description)
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        # Don't fail creation if metadata insert fails; file exists and can be edited.
+        pass
+
+    # Dynamically import and register in-memory
+    try:
+        importlib.invalidate_caches()
+        mod = importlib.import_module(f"strategies.{name}")
+        fn = getattr(mod, compute_fn_name, None)
+        if not callable(fn):
+            return jsonify({'error': f'Created file but did not find callable {compute_fn_name}()'}), 500
+        STRATEGY_REGISTRY[name] = fn  # mutate in-place so app references see it immediately
+    except Exception as e:
+        return jsonify({'error': f'Created file but failed to import/register: {e}'}), 500
+
+    # Persist in strategies/__init__.py best-effort
+    try:
+        _ensure_strategy_registered_in_init(name, compute_fn_name)
+    except Exception:
+        pass
+
+    return jsonify({'ok': True, 'name': name, 'display_name': display_name, 'description': description})
+
+
+@app.route('/api/strategy/<name>/meta', methods=['POST'])
+def update_strategy_meta(name):
+    """Update strategy metadata stored in SQLite (display_name, description, enabled)."""
+    nm = (name or '').strip()
+    if nm not in STRATEGY_REGISTRY:
+        return jsonify({'error': 'Unknown strategy'}), 404
+    if not _is_valid_strategy_name(nm):
+        return jsonify({'error': 'Invalid strategy name'}), 400
+
+    payload = request.get_json(silent=True) or {}
+    display_name = (payload.get('display_name') or '').strip()
+    description = (payload.get('description') or '').strip()
+    enabled = payload.get('enabled')
+    enabled_i = 1 if (enabled is None or bool(enabled)) else 0
+
+    if not display_name:
+        display_name = nm
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO strategies_meta (name, display_name, description, enabled)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+              display_name=excluded.display_name,
+              description=excluded.description,
+              enabled=excluded.enabled,
+              updated_at=CURRENT_TIMESTAMP
+            """,
+            (nm, display_name, description, enabled_i)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'ok': True, 'name': nm, 'display_name': display_name, 'description': description, 'enabled': bool(enabled_i)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def perform_strategy_backtest(name, ticker, interval, fee_bp, risk_percent, reward_multiple, start: str | None = None, end: str | None = None):
     """Shared backtest execution used by multiple endpoints."""
     supported = STRATEGY_REGISTRY
 
@@ -1194,9 +1567,64 @@ def perform_strategy_backtest(name, ticker, interval, fee_bp, risk_percent, rewa
     if not ticker:
         raise ValueError('ticker required')
 
+    # Normalize ticker to uppercase for real symbols
+    ticker = ticker.upper()
+
+    # Map interval string to bar_s in seconds if needed
+    interval_map = {
+        '1Min': 60, '5Min': 300, '15Min': 900,
+        '1h': 3600, '4h': 14400, '1d': 86400
+    }
+    
+    # Try to determine target bar_s. If interval looks like a number, use it.
+    try:
+        target_bar_s = int(interval)
+    except (ValueError, TypeError):
+        target_bar_s = interval_map.get(interval, 60)
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    fetched = _fetch_stock_data_ohlcv(cursor, ticker=ticker, interval=interval)
+    
+    # Strategy: 
+    # 1. Try fetching exact interval requested.
+    # 2. If no data, fetch 1Min data and aggregate to target_bar_s.
+    fetched = _fetch_stock_data_ohlcv(cursor, ticker=ticker, interval=interval, start_iso=start, end_iso=end)
+    
+    if not fetched and target_bar_s != 60:
+        # Fallback: fetch 1Min data and aggregate
+        fetched_1m = _fetch_stock_data_ohlcv(cursor, ticker=ticker, interval='1Min', start_iso=start, end_iso=end)
+        if fetched_1m:
+            # _fetch_stock_data_ohlcv returns (ts, c, o, h, l, v)
+            # _aggregate_ohlcv expects (epoch_ms, o, h, l, v, c) - wait, check order!
+            # Let's check _aggregate_ohlcv signature again.
+            
+            # From _aggregate_ohlcv: 
+            # rows: List[Tuple[int, float, float, float, float, float]] (epoch_ms, o,h,l,c,v)
+            
+            agg_input = []
+            for (ts_iso, c, o, h, l, v) in fetched_1m:
+                try:
+                    dt = datetime.fromisoformat(ts_iso.replace('Z', '+00:00'))
+                    ms = int(dt.timestamp() * 1000)
+                    agg_input.append((ms, o, h, l, c, v))
+                except Exception:
+                    continue
+            
+            if agg_input:
+                agg = _aggregate_ohlcv(agg_input, target_bar_s)
+                # Reconstruct 'fetched' format: (ts_iso, c, o, h, l, v)
+                fetched = []
+                for i in range(len(agg['t_ms'])):
+                    ts_iso = datetime.fromtimestamp(agg['t_ms'][i]/1000, tz=timezone.utc).isoformat().replace('+00:00', 'Z')
+                    fetched.append((
+                        ts_iso,
+                        agg['c'][i],
+                        agg['o'][i],
+                        agg['h'][i],
+                        agg['l'][i],
+                        agg['v'][i]
+                    ))
+
     conn.close()
 
     if not fetched:
@@ -1353,12 +1781,12 @@ def get_ticker_data(ticker, interval):
         # Allow off-hours for the simple VWAP/EMA crossover
         signals_vwap_ema_cross = compute_vwap_ema_crossover_signals(df_strategy, rth_mask=None)
         if signals_vwap_ema_cross:
-            strategy_payload['vwap_ema_crossover_v1'] = signals_vwap_ema_cross
+            strategy_payload['vwap_ema_crossover_v1'] = normalize_signals(signals_vwap_ema_cross, df_strategy)
         
         # Compute Fools Paradise strategy signals
         signals_fools_paradise = compute_fools_paradise_signals(df_strategy, rth_mask=None)
         if signals_fools_paradise:
-            strategy_payload['fools_paradise'] = signals_fools_paradise
+            strategy_payload['fools_paradise'] = normalize_signals(signals_fools_paradise, df_strategy)
     except Exception as e:
         # Keep strategies empty if anything fails; don't break main payload
         strategy_payload = {}
@@ -1417,6 +1845,8 @@ def run_strategy_backtest(name):
     payload = request.get_json(silent=True) or {}
     ticker = payload.get('ticker')
     interval = payload.get('interval', '1Min')
+    start = (payload.get("start") or "").strip() or None
+    end = (payload.get("end") or "").strip() or None
     fee_bp = float(payload.get('fee_bp', 0.0) or 0.0)
     risk_percent = float(payload.get('risk_percent', 0.5) or 0.5)  # Default 0.5% risk
     reward_multiple = float(payload.get('reward_multiple', 2.0) or 2.0)  # Default 2:1
@@ -1427,7 +1857,9 @@ def run_strategy_backtest(name):
             interval=interval,
             fee_bp=fee_bp,
             risk_percent=risk_percent,
-            reward_multiple=reward_multiple
+            reward_multiple=reward_multiple,
+            start=start,
+            end=end,
         )
         return jsonify(result)
     except ValueError as e:
@@ -1509,7 +1941,7 @@ def backtests():
                 interval=interval,
                 fee_bp=fee_bp,
                 risk_percent=risk_percent,
-                reward_multiple=reward_multiple
+                reward_multiple=reward_multiple,
             )
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
@@ -1577,7 +2009,7 @@ def rerun_backtest(bt_id):
             interval=bt['interval'],
             fee_bp=bt['fee_bp'],
             risk_percent=bt['risk_percent'],
-            reward_multiple=bt['reward_multiple']
+            reward_multiple=bt['reward_multiple'],
         )
     except ValueError as e:
         conn.close()
