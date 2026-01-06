@@ -290,18 +290,36 @@ def _fetch_stock_data_ohlcv(
     - In the current Alpaca-only setup, we expect 1-minute data to be stored as `interval='1Min'`.
     """
     if start_iso and end_iso:
-        cursor.execute(
-            """
-            SELECT timestamp, price, open_price, high_price, low_price, volume
-            FROM stock_data
-            WHERE ticker = ?
-              AND interval = ?
-              AND timestamp >= ?
-              AND timestamp <= ?
-            ORDER BY timestamp ASC
-            """,
-            (ticker, interval, start_iso, end_iso),
-        )
+        # IMPORTANT:
+        # Do not compare timestamp strings directly; DB rows may be stored with/without 'T'/'Z'.
+        # Use epoch-seconds filtering consistent with `/window`.
+        s_ms = _parse_iso_to_epoch_ms(start_iso)
+        e_ms = _parse_iso_to_epoch_ms(end_iso)
+        if s_ms is None or e_ms is None:
+            cursor.execute(
+                """
+                SELECT timestamp, price, open_price, high_price, low_price, volume
+                FROM stock_data
+                WHERE ticker = ? AND interval = ?
+                ORDER BY timestamp ASC
+                """,
+                (ticker, interval),
+            )
+        else:
+            start_sec = str(int(s_ms // 1000))
+            end_sec = str(int(e_ms // 1000))
+            cursor.execute(
+                """
+                SELECT timestamp, price, open_price, high_price, low_price, volume
+                FROM stock_data
+                WHERE ticker = ?
+                  AND interval = ?
+                  AND strftime('%s', timestamp) >= ?
+                  AND strftime('%s', timestamp) <= ?
+                ORDER BY timestamp ASC
+                """,
+                (ticker, interval, start_sec, end_sec),
+            )
     else:
         cursor.execute(
             """

@@ -1,92 +1,392 @@
+>>>> Pairing entries / exits
+https://chatgpt.com/c/695d7fa7-bdb0-8328-bb28-5cf2f9b4e9f0
 
-you’re at the point where a real end-to-end test is worth running now.
+Yes — if you can’t quickly see which entry pairs with which exit, charts become “confetti mode” and you lose most of the debugging value. Hover-linking is a great solution, and it scales well as you add partials, stops/targets, etc.
 
-You’ve got the three things that usually block “first real run”:
+Here’s a solid approach that stays clean in the UI and clean in the data model.
 
-stable fixed schema (schema_v1) 
+1) Give every trade a stable trade_id
 
-feature_registry
+In your backtest output, every position lifecycle should have an ID:
 
-hard warmup + causal guarantees (unit tests + sentinel)
+ENTRY event: { trade_id, ts, price, side, qty, ... }
 
-env semantics + cost model + baseline parity (so you can interpret results)
+EXIT event: { trade_id, ts, price, reason, ... }
 
-What I’d run as the first real test (fast, meaningful, low-risk):
+If you support partial exits later, you’ll have multiple EXIT/FILL events with the same trade_id.
 
-Real test #1: “Can PPO beat z-fade on one week of SPY 1m RTH?”
+This ID is what makes hover pairing trivial.
 
-Goal: not “holy grail,” just proof the loop learns something non-trivial and doesn’t churn itself to death.
+2) Hover behavior that feels “standard”
 
-A) Data slice
+When user hovers an entry or exit marker:
 
-Instrument: SPY 1m
+Highlight
 
-Session: RTH only (as you’ve defaulted)
+The hovered marker (strong glow/outline)
 
-Train: 5–10 trading days
+Its paired counterpart marker(s)
 
-Test: next 2–3 trading days (strictly later dates)
+The connecting path (optional but very useful)
 
-B) What to record
+Dim
 
-For both PPO and z-fade baseline:
+All other markers (reduce opacity)
 
-net PnL after costs
+Tooltip (super helpful)
 
-turnover (position changes/day)
+Show a compact trade summary:
 
-time-in-market
+Side (Long/Short)
 
-% exposure during breakout_flag=1
+Entry time/price
 
-max drawdown (even crude)
+Exit time/price
 
-If PPO can’t beat z-fade yet, that’s still a success if:
+R multiple / P&L
 
-turnover drops over training
+Exit reason (TP / SL / signal / time)
 
-breakout exposure drops
+This makes debugging almost instantaneous.
 
-the action distribution stops being random
+3) The best visual “link”: a faint trade line
 
-C) How to run it (concretely)
+On hover, draw a thin line from entry to exit:
 
-Run your training script with:
+Color by realized outcome (green/red/gray)
 
-short run, small timesteps, deterministic seed
+If you don’t want to pick colors: use neutral line + vary opacity and add “+R / -R” label in tooltip
 
-debug series ON for a single evaluation episode (not all training)
+Even a subtle line is enough to answer “what pairs with what?” in 200ms.
 
-Example pattern:
+4) Edge cases you should handle up front
+A) Multiple exits (partials / scale-outs)
 
-Train with return_reward_components=False (fast)
+Hovering entry should highlight all exits for that trade_id.
+Hovering an exit should highlight its entry and that exit.
 
-Evaluate with return_reward_components=True (diagnostic)
+B) Stop/TP vs discretionary exit
 
-Confirm the export artifact + meta are produced, and confirm the schema matches:
+If exit reason is STOP or TP, highlight the correct marker type (✕ or ◎) instead of a generic exit arrow.
 
-schema_id == schema_v1
+C) Missing exit (open trade)
 
-feature_names match registry order 
+If a position is still open at end of window:
 
-feature_registry
+Hover entry highlights entry
 
-D) Expected outcomes (so you know if it “worked”)
+Show “Open trade” tooltip
 
-A “successful first real test” looks like:
+Optionally draw line to “current” price or last bar (dotted)
 
-PPO learns a stable behavior (not constant flipping)
+5) Where to implement it (ntree architecture)
 
-PPO’s average daily turnover is lower than random and ideally comparable to z-fade
+This should live in the chart layer, driven by backtest events.
 
-PPO isn’t spending lots of time long/short while range_break_flag=1
+Strategy-only markers can still exist, but the pairing logic is only truly reliable once you have executed trades.
 
-PPO test PnL is at least “not catastrophically worse” than z-fade (profitability may come later)
+If you want pairing even before running backtest, you’d need the strategy to output “intended exits,” but that’s usually not what you want to teach users.
 
-If PPO is wildly negative with huge turnover:
+So: pairing = backtest trade log feature.
 
-reward shaping/cost too low
+6) Minimal implementation plan (what to build next)
 
-action coercion logic is being exploited
+Ensure your backtest produces a trades[] list or events[] list containing trade_id.
 
-or features are too noisy / not normalized as expected
+In the chart:
+
+Keep a map: trade_id -> {entry_marker, exit_markers[]}
+
+Add hover handlers:
+
+onHover(marker) => activeTradeId = marker.trade_id
+
+Render pass:
+
+If activeTradeId:
+
+dim others
+
+highlight active
+
+draw connector(s)
+
+That’s it. Simple and extremely high impact.
+
+If you tell me what you’re using to render the chart (Canvas? SVG? Chart.js? custom WebGL?), I’ll suggest the most ergonomic way to implement the highlight/connector with that stack.
+
+12_strategy_backtest.js
+JavaScript
+07_render_and_interactions.js
+JavaScript
+attaching the relevant files 
+Thought for 18s
+Where should “go long on uptrends / short on downtrends” live?
+
+In the strategy. The backtest engine should be strategy-neutral: it just simulates fills, position state, fees/slippage, risk sizing rules, and exit mechanics.
+
+Your current split already reflects that:
+
+Strategy-time (intent) artifacts: arrays like entry + side (or legacy long_entry + direction), plus optional discretionary exits (long_exit + exit_direction) are drawn as markers directly from state.strategies[selected]. 
+
+07_render_and_interactions
+
+Backtest-time (execution) artifacts: stop-loss / take-profit markers only exist after you run a backtest; they’re stored into backtestState.executionEvents from the API response. 
+
+12_strategy_backtest
+
+That’s the right convention: strategy decides what it wants to do, engine decides what actually happened.
+
+Where should stop loss / take profit live?
+
+Mechanically: in the backtest engine (and later the live execution engine), because SL/TP is part of order/execution simulation, not the alpha signal.
+
+Configurationally: it can be declared by strategy or selected via a reusable “backtest config,” but the actual enforcement (when it triggers, what bar it triggers on, what price, priority vs discretionary exit, etc.) belongs in the engine.
+
+Again, your UI code is already organized this way:
+
+You explicitly treat stop/TP markers as “backtest artifacts and should not exist until after the run.” 
+
+12_strategy_backtest
+
+Your renderer suppresses drawing a discretionary exit arrow on bars where a stop/TP fired (so execution wins over intent). 
+
+07_render_and_interactions
+
+That’s exactly the correct precedence model.
+
+Icon conventions (and when to plot them)
+
+Your proposed mapping is solid:
+
+Entry (open): long ▲ (green), short ▼ (red)
+
+Exit (close): long ▼ (green), short ▲ (red)
+
+Stop loss hit: ✕ / ⨯ (red)
+
+Take profit: ◇ / ◎ (green)
+
+And yes—SL/TP should be plotted only after the backtest run, because they are execution outcomes, not intent. You’re already doing that separation in drawStrategyMarkers() (intent) vs drawExecutionMarkers() (execution). 
+
+07_render_and_interactions
+
+ 
+
+07_render_and_interactions
+
+“Hover an entry/exit and highlight its counterpart” — yes, and here’s the clean way to do it
+
+Right now, your strategy markers are per-bar booleans (entryArr[fidx], longExits[fidx]) without a trade identifier. 
+
+07_render_and_interactions
+
+
+So: you can’t reliably know which exit matches which entry once you allow:
+
+multiple trades
+
+overlapping trades (even briefly)
+
+scaling in/out
+
+stop/TP overriding discretionary exit
+
+Best approach: pair trades in the backtest and return a trade list
+
+Have the backtest return a canonical list like:
+
+trades: [
+  {
+    "trade_id": 12,
+    "side": "long",
+    "entry_t_ms": 170...,
+    "entry_price": 481.23,
+    "exit_t_ms": 170...,
+    "exit_price": 484.10,
+    "exit_reason": "take_profit" | "stop_loss" | "signal_exit" | "eod" | ...
+  }
+]
+
+
+Then in the renderer:
+
+Build a tradeIndex (by trade_id)
+
+Render entry/exit markers from trades (not from the boolean arrays) when a backtest has run
+
+On hover, set state.hoverTradeId = ...
+
+Re-draw with:
+
+both markers emphasized (bigger / thicker / glow)
+
+optional faint connector line entry→exit
+
+This is also consistent with your existing philosophy of “execution-time artifacts only after running.” 
+
+12_strategy_backtest
+
+Practical implementation detail (minimal surgery)
+
+Keep your current strategy markers for “preview intent” (before running).
+
+After backtest:
+
+Prefer rendering paired trade markers from trades
+
+Keep stop/TP diamonds/X as you already do (or fold them into trades.exit_reason rendering)
+
+Hover hit-testing
+
+You’ll need a tiny “pick buffer” of marker screen coords. Pattern:
+
+During draw, when you draw a marker, also push a record:
+
+state._render.pickables.push({
+  kind: 'trade_entry' | 'trade_exit',
+  trade_id,
+  x: cx,
+  y: markerY,
+  r: 10
+});
+
+
+In your existing mousemove path you already call updateHover(e) when not dragging. 
+
+07_render_and_interactions
+
+
+Extend updateHover to also check nearest pickable within radius, set state.hoverTradeId, then requestDraw('hover').
+
+Visual emphasis suggestion
+
+When hoverTradeId is set:
+
+draw a slightly larger outline ring around both entry and exit markers
+
+draw a subtle connector line (maybe dashed) from entry to exit
+
+optionally show a small tooltip: L +0.6% TP etc.
+
+This gives you the “which exit belongs to which entry” clarity without cluttering the chart.
+
+One more small recommendation
+
+Right now, executionEvents are indexed only by bar time (t_ms). 
+
+07_render_and_interactions
+
+
+That’s fine for plotting, but for pairing you really want a stable identifier (trade_id) because multiple events can occur across a trade lifecycle. So even if you keep execution_events, I’d add:
+
+trade_id
+
+event_seq (optional)
+
+entry_t_ms (optional but handy)
+
+If you want, paste (or point me at) the backtest API response shape you’re returning today (/api/strategy/<name>/backtest) and I’ll suggest the smallest JSON addition that unlocks trade pairing + hover highlighting cleanly.
+
+Sources
+execution.py
+Python
+is this what you mean? 
+Thought for 8s
+
+Yep — this is exactly what I mean. ✅
+
+Your execution.py is explicitly an execution model that “turns entry/side signals into fills and PnL under explicit assumptions (fill policy, stops/targets, tie-break rules, fees, etc.)” 
+
+execution
+
+ — which is precisely the backtest-engine side of the split.
+
+And you’re already doing the “backtest-time artifacts only after execution” thing by emitting execution_events only when the trade actually closes via stop_loss or take_profit 
+
+execution
+
+.
+
+What you have now (and why it’s correct)
+
+Strategy provides entry + side (via normalize_signals) 
+
+execution
+
+Execution model:
+
+enters on next bar open 
+
+execution
+
+computes SL/TP levels 
+
+execution
+
+resolves SL/TP hits and tie-breaks if both hit same bar 
+
+execution
+
+emits backtest-only markers (execution_events) including entry_idx and exit_idx 
+
+execution
+
+So yes: this file is the “mechanics live here” side of the system.
+
+The one missing piece for your hover-linking idea
+
+Right now you emit execution_events only for SL/TP, and they don’t carry a stable trade_id — just entry_idx/exit_idx 
+
+execution
+
+.
+
+That’s almost enough, but to support “hover entry highlights its paired exit” cleanly (and later: partial exits, scale-ins, etc.), you’ll want one of these:
+
+Option A (minimal change): add trade_id + include both entry + exit events
+
+Generate a trade_id counter per trade
+
+Emit an entry execution event at entry time, and an exit execution event at exit time
+
+Keep SL/TP as the exit “reason” (or separate event types)
+
+Option B (cleanest): return a trades list
+
+Return a list of completed trades with explicit entry/exit timestamps/prices/reasons, and render markers from that list.
+
+Why I’d tweak your current output slightly
+
+Your renderer currently indexes execution markers by t_ms and only allows one event per bar (“keep the first”) 
+
+07_render_and_interactions
+
+. That’s fine for “one X or diamond per bar,” but hover-pairing is much easier if you have an object like:
+
+{ trade_id, entry_t_ms, exit_t_ms, entry_price, exit_price, side, exit_reason }
+
+
+Then the chart can highlight both points deterministically.
+
+The simplest next step (tiny diff, big payoff)
+
+In RiskRewardExecutionModel.run():
+
+Add:
+
+trade_id = 0 before the loop
+
+increment per trade
+
+When you determine entry_idx/entry_price, emit an entry event:
+
+{ event: "entry", trade_id, side, t_ms, price, entry_idx }
+
+When you emit stop/tp, include the same trade_id:
+
+{ event: "stop_loss"|"take_profit", trade_id, ... }
+
+Then your UI can pair markers by trade_id with no guesswork.
+
+If you paste your /api/strategy/<name>/backtest response structure (or where execution.py is called), I can tell you the smallest JSON change that won’t ripple through the frontend.

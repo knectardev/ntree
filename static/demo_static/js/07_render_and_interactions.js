@@ -861,6 +861,7 @@
       try{
         if(!state || !state.backtest) return;
         var bt = state.backtest || {};
+        if(bt.showExecutionMarkers === false) return;
         if(!bt.executionEvents || !Array.isArray(bt.executionEvents) || !bt.executionEvents.length) return;
         if(!bt.selectedStrategy || bt.selectedStrategy === 'none') return;
         if(String(bt.executionEventsStrategy || '') !== String(bt.selectedStrategy || '')) return;

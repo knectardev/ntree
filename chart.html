@@ -223,6 +223,28 @@
 
             <button class="btnPrimary" type="button" id="runBacktestBtn" style="margin-top: 10px;">Run Backtest</button>
             <div id="strategyResults" class="hint" style="margin-top: 10px; display: none; white-space: pre-line; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;"></div>
+
+            <label class="chkRow" title="Show/hide backtest-time stop-loss and take-profit markers" style="margin-top:10px;">
+              <input id="showExecMarkers" type="checkbox" checked />
+              <span class="chkLbl">
+                <span class="chkNameRow">
+                  <span class="chkName">Show execution markers</span>
+                </span>
+                <span class="hint" style="display:block;margin-top:2px;">
+                  Backtest-time only (stops/targets), not strategy intent.
+                </span>
+              </span>
+            </label>
+            <div id="execLegend" class="hint" style="margin-top: 6px; display: none; border-left: 2px solid rgba(255,255,255,0.10); padding-left: 8px;">
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <span><span style="color:#2ecc71;font-weight:800;">▲</span> Long entry</span>
+                <span><span style="color:#e74c3c;font-weight:800;">▼</span> Short entry</span>
+                <span><span style="color:#2ecc71;font-weight:800;">▼</span> Long exit</span>
+                <span><span style="color:#e74c3c;font-weight:800;">▲</span> Short exit</span>
+                <span><span style="color:#e74c3c;font-weight:800;">⨯</span> Stop loss</span>
+                <span><span style="color:#2ecc71;font-weight:800;">◇</span> Take profit</span>
+              </div>
+            </div>
           </div>
         </div>
       </details>

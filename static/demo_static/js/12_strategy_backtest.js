@@ -15,6 +15,8 @@
 
     const runBacktestBtn = document.getElementById('runBacktestBtn');
     const resultsBox = document.getElementById('strategyResults');
+    const showExecMarkersChk = document.getElementById('showExecMarkers');
+    const execLegend = document.getElementById('execLegend');
 
     const backtestState = {
         configs: [],
@@ -27,11 +29,22 @@
         executionEventsStrategy: null,
         executionEventsTicker: null,
         executionEventsInterval: null,
+        showExecutionMarkers: true,
     };
 
     // Expose to window.state for renderer
     if (window.state) {
         window.state.backtest = backtestState;
+    }
+
+    // Toggle: show/hide execution markers (backtest-time artifacts).
+    if (showExecMarkersChk) {
+        showExecMarkersChk.checked = true;
+        backtestState.showExecutionMarkers = true;
+        showExecMarkersChk.addEventListener('change', () => {
+            backtestState.showExecutionMarkers = !!showExecMarkersChk.checked;
+            if (typeof window.requestDraw === 'function') window.requestDraw('toggle_exec_markers');
+        });
     }
 
     // Generic dropdown toggle logic
@@ -80,6 +93,7 @@
         backtestState.executionEventsStrategy = null;
         backtestState.executionEventsTicker = null;
         backtestState.executionEventsInterval = null;
+        if (execLegend) execLegend.style.display = 'none';
         strategyLabel.textContent = text;
         const desc = item ? (item.getAttribute('data-desc') || '') : '';
         if (strategyDesc) {
@@ -182,17 +196,21 @@
             if (resultsBox) resultsBox.style.display = 'none';
             return;
         }
-        
+        const execN = (metrics && Array.isArray(metrics.execution_events)) ? metrics.execution_events.length : 0;
         const lines = [
             `Trades: ${metrics.n_trades ?? '—'}`,
             `Win rate: ${metrics.win_rate != null ? (metrics.win_rate * 100).toFixed(1) + '%' : '—'}`,
             `Avg ret: ${metrics.avg_ret != null ? (metrics.avg_ret * 100).toFixed(2) + '%' : '—'}`,
             `Median: ${metrics.median_ret != null ? (metrics.median_ret * 100).toFixed(2) + '%' : '—'}`,
+            `Exec markers (SL/TP): ${execN}`,
             `Sharpe: ${metrics.sharpe_ratio != null ? metrics.sharpe_ratio.toFixed(2) : '—'}`
         ];
         
         resultsBox.innerHTML = `<strong>Results</strong><br>${lines.join('<br>')}`;
         resultsBox.style.display = 'block';
+
+        // Only show legend if we actually have execution events to explain.
+        if (execLegend) execLegend.style.display = execN > 0 ? 'block' : 'none';
     }
 
     // Helper to map bar_s to backend interval names
