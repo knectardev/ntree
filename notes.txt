@@ -1,147 +1,164 @@
-Updates to RL 
+Here’s a tight spec you can hand to Cursor to implement LLM-generated interpretation + callouts as a sidecar artifact (no pixel arrows, no CV, no fragility).
 
-Here’s what I’d do next (in a tight, deterministic order) to turn this into a usable, documentable range-cycle scalp learner.
+LLM Annotation Sidecar Requirements (Option A)
+Goal
 
-1) Add one more safety test: “no-lookahead sentinel”
+After generating a behavior timeline (baseline vs PPO), produce a human-readable interpretation summary grounded strictly in:
 
-Right now you’ve got warmup + reward semantics locked. The remaining class of catastrophic bugs is feature leakage.
+the exported per-step timeline dataset (*.timeline.parquet/csv)
 
-Test idea (cheap + brutal):
+the per-day summary metrics (*.summary.json)
 
-Create a synthetic price series.
+config/meta (schema/env_cfg)
 
-Create a copy where you modify only the future portion (e.g., add a huge spike after index i+50).
+No image parsing required.
 
-Assert that get_observation(i) is identical between the original and modified series for all i before the spike window.
+Outputs
 
-This catches:
+For each date rendered, create:
 
-accidental centered windows
+.../spy_1m_rth_YYYY-MM-DD.annotation.md
 
-accidental “fit full series”
+(optional but nice) .../spy_1m_rth_YYYY-MM-DD.annotation.json (structured)
 
-any helper that slices too far
+CLI Flags
 
-You can run it on just 2–3 representative feature groups to start.
+Add to scripts/render_behavior_timeline.py:
 
-2) Add “baseline parity” test: z-fade in env == z-fade in exporter
+--llm_annotate (bool)
 
-You’ve implemented z-fade baseline under the same rules. Great — now lock it:
+--llm_provider (string; default can be whatever you’re using)
 
-Run z-fade baseline in the env runner (step-by-step)
+--llm_model (string; optional)
 
-Run z-fade baseline in the exported dataset runner (vectorized/offline if you have it)
+--llm_max_tokens (int; e.g. 400)
 
-Assert same trades/counts/costs/reward sum (or within epsilon)
+--llm_temperature (float; e.g. 0.2)
 
-This prevents “two subtly different baselines,” which always happens otherwise.
+--llm_offline (bool)
 
-3) Instrumentation you’ll want before training (so you don’t fly blind)
+If set (or if provider unavailable), write a deterministic “template-only” summary using metrics (no LLM).
 
-Add these counters/series to info:
+Inputs to the LLM (the “digest”)
 
-position (already implied but include explicitly)
+Before calling the LLM, build a compact JSON digest (and save it to disk for traceability):
 
-time_in_position
+.../spy_1m_rth_YYYY-MM-DD.digest.json
 
-breakout_flag
+Digest fields
 
-zscore
+identifiers:
 
-sigma
+symbol, bar_size, session_mode, date, timezone
 
-reward_components: {pnl, cost, breakout_penalty}
+schema_id
 
-Even if you don’t log every bar in production, you want the option for:
+model_id (ppo path or checkpoint id; “none” if baseline-only)
 
-“Why did it trade here?”
+baseline metrics:
 
-“Is it just churning?”
+total_reward, pnl, cost, breakout_penalty
 
-“Is breakout penalty dominating?”
+turnover_changes, time_in_market_frac, avg_hold_min, breakout_exposure_pct
 
-This makes your UI explanations way easier later.
+action_counts (H, L, S, X)
 
-4) Training scaffolding: keep it minimal, but correct
-Start with PPO (not recurrent) for the first run
+ppo metrics (same keys; omit if not provided)
 
-Even though we expect RecurrentPPO to win later, PPO gives you a fast sanity check.
+key “events” extracted deterministically from the timeline:
 
-env: 1 trading day episodes, RTH
+top_trade_clusters: list of windows with unusually high turnover (e.g. [start_ts, end_ts, num_changes])
 
-action: Discrete(4)
+breakout_exposure_windows: windows where position!=0 and breakout_flag==1 (top 3 by duration)
 
-cost: 0.00005–0.00010 per change
+largest_drawdown_window: [start_ts, end_ts] (approx; can be based on cumulative reward curve)
 
-reward: as implemented
+largest_pnl_gain_window: [start_ts, end_ts]
 
-The goal of PPO run #1 is not profit. It’s:
+notable_divergence_windows: windows where baseline is flat but PPO is in position (and vice versa), top 3 by duration
 
-does learning improve vs random?
+Keep it small: 1–2 pages of JSON max.
 
-does turnover drop?
+LLM Prompt Template
 
-does it learn “don’t hold through breakout”?
+System: You are a trading analytics explainer. No ML jargon. No hype. Be specific.
+User: Given this digest JSON, write an interpretation of baseline vs PPO for a beginner.
+Constraints:
 
-Then switch to RecurrentPPO
+120–180 words max (configurable)
 
-Only after PPO is stable, because recurrent adds debugging complexity.
+Bullet lists preferred
 
-5) Evaluation protocol (the “documentable” part)
+Do not invent any metrics not in digest
 
-Before you chase Sharpe, lock these eval outputs every run:
+Include 3 timestamped callouts using the digest windows
 
-Net PnL after costs (test split)
+End with “One lever to try next” (one sentence) based on metrics (churn vs breakout vs hold time)
 
-Max drawdown
+Annotation Markdown Format (exact)
+# Behavior Timeline Interpretation — {SYMBOL} {BAR} {SESSION} ({DATE})
 
-Turnover (position changes/day)
+## Summary
+{2–4 bullets comparing PPO vs baseline in plain English}
 
-Hit rate / average win/loss (optional, but nice)
+## What the baseline did
+{2–3 bullets}
 
-“Breakout exposure”: % of time in position while breakout_flag=1
+## What the learned policy did differently
+{2–3 bullets}
 
-Comparison vs z-fade baseline
+## Notable moments (callouts)
+- {HH:MM–HH:MM ET}: {callout}
+- {HH:MM–HH:MM ET}: {callout}
+- {HH:MM–HH:MM ET}: {callout}
 
-This is exactly what you’ll show in ntree as “RL policy health.”
+## One lever to try next
+{single sentence, e.g. “reduce churn by …”}
 
-6) Feature roadmap for range-cycle scalps (what to add next)
+Determinism / Traceability
 
-You don’t need the full cycle scan yet. Add one “cycle-ish” group now:
+Always save digest.json
 
-Band-pass proxy group
+Save the exact prompt and LLM response metadata (model, temp, tokens) into annotation.json
 
-bp = EMA(close,10) - EMA(close,60)
+If --llm_offline, produce the same markdown using a deterministic rule-based template.
 
-bp_z (rolling z)
+Acceptance Criteria
 
-bp_slope (1-bar diff)
+Running:
 
-autocorr_ret_15, autocorr_ret_30, autocorr_ret_60 (optional)
+python scripts/render_behavior_timeline.py --date 2024-01-05 --ppo_model_path ... --llm_annotate
 
-This improves the agent’s ability to detect “bouncy vs dead” regimes without a heavy FFT pipeline.
+Produces:
 
-Since you already reserved cycle-scan placeholders, you can keep schema stable.
+.timeline.png
 
-Quick sanity check: your status implies you’re ready to train
+.timeline.parquet
 
-Given:
+.summary.json
 
-schema stability ✅
+.digest.json
 
-warmup policy ✅
+.annotation.md (and optionally .annotation.json)
 
-no-flip semantics ✅
+Annotation correctly references:
 
-cost model ✅
+churn/turnover differences
 
-tests ✅
+breakout exposure differences
 
-…you are at the point where the next meaningful artifact is a training script + eval report that produces:
+hold time differences
 
-PPO learning curve (reward)
+and includes 3 timestamped callouts that correspond to extracted windows
 
-test-period metrics vs baseline
+One extra suggestion (tiny but high value)
 
+Add a --annotation_tone flag with options:
 
+plain (default)
 
+clinical
+
+friendly
+
+Because you’ll quickly develop a preference.

@@ -1,0 +1,46 @@
+{
+  "date": "2024-01-05",
+  "baseline": {
+    "total_reward": -0.011705313709369019,
+    "pnl_raw": -0.00550531370936902,
+    "cost_total": 0.0002,
+    "breakout_penalty_total": 0.006,
+    "turnover_changes": 4.0,
+    "time_in_market_frac": 0.30848329048843187,
+    "max_drawdown_reward_units": -0.01186940521289527,
+    "breakout_exposure": 0.25,
+    "avg_hold_time": 60.0,
+    "n_trades": 2,
+    "action_counts": {
+      "HOLD": 340,
+      "ENTER_LONG": 21,
+      "ENTER_SHORT": 10,
+      "EXIT": 18
+    }
+  },
+  "ppo": {
+    "total_reward": -0.0020538251295837365,
+    "pnl_raw": 0.0049461748704162645,
+    "cost_total": 0.001,
+    "breakout_penalty_total": 0.006,
+    "turnover_changes": 19.0,
+    "time_in_market_frac": 0.583547557840617,
+    "max_drawdown_reward_units": -0.00838018552142938,
+    "breakout_exposure": 0.13215859030837004,
+    "avg_hold_time": 22.7,
+    "n_trades": 10,
+    "action_counts": {
+      "HOLD": 262,
+      "ENTER_LONG": 0,
+      "ENTER_SHORT": 116,
+      "EXIT": 11
+    }
+  },
+  "data_context": {
+    "source": "SQLite Local (stock_data)",
+    "db_start": "2023-01-03",
+    "db_end": "2026-01-06",
+    "cost_bp": 0.5,
+    "breakout_bp": 2.0
+  }
+}

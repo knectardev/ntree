@@ -1,0 +1,129 @@
+{
+  "digest": {
+    "identifiers": {
+      "symbol": "SPY",
+      "bar_size": "1m",
+      "session_mode": "RTH",
+      "date": "2024-01-05",
+      "timezone": "US/Eastern",
+      "db_start": "2023-01-03",
+      "db_end": "2026-01-06"
+    },
+    "schema_id": "schema_v1",
+    "model_id": "ppo_model.zip",
+    "baseline_metrics": {
+      "total_reward": -0.011705313709369019,
+      "pnl_raw": -0.00550531370936902,
+      "cost_total": 0.0002,
+      "breakout_penalty_total": 0.006,
+      "turnover_changes": 4.0,
+      "time_in_market_frac": 0.30848329048843187,
+      "max_drawdown_reward_units": -0.01186940521289527,
+      "breakout_exposure": 0.25,
+      "avg_hold_time": 60.0,
+      "n_trades": 2,
+      "action_counts": {
+        "HOLD": 340,
+        "ENTER_LONG": 21,
+        "ENTER_SHORT": 10,
+        "EXIT": 18
+      }
+    },
+    "ppo_metrics": {
+      "total_reward": -0.0020538251295837365,
+      "pnl_raw": 0.0049461748704162645,
+      "cost_total": 0.001,
+      "breakout_penalty_total": 0.006,
+      "turnover_changes": 19.0,
+      "time_in_market_frac": 0.583547557840617,
+      "max_drawdown_reward_units": -0.00838018552142938,
+      "breakout_exposure": 0.13215859030837004,
+      "avg_hold_time": 22.7,
+      "n_trades": 10,
+      "action_counts": {
+        "HOLD": 262,
+        "ENTER_LONG": 0,
+        "ENTER_SHORT": 116,
+        "EXIT": 11
+      }
+    },
+    "events": {
+      "breakout_exposure_windows_baseline": [
+        {
+          "start": "10:01",
+          "end": "10:11",
+          "duration_min": 10
+        },
+        {
+          "start": "12:07",
+          "end": "12:17",
+          "duration_min": 10
+        },
+        {
+          "start": "12:18",
+          "end": "12:24",
+          "duration_min": 6
+        }
+      ],
+      "breakout_exposure_windows_ppo": [
+        {
+          "start": "10:01",
+          "end": "10:11",
+          "duration_min": 10
+        },
+        {
+          "start": "12:07",
+          "end": "12:17",
+          "duration_min": 10
+        },
+        {
+          "start": "12:18",
+          "end": "12:24",
+          "duration_min": 6
+        }
+      ],
+      "notable_divergence_windows": [
+        {
+          "start": "11:31",
+          "end": "13:07",
+          "duration_min": 96
+        },
+        {
+          "start": "14:06",
+          "end": "15:06",
+          "duration_min": 60
+        },
+        {
+          "start": "09:31",
+          "end": "10:01",
+          "duration_min": 30
+        }
+      ],
+      "largest_drawdown_window_baseline": {
+        "start": "09:31",
+        "end": "13:04",
+        "max_dd": -0.01186940521289527
+      },
+      "largest_pnl_gain_window_baseline": {
+        "start": "10:10",
+        "end": "10:17",
+        "max_gain": 0.0020440543255206833
+      },
+      "largest_drawdown_window_ppo": {
+        "start": "09:31",
+        "end": "10:10",
+        "max_dd": -0.00838018552142938
+      },
+      "largest_pnl_gain_window_ppo": {
+        "start": "10:10",
+        "end": "14:55",
+        "max_gain": 0.006126949818072406
+      },
+      "top_trade_clusters_baseline": []
+    }
+  },
+  "llm_meta": {
+    "mode": "offline"
+  },
+  "annotation_md": "# Behavior Timeline Interpretation \u2014 SPY 1m RTH (2024-01-05)\n\n## Data Context & Metadata\n- **Symbol**: SPY | **Interval**: 1m\n- **Data Source**: SQLite (stock_data) | **Timezone**: US/Eastern\n- **Historical DB Span**: 2023-01-03 to 2026-01-06\n- **Execution Costs**: 0.5 bp / change\n- **Breakout Penalty**: 2.0 bp\n\n## Summary\n- PPO outperformed baseline by 0.0097.\n- Breakout exposure: 13.22% vs 25.00%.\n- Hold time: 22.7m vs 60.0m.\n\n## What the baseline did\n- 31 entries, 4.0 changes.\n- Session exposure: 30.85%.\n\n## What the learned policy did differently\n- 116 entries (vs 31).\n- Key divergence at 11:31 (96m).\n\n## Notable moments (callouts)\n- 09:31\u201313:04 ET: Baseline max drawdown (-0.0119).\n- 10:01\u201310:11 ET: Baseline breakout exposure.\n- 11:31\u201313:07 ET: Policy divergence.\n\n## One lever to try next\nTry increasing max_hold.\n"
+}
