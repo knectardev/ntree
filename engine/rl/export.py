@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-from engine.rl.env import DiscreteActions, RLEnvConfig, TradingRLEnv
+from engine.rl.baselines import compute_zfade_baseline
+from engine.rl.env import RLEnvConfig, TradingRLEnv
 from engine.rl.feature_pipeline import FeaturePipeline, FeaturePipelineConfig
 from engine.rl.feature_registry import FeatureRegistry
+from utils import is_market_hours
 
 
 @dataclass(frozen=True)
@@ -20,41 +22,15 @@ class DatasetMetadata:
     feature_groups: list[str]
     env_cfg: Dict[str, Any]
     feat_cfg: Dict[str, Any]
+    skipped_days: list[str] = field(default_factory=list)
+    skipped_days_reason: str = "min_bars_per_episode"
+    episode_day_counts: Dict[str, int] = field(default_factory=dict)
 
 
 def _write_meta(meta_path: str, meta: DatasetMetadata) -> None:
     os.makedirs(os.path.dirname(meta_path) or ".", exist_ok=True)
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(asdict(meta), f, indent=2, sort_keys=True)
-
-
-def _baseline_z_fade_actions(mr_z: np.ndarray) -> np.ndarray:
-    """
-    Baseline:
-    - enter short if z > +2
-    - enter long if z < -2
-    - exit if |z| <= 0.2
-    """
-    n = int(mr_z.shape[0])
-    actions = np.full(n, DiscreteActions.HOLD, dtype=np.int32)
-    pos = 0.0
-    for t in range(n):
-        z = float(mr_z[t])
-        if not np.isfinite(z):
-            actions[t] = DiscreteActions.HOLD
-            continue
-        if abs(z) <= 0.2:
-            actions[t] = DiscreteActions.EXIT
-            pos = 0.0
-        elif z > 2.0:
-            actions[t] = DiscreteActions.ENTER_SHORT
-            pos = -1.0 if pos <= 0 else 0.0  # no flip
-        elif z < -2.0:
-            actions[t] = DiscreteActions.ENTER_LONG
-            pos = 1.0 if pos >= 0 else 0.0  # no flip
-        else:
-            actions[t] = DiscreteActions.HOLD
-    return actions
 
 
 def serialize_dataset(
@@ -78,8 +54,18 @@ def serialize_dataset(
     feat_cfg = feat_cfg or FeaturePipelineConfig()
     env_cfg = env_cfg or RLEnvConfig()
 
+    # Default session filtering for both env + exports.
+    df_in = df_bars.copy()
+    if str(env_cfg.session_mode).upper() == "RTH":
+        if "ts" in df_in.columns:
+            ts = pd.to_datetime(df_in["ts"], utc=True)
+        else:
+            ts = pd.to_datetime(df_in.index, utc=True)
+        mask = [is_market_hours(t.to_pydatetime()) == "regular" for t in ts]
+        df_in = df_in.loc[mask].copy()
+
     # Build pipeline once to reuse computed series.
-    pipe = FeaturePipeline(df_bars=df_bars, registry=reg, cfg=feat_cfg)
+    pipe = FeaturePipeline(df_bars=df_in, registry=reg, cfg=feat_cfg)
 
     # Build observation matrix assuming a neutral position-state baseline (pos=0).
     # Training env will supply the true position features during rollouts.
@@ -89,7 +75,10 @@ def serialize_dataset(
 
     # Assemble dataset frame.
     out = pd.DataFrame(index=pipe.df.index)
-    out["ts"] = pipe.df.index.astype("datetime64[ns]").astype("datetime64[ns]")
+    # Persist timestamps as UTC-naive datetimes (representing UTC) to avoid tz conversion issues
+    # across parquet/csv and pandas versions.
+    ts_utc = pipe.df.index.tz_convert("UTC") if getattr(pipe.df.index, "tz", None) is not None else pipe.df.index
+    out["ts"] = ts_utc.tz_localize(None)
     for col in ["open", "high", "low", "close", "volume"]:
         if col in pipe.df.columns:
             out[col] = pipe.df[col].astype(float).values
@@ -99,25 +88,20 @@ def serialize_dataset(
 
     out["ret_1"] = pipe._series["ret_1"].astype(np.float64)
 
-    # Baseline simulation via the env to ensure the same cost + no-flip semantics.
-    env = TradingRLEnv(df_bars=pipe.df.reset_index().rename(columns={"index": "ts"}), registry=reg, feat_cfg=feat_cfg, env_cfg=env_cfg)
-    # Use pipeline mr_z (computed on the same bars).
-    base_actions = _baseline_z_fade_actions(pipe._series["mr_z"])
-    base_pos = np.zeros(pipe.n, dtype=np.float64)
-    base_rew = np.zeros(pipe.n, dtype=np.float64)
+    # Episode selection metadata (so runs are reproducible/documentable)
+    env_meta = TradingRLEnv(
+        df_bars=pipe.df.reset_index().rename(columns={"index": "ts"}),
+        registry=reg,
+        feat_cfg=feat_cfg,
+        env_cfg=env_cfg,
+    )
 
-    # Step day-by-day; align arrays by absolute index.
-    for day_i in range(env.n_days):
-        obs0 = env.reset(day_index=day_i)
-        _ = obs0
-        # env internal t is absolute index
-        done = False
-        while not done:
-            t = int(env._t)
-            a = int(base_actions[t])
-            _, r, done, info = env.step(a)
-            base_pos[int(info["t"])] = float(info["pos"])
-            base_rew[int(info["t"])] = float(r)
+    base_actions, base_pos, base_rew = compute_zfade_baseline(
+        df_bars=pipe.df.reset_index().rename(columns={"index": "ts"}),
+        registry=reg,
+        feat_cfg=feat_cfg,
+        env_cfg=env_cfg,
+    )
 
     out["baseline_zfade_action"] = base_actions.astype(np.int32)
     out["baseline_zfade_pos"] = base_pos.astype(np.float32)
@@ -130,6 +114,9 @@ def serialize_dataset(
         feature_groups=reg.feature_groups,
         env_cfg=asdict(env_cfg),
         feat_cfg=asdict(feat_cfg),
+        skipped_days=env_meta.skipped_days,
+        skipped_days_reason="min_bars_per_episode",
+        episode_day_counts=env_meta.skipped_day_counts,
     )
     meta_path = out_path + ".meta.json"
     _write_meta(meta_path, meta)

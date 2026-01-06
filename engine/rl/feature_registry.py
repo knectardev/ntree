@@ -66,6 +66,19 @@ class FeatureRegistry:
             if s.group == g:
                 yield s
 
+    def indices_for_group(self, group: str) -> List[int]:
+        g = str(group)
+        return [i for i, s in enumerate(self.specs) if s.group == g]
+
+    def indices_for_group_flags(self, group: str) -> List[int]:
+        """
+        Return indices for the per-group flags (is_warm_<group>, is_missing_<group>).
+        These features live in the 'flags' group but refer to the given group.
+        """
+        g = str(group)
+        want = {f"is_warm_{g}", f"is_missing_{g}"}
+        return [i for i, s in enumerate(self.specs) if s.name in want]
+
     def group_warmup_bars(self) -> Dict[str, int]:
         """
         Default warmup bars per group, derived from max_lookback across features in group.

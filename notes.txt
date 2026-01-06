@@ -1,357 +1,147 @@
-reinforcement Learning engine notes: 
+Updates to RL 
 
+Here’s what I’d do next (in a tight, deterministic order) to turn this into a usable, documentable range-cycle scalp learner.
 
-1) A clean observation vector per bar
+1) Add one more safety test: “no-lookahead sentinel”
 
-You need a function like:
+Right now you’ve got warmup + reward semantics locked. The remaining class of catastrophic bugs is feature leakage.
 
-getObservation(i) -> Float32Array | number[]
+Test idea (cheap + brutal):
 
-that returns a fixed-length, consistently ordered vector of features for bar i.
+Create a synthetic price series.
 
-Key point: RL hates “optional” features. Avoid variable-length based on toggles. UI toggles should not change the observation schema unless you’re explicitly running an ablation experiment.
+Create a copy where you modify only the future portion (e.g., add a huge spike after index i+50).
 
-Do this:
+Assert that get_observation(i) is identical between the original and modified series for all i before the spike window.
 
-Define a canonical ordered list of feature keys (the registry already gives you names).
+This catches:
 
-Always emit them.
+accidental centered windows
 
-For unavailable values (warmup), emit 0 plus a *.is_warm flag.
+accidental “fit full series”
 
-2) Strict no-lookahead guarantees
+any helper that slices too far
 
-This is where most RL trading prototypes quietly fail.
+You can run it on just 2–3 representative feature groups to start.
 
-Make sure:
+2) Add “baseline parity” test: z-fade in env == z-fade in exporter
 
-any rolling stats use only <= i
+You’ve implemented z-fade baseline under the same rules. Great — now lock it:
 
-classifier refits use only past labels (and labels are only created when future exists)
+Run z-fade baseline in the env runner (step-by-step)
 
-Brier score windows don’t leak future outcomes
+Run z-fade baseline in the exported dataset runner (vectorized/offline if you have it)
 
-A simple practical rule:
+Assert same trades/counts/costs/reward sum (or within epsilon)
 
-compute targets/labels in a separate pass, but when generating features at i, only use labels up to i - k_max.
+This prevents “two subtly different baselines,” which always happens otherwise.
 
-3) Normalization that doesn’t drift unpredictably
+3) Instrumentation you’ll want before training (so you don’t fly blind)
 
-You already have sigma — great. Use it as the global normalizer.
+Add these counters/series to info:
 
-Rules of thumb:
-
-returns ÷ sigma
-
-deviations (log(close/vwap)) ÷ sigma (you already do)
-
-slopes should be in return units or z-units (like kalman.slope_z)
-
-Also: clamp extreme z-values (e.g., to ±8 or ±10) so RL doesn’t blow up on rare spikes.
-
-4) Quality flags are features, not gates
-
-You’re already computing fit_ok/stability/entropy — good.
-
-For RL:
-
-don’t hard-disable features based on fit_ok
-
-do include fit_ok and is_warm in the observation vector
-
-Let the agent learn:
-
-“this signal is trustworthy now”
-
-“this signal is garbage now”
-
-That’s part of the learning problem.
-
-5) Define the RL interface: reward + action space
-
-Before more models, lock these down:
-
-Action space (start simple)
-
-0: flat
-
-1: long
-
-2: short
-
-(Or long/flat only if you want simpler.)
-
-Reward (start conservative)
-
-next-bar P&L minus costs:
-
-𝑟
-𝑡
-+
-1
-=
-𝑝
-𝑜
-𝑠
-𝑖
-𝑡
-𝑖
-𝑜
-𝑛
-𝑡
-⋅
-Δ
-𝑙
-𝑜
-𝑔
-𝑃
-𝑡
-+
-1
-−
-𝑐
-𝑜
-𝑠
-𝑡
-⋅
-∣
-𝑝
-𝑜
-𝑠
-𝑖
-𝑡
-𝑖
-𝑜
-𝑛
-𝑡
-−
-𝑝
-𝑜
-𝑠
-𝑖
-𝑡
-𝑖
-𝑜
-𝑛
-𝑡
-−
-1
-∣
-r
-t+1
-	​
-
-=position
-t
-	​
-
-⋅ΔlogP
-t+1
-	​
-
-−cost⋅∣position
-t
-	​
-
-−position
-t−1
-	​
-
-∣
-
-Use logP for stability, and a cost term to prevent churn.
-
-This one formula will teach you more than another indicator line.
-
-What I’d do next (highest leverage)
-
-In priority order:
-
-Freeze a canonical feature schema (ordered list, fixed length)
-
-Add is_warm everywhere (if not already)
-
-Add a serializeDataset() function that exports:
-
-per-bar observations
-
-actions (optional baseline)
-
-rewards/returns
-
-timestamps
-
-Train RL outside the browser (Python), iterate faster
-
-Cool — 1m SPY is a perfectly fine place to start for range-cycle scalps, even if your cycle-scan outputs aren’t nailed down yet. You can build the RL loop without a “smart” scan by using simple proxy cycle features first, then swap in your fancy scan once it exists.
-
-Here’s the clean plan.
-
-What to use right now
-RL algorithm
-
-Start: PPO (Stable-Baselines3)
-
-Upgrade (likely needed for cycles): RecurrentPPO (sb3-contrib, LSTM)
-
-Reason: at 1m, the “state” of a range (phase-ish context + whether it’s degrading) benefits from memory.
-
-A cycle-scalp environment that doesn’t require your scan yet
-1) Observations (feature vector) — minimum viable
-
-You want features that represent:
-
-where we are inside the range
-
-whether the range is stable
-
-whether we’re about to break out
-
-Use these:
-
-A. Mean-reversion position in range
-
-z = (price - rolling_mean) / rolling_std with window 60–120 min
-
-dist_to_mid = price - rolling_mean (or normalized)
-
-band_width = rolling_std (or ATR)
-
-B. “Cycle-ish” proxy (no scan required)
-
-Use a band-pass filtered component (cheap and works surprisingly well):
-
-bp = EMA_fast(price) - EMA_slow(price) (e.g., 10 vs 60)
-
-bp_z = (bp - mean(bp))/std(bp) over rolling window
-
-bp_slope = bp - bp_prev
-
-This is basically “oscillation component” without FFT.
-
-Optional but very useful:
-
-autocorr at a few lags (e.g., 15, 30, 60 min) on returns or on bp
-(these become your “is it rhythmically bouncing?” signals)
-
-C. Breakout suppressors (critical)
-
-trend_slope: rolling OLS slope of price over 60–180 min, normalized by volatility
-
-range_break_flag: close outside rolling_mean ± k*rolling_std (k=2ish)
-
-vol_regime: realized vol ratio (short vol / long vol), e.g. vol_15 / vol_120
-
-D. Execution realism
-
-position (current: -1/0/+1)
+position (already implied but include explicitly)
 
 time_in_position
 
-optional: time_of_day as sin/cos of minutes since open
+breakout_flag
 
-That’s enough for an agent to learn “fade extremes when stable, stop when breaking”.
+zscore
 
-2) Actions (simple + explainable)
+sigma
 
-Discrete actions:
+reward_components: {pnl, cost, breakout_penalty}
 
-0 HOLD
+Even if you don’t log every bar in production, you want the option for:
 
-1 ENTER_LONG (or maintain long)
+“Why did it trade here?”
 
-2 ENTER_SHORT
+“Is it just churning?”
 
-3 EXIT
+“Is breakout penalty dominating?”
 
-Keep size fixed (1x) at first.
+This makes your UI explanations way easier later.
 
-3) Reward (shaped for scalping)
+4) Training scaffolding: keep it minimal, but correct
+Start with PPO (not recurrent) for the first run
 
-At 1m, if you reward raw PnL only, PPO often learns churn.
+Even though we expect RecurrentPPO to win later, PPO gives you a fast sanity check.
 
-Use:
+env: 1 trading day episodes, RTH
 
-reward = ΔPnL − cost − churn_penalty − breakout_penalty
+action: Discrete(4)
 
-ΔPnL = change in equity from t→t+1
+cost: 0.00005–0.00010 per change
 
-cost = fixed per-trade cost (start conservative)
+reward: as implemented
 
-churn_penalty = small penalty when action changes position (e.g. 0.01)
+The goal of PPO run #1 is not profit. It’s:
 
-breakout_penalty = if you’re in a MR position while range_break_flag is on (bigger penalty)
+does learning improve vs random?
 
-That last term is what keeps it from dying in trend days.
+does turnover drop?
 
-What “cycle scan outputs” should be (so RL can use your real scan later)
+does it learn “don’t hold through breakout”?
 
-When you build the scan, have it output a small, stable set of numbers per bar:
+Then switch to RecurrentPPO
 
-Core
+Only after PPO is stable, because recurrent adds debugging complexity.
 
-period_min (dominant period in minutes)
+5) Evaluation protocol (the “documentable” part)
 
-coherence (0–1): “how sinusoidal/repeatable”
+Before you chase Sharpe, lock these eval outputs every run:
 
-amplitude (normalized by price volatility)
+Net PnL after costs (test split)
 
-phase_sin, phase_cos (phase encoded safely)
+Max drawdown
 
-Stability
+Turnover (position changes/day)
 
-period_stability (e.g., std(period) over last N scans)
+Hit rate / average win/loss (optional, but nice)
 
-coherence_stability (rolling mean/std)
+“Breakout exposure”: % of time in position while breakout_flag=1
 
-Breakout risk
+Comparison vs z-fade baseline
 
-trend_dominance = low-freq power / cycle-band power
+This is exactly what you’ll show in ntree as “RL policy health.”
 
-innovation = shock magnitude (Kalman innovation works great)
+6) Feature roadmap for range-cycle scalps (what to add next)
 
-Even if you don’t know yet, this tells you what to standardize toward.
+You don’t need the full cycle scan yet. Add one “cycle-ish” group now:
 
-Training protocol for 1m SPY (so it’s not a mirage)
+Band-pass proxy group
 
-Episodes: sample contiguous chunks like 1–3 trading days
+bp = EMA(close,10) - EMA(close,60)
 
-Train/val/test: strict walk-forward by date
+bp_z (rolling z)
 
-Baselines (must beat after costs):
+bp_slope (1-bar diff)
 
-z-score fade: enter at z>+2 short / z<-2 long, exit at z~0
+autocorr_ret_15, autocorr_ret_30, autocorr_ret_60 (optional)
 
-band fade: enter at upper/lower band, exit at mid
+This improves the agent’s ability to detect “bouncy vs dead” regimes without a heavy FFT pipeline.
 
-If RL can’t beat those, the env/reward/features aren’t right yet.
+Since you already reserved cycle-scan placeholders, you can keep schema stable.
 
-Practical “cost” model to start with (SPY 1m)
+Quick sanity check: your status implies you’re ready to train
 
-Don’t overthink it, but don’t ignore it:
+Given:
 
-per round-trip: something like 1–2 bps equivalent (tunable)
+schema stability ✅
 
-or fixed cents per share approximations if you prefer
+warmup policy ✅
 
-The point is: force the agent to need clean edges, not noise-chop.
+no-flip semantics ✅
 
-What I’d implement next in ntree (order that tends to work)
+cost model ✅
 
-Add the proxy cycle features (band-pass EMA diff + autocorr lags)
+tests ✅
 
-Build the Gymnasium env + PPO training loop
+…you are at the point where the next meaningful artifact is a training script + eval report that produces:
 
-Validate vs the two baselines
+PPO learning curve (reward)
 
-Then replace proxy cycle features with your “real” scan outputs
+test-period metrics vs baseline
 
-Upgrade PPO → RecurrentPPO once the env is stable
 
-If you paste one row of what your current feature factory emits (column names), I’ll:
 
-propose the exact observation vector for cycle scalps,
-
-define the env step logic (including position accounting),
-
-and give you a ready-to-run SB3 training config (PPO → RecurrentPPO).

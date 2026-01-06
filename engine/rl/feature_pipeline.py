@@ -128,6 +128,32 @@ def _rolling_corr(x: np.ndarray, *, lag: int, window: int) -> np.ndarray:
 
     return out.astype(np.float64)
 
+def _rolling_count(mask: np.ndarray, window: int) -> np.ndarray:
+    """
+    Causal rolling count of True values over the last `window` points (inclusive).
+    """
+    n = int(mask.shape[0])
+    w = max(1, int(window))
+    out = np.zeros(n, dtype=np.int32)
+    q = np.zeros(w, dtype=np.int32)
+    cnt = 0
+    qi = 0
+    run = 0
+    for i in range(n):
+        v = 1 if bool(mask[i]) else 0
+        if cnt < w:
+            q[qi] = v
+            qi = (qi + 1) % w
+            run += v
+            cnt += 1
+        else:
+            old = int(q[qi])
+            q[qi] = v
+            qi = (qi + 1) % w
+            run += v - old
+        out[i] = int(run)
+    return out
+
 
 @dataclass(frozen=True)
 class FeaturePipelineConfig:
@@ -351,18 +377,33 @@ class FeaturePipeline:
             "cycle_amplitude": np.zeros(n, dtype=np.float64),
         }
 
-        # Warmup policies (per-group) derived from windows used.
-        # This is intentionally explicit (schema_v1 contracts).
-        self._group_warmup = {
-            "price_base": max(c.sigma_window, 2),
-            "mr_bands": c.bands_window,
-            "cycle_proxy": max(c.bp_ema_slow, c.bp_stat_window, c.acorr_window),
-            "trend": c.trend_window,
-            "risk": c.bands_window,
-            "time": 0,
-            "position_state": 0,
-            "cycle_scan": 0,
-            "flags": 0,
+        # Warmup/availability masks (per-group), based on *actual trailing window satisfaction*.
+        # Key rule from notes: treat sigma warm when you have at least N returns in the trailing window.
+        ret_ok = np.isfinite(ret)
+        logp_ok = np.isfinite(logp)
+        close_ok = np.isfinite(close)
+
+        sigma_cnt = _rolling_count(ret_ok, c.sigma_window)
+        bands_cnt_lp = _rolling_count(logp_ok, c.bands_window)
+        bands_cnt_c = _rolling_count(close_ok, c.bands_window)
+        bp_cnt = _rolling_count(logp_ok, c.bp_stat_window)
+        ac_cnt = _rolling_count(ret_ok, c.acorr_window)
+        trend_cnt = _rolling_count(logp_ok, c.trend_window)
+
+        self._group_ready: Dict[str, np.ndarray] = {
+            "price_base": (sigma_cnt >= int(c.sigma_window)).astype(np.int32),
+            "mr_bands": (bands_cnt_lp >= int(c.bands_window)).astype(np.int32),
+            "risk": (bands_cnt_c >= int(c.bands_window)).astype(np.int32),
+            "cycle_proxy": (
+                (bp_cnt >= int(c.bp_stat_window))
+                & (ac_cnt >= int(c.acorr_window))
+                & (np.arange(n) >= int(c.bp_ema_slow))
+            ).astype(np.int32),
+            "trend": (trend_cnt >= int(c.trend_window)).astype(np.int32),
+            "time": np.ones(n, dtype=np.int32),
+            "position_state": np.ones(n, dtype=np.int32),
+            "cycle_scan": np.ones(n, dtype=np.int32),
+            "flags": np.ones(n, dtype=np.int32),
         }
 
     @property
@@ -371,7 +412,12 @@ class FeaturePipeline:
 
     @property
     def group_warmup(self) -> Dict[str, int]:
-        return dict(self._group_warmup)
+        # Backwards-compatible informational view: first index where group becomes ready.
+        out: Dict[str, int] = {}
+        for g, m in self._group_ready.items():
+            idxs = np.where(m.astype(bool))[0]
+            out[g] = int(idxs[0]) if len(idxs) else self.n
+        return out
 
     def get_observation(
         self,
@@ -399,7 +445,8 @@ class FeaturePipeline:
         warm: Dict[str, int] = {}
         miss: Dict[str, int] = {}
         for g in self.registry.feature_groups:
-            warm[g] = 1 if idx >= int(self._group_warmup.get(g, 0)) else 0
+            gm = self._group_ready.get(g)
+            warm[g] = int(gm[idx]) if gm is not None else 1
             miss[g] = 0
 
         # Missing checks (only meaningful once warm).

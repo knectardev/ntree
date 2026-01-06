@@ -1,321 +1,92 @@
-Below is a recommended set of defaults that fit your current direction (intraday, “feature richness + minimal overlays,” RL-friendly, honest gating). Treat this as a strong starting spec you can tweak.
 
-A) Data + targets
+you’re at the point where a real end-to-end test is worth running now.
 
-Base series
+You’ve got the three things that usually block “first real run”:
 
-Use log price internally for modeling whenever possible.
+stable fixed schema (schema_v1) 
 
-If you want a single “price-like” series for trend visuals, use OHLC4 for stability (less wick noise), but it’s optional.
+feature_registry
 
-For everything predictive, use returns.
+hard warmup + causal guarantees (unit tests + sentinel)
 
-Returns definition
+env semantics + cost model + baseline parity (so you can interpret results)
 
-Default: log returns
+What I’d run as the first real test (fast, meaningful, low-risk):
 
-𝑟
-𝑡
-=
-log
-⁡
-(
-𝑃
-𝑡
-)
-−
-log
-⁡
-(
-𝑃
-𝑡
-−
-1
-)
-r
-t
-	​
+Real test #1: “Can PPO beat z-fade on one week of SPY 1m RTH?”
 
-=log(P
-t
-	​
+Goal: not “holy grail,” just proof the loop learns something non-trivial and doesn’t churn itself to death.
 
-)−log(P
-t−1
-	​
+A) Data slice
 
-)
+Instrument: SPY 1m
 
-Why: additive across time, less scale weirdness, works well with linear/state-space.
+Session: RTH only (as you’ve defaulted)
 
-Forecast horizon(s)
+Train: 5–10 trading days
 
-Implement k ∈ {1, 3, 10} bars (these cover “next bar,” “couple bars,” “short swing intraday”).
+Test: next 2–3 trading days (strictly later dates)
 
-Compute features once, then produce target variants for RL/experiments.
+B) What to record
 
-Classification label y
-Pick one “canonical” and then allow variants:
+For both PPO and z-fade baseline:
 
-Binary directional label (canonical)
+net PnL after costs
 
-y_up(k) = 1 if sum_{i=1..k} r_{t+i} > +thr(k) else 0
+turnover (position changes/day)
 
-threshold: thr(k) = 0 (pure direction) to start
+time-in-market
 
-later add thr(k) = c * sigma_k (vol-adjusted) to avoid tiny-noise labels
+% exposure during breakout_flag=1
 
-De-overlap
+max drawdown (even crude)
 
-For offline evaluation / classifier training: yes, use stride = k to reduce leakage.
+If PPO can’t beat z-fade yet, that’s still a success if:
 
-For RL step-by-step environment: no, keep per-bar labels; RL will see overlap anyway.
+turnover drops over training
 
-B) Warmup + quality flags
+breakout exposure drops
 
-is_warm
+the action distribution stops being random
 
-OLS: t >= window + 5
+C) How to run it (concretely)
 
-AR(p): t >= max(p) + window + 5
+Run your training script with:
 
-Kalman: t >= 20 (or 2× your typical “smoothing strength” in bars)
+short run, small timesteps, deterministic seed
 
-Classifier: needs a training buffer: t >= train_window
+debug series ON for a single evaluation episode (not all training)
 
-fit_ok defaults
-Don’t overthink. Provide both:
+Example pattern:
 
-raw quality metrics (continuous)
+Train with return_reward_components=False (fast)
 
-a conservative boolean (for debugging + optional gating)
+Evaluate with return_reward_components=True (diagnostic)
 
-Recommended booleans:
+Confirm the export artifact + meta are produced, and confirm the schema matches:
 
-OLS: R² >= 0.05 AND |t_stat(mu_hat)| >= 1.0
+schema_id == schema_v1
 
-AR: stability OK (roots) AND sigma_hat finite AND not exploding
+feature_names match registry order 
 
-Kalman: slope_z = slope / slope_std finite; optionally |slope_z| >= 0.5
+feature_registry
 
-Classifier: entropy <= 0.65 (or just output entropy; RL can learn)
+D) Expected outcomes (so you know if it “worked”)
 
-But for RL: expose the booleans; don’t hard-gate the feature stream. Let the agent learn to ignore bad regimes.
+A “successful first real test” looks like:
 
-C) 1.1 Rolling OLS
+PPO learns a stable behavior (not constant flipping)
 
-What’s X (regressors)?
-Two variants (both useful):
+PPO’s average daily turnover is lower than random and ideally comparable to z-fade
 
-Drift-only OLS (simple, robust)
+PPO isn’t spending lots of time long/short while range_break_flag=1
 
-Predict r_{t+1..t+k} from a small factor set:
+PPO test PnL is at least “not catastrophically worse” than z-fade (profitability may come later)
 
-trend_slope (from your local linear or Kalman slope)
+If PPO is wildly negative with huge turnover:
 
-vwap_dev (price - VWAP, z-scored)
+reward shaping/cost too low
 
-vol_state (rolling std)
+action coercion logic is being exploited
 
-residual_energy (from detrend residual)
-
-This is “ARX-lite” but easy.
-
-Local linear trend OLS (time index)
-
-Fit price ~ time over window → outputs slope/R²
-
-You already basically have this.
-
-Window + weighting
-
-Start with fixed window OLS (simpler, comparable).
-
-Add EWLS later if you want responsiveness.
-
-Standard errors
-
-Start with plain OLS SE.
-
-Add Newey–West later only if you’re doing statistical testing; for RL it’s usually not necessary.
-
-D) 1.2 AR / ARX
-
-Orders
-
-Start fixed: AR(1), AR(2), AR(3) features computed in parallel.
-
-Avoid AIC/BIC auto-selection per bar at first (it adds jitter and complexity).
-
-Exogenous terms
-Keep a guaranteed small core set:
-
-trend_slope_z (from Kalman or local linear)
-
-vwap_dev_z
-
-vol_z
-
-session_time (optional: minutes since open as sin/cos)
-
-Stability check
-
-Provide both:
-
-ar.is_stable boolean
-
-ar.stability_margin continuous (distance of largest root from unit circle)
-
-E) 1.3 Kalman local linear trend
-
-Model form
-
-Classic local linear trend:
-
-state = [level, slope]
-
-observation = level + noise
-
-Noise parameters (Q/R)
-
-Start fixed defaults + a single “responsiveness” knob.
-
-Then optionally adapt:
-
-R from rolling return variance
-
-Q scaled to let slope change moderately under higher vol
-
-Output units
-
-Keep the filter on log price level
-
-Output:
-
-slope_per_bar in return units
-
-slope_z = slope / slope_std (this is gold)
-
-F) 1.4 Classifier (logistic / LDA)
-
-Training
-
-Start with rolling refit every N bars (e.g., every 25 bars) on last train_window (e.g., 500–2000 bars).
-
-True per-bar online SGD is doable but you don’t need it first.
-
-Regularization
-
-L2 on by default, fairly strong.
-
-This reduces “spaghetti probability swings.”
-
-Calibration
-
-Rolling Brier score over last 200–500 labeled examples.
-
-Output:
-
-clf.brier
-
-clf.cal_ok = brier < threshold (optional)
-
-G) Feature registry + naming
-
-Yes: do stable names like:
-
-kalman.level, kalman.slope, kalman.slope_z
-
-ols.mu_hat.k1, ols.tstat.k1, ols.r2
-
-ar1.mu_hat.k1, ar3.innov_z, ar2.stability_margin
-
-clf.p_up.k3, clf.entropy, clf.brier
-And always:
-
-*.is_warm, *.fit_ok
-
-H) Normalization standard
-
-For RL, consistency matters more than perfection.
-
-Recommended default:
-
-Use rolling std of returns sigma (e.g., 100-bar) as the global scaler.
-
-Rules:
-
-Any return-like value → divide by sigma
-
-Any price-like deviation (VWAP dev) → convert to return units or z-score
-
-Then optionally apply per-feature z-score (but don’t do both at once initially)
-
-I) Visualization constraints (avoid spaghetti)
-
-Hard cap: 1 trend overlay visible at once (SMA OR local linear OR Kalman).
-
-Everything else goes into:
-
-mini-panels (drift, slope_z, p_up)
-
-background shading (regime/confidence)
-
-“Developer mode” shows:
-
-residuals
-
-innovations
-
-covariances (optional)
-
-Answering Cursor’s “3 key questions” (recommended defaults)
-
-Prediction horizons: k = 1, 3, 10 bars
-
-Returns vs price: compute predictors on returns; keep Kalman on log price but output return-normalized slope (slope_per_bar, slope_z)
-
-Where is RL trained?
-
-Best path: RL training elsewhere (Python) and the app emits features.
-
-If you want in-browser later, keep it modular so you can swap. 
-
-what bar size you expect RL to operate on most (1m, 5m, 15m?
-Make bar size a config, and train/evaluate on a small set
-
-Pick three canonical bar sizes and treat them like different “markets”:
-
-1m = microstructure + noise, good for execution/entries
-
-5m = the sweet spot for intraday structure/regimes
-
-15m = less noise, more stable regimes, fewer decisions
-
-Then:
-
-compute the same feature schema for each
-
-train the same RL policy separately per bar size
-
-compare out-of-sample P&L and stability
-
-This is the least opinionated, most informative path.
-
-What to implement now
-
-Your feature registry emits the same keys regardless of bar size
-
-Windows are expressed in minutes, then converted to bars.
-
-Example:
-
-trend_window_minutes = 120
-
-on 1m → 120 bars
-
-on 5m → 24 bars
-
-on 15m → 8 bars
-
-This keeps your “smoothing strength” meaning consistent.
+or features are too noisy / not normalized as expected
