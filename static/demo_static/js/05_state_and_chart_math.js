@@ -24,6 +24,8 @@
     hoverIdx: -1,
     hoverX: NaN,
     hoverY: NaN,
+    hoverTradeId: null, // Stable ID of the trade being hovered
+    pickables: [],      // Array of hit-testable objects {x, y, r, trade_id}
     symbol: 'ESZ5',
     windowSec: 60,
     // Navigation anchor: requested window span (not the full dataset span).

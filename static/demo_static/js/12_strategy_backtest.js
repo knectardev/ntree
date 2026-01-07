@@ -196,13 +196,17 @@
             if (resultsBox) resultsBox.style.display = 'none';
             return;
         }
-        const execN = (metrics && Array.isArray(metrics.execution_events)) ? metrics.execution_events.length : 0;
+        const evs = (metrics && Array.isArray(metrics.execution_events)) ? metrics.execution_events : [];
+        const execN = evs.length;
+        const entryN = evs.filter(e => e.event === 'entry').length;
+        const exitN = evs.filter(e => e.event === 'exit').length;
+
         const lines = [
             `Trades: ${metrics.n_trades ?? '—'}`,
             `Win rate: ${metrics.win_rate != null ? (metrics.win_rate * 100).toFixed(1) + '%' : '—'}`,
             `Avg ret: ${metrics.avg_ret != null ? (metrics.avg_ret * 100).toFixed(2) + '%' : '—'}`,
             `Median: ${metrics.median_ret != null ? (metrics.median_ret * 100).toFixed(2) + '%' : '—'}`,
-            `Exec markers (SL/TP): ${execN}`,
+            `Markers: ${entryN} entries, ${exitN} exits`,
             `Sharpe: ${metrics.sharpe_ratio != null ? metrics.sharpe_ratio.toFixed(2) : '—'}`
         ];
         

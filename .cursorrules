@@ -1,0 +1,16 @@
+# Cursor Rules for ntree project
+
+# Source of Truth
+# The absolute source of truth for this project is the local directory: C:\local_dev\ntree
+# ALWAYS prefer files in this path over any other temporary or workspace-internal paths.
+
+# Context-Aware Modification
+- Before making any code modifications, review all related code files (including utility or dependency files).
+- Code changes must be designed not to break or inadvertently alter current functionality.
+- If an existing function is modified, its original purpose must be preserved unless a replacement or enhancement is clearly intended.
+
+# Strategy and Backtest Semantics
+- Entry markers should be linked to their corresponding exit markers via a stable `trade_id`.
+- The backtest engine should emit both `entry` and `exit` events.
+- Hover logic in the UI should perform hit-testing against markers, not just bar indices.
+

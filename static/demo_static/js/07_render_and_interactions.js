@@ -174,7 +174,8 @@
         os0 && os0.ema9 ? 1 : 0,
         os0 && os0.ema21 ? 1 : 0,
         os0 && os0.ema50 ? 1 : 0,
-        os0 && os0.vwap ? 1 : 0
+        os0 && os0.vwap ? 1 : 0,
+        String(state.hoverTradeId || 'none') // Include hoverTradeId in cache key
       ].join('|');
     } catch(_eKey){
       baseKey = '';
@@ -287,6 +288,85 @@
         ctx.fillStyle = axisText;
         ctx.textAlign = 'center';
         ctx.fillText(ttxt, tBoxX + tBoxW/2, tBoxY + th/2);
+
+        // --- Trade Details Tooltip (Inside fast-path) ---
+        if (state.hoverTradeId != null) {
+          (function drawTradeDetailsTooltip() {
+            try {
+              var bt = state.backtest || {};
+              var evs = (bt && Array.isArray(bt.executionEvents)) ? bt.executionEvents : [];
+              var tradeEvs = evs.filter(function(e) { return e.trade_id === state.hoverTradeId; });
+              if (!tradeEvs.length) return;
+
+              var entry = tradeEvs.find(function(e) { return e.event === 'entry'; });
+              var exit = tradeEvs.find(function(e) { return e.event === 'exit'; });
+              if (!entry) return;
+
+              var side = (entry.side || 'long').toUpperCase();
+              var entryPx = Number(entry.price);
+              var exitPx = exit ? Number(exit.price) : NaN;
+              var reason = exit ? (exit.exit_reason || 'exit') : 'open';
+              
+              var lines = [
+                'Trade #' + state.hoverTradeId + ' (' + side + ')',
+                'Entry: ' + entryPx.toFixed(2),
+              ];
+              
+              if (exit) {
+                lines.push('Exit: ' + exitPx.toFixed(2) + ' (' + reason + ')');
+                var ret = (side === 'LONG') ? (exitPx - entryPx) / entryPx : (entryPx - exitPx) / entryPx;
+                lines.push('Result: ' + (ret * 100).toFixed(2) + '%');
+              } else {
+                lines.push('Status: Open');
+              }
+
+              ctx.save();
+              ctx.font = 'bold 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              var pad = 12;
+              var lh = 20;
+              var maxW = 0;
+              for (var i = 0; i < lines.length; i++) {
+                var tw = ctx.measureText(lines[i]).width;
+                if (tw > maxW) maxW = tw;
+              }
+              
+              var boxW = maxW + pad * 2;
+              var boxH = lines.length * lh + pad * 2;
+              
+              // Position tooltip near the mouse, but avoid clipping
+              var tx = hx2 + 20;
+              var ty = hy2 - boxH / 2;
+              // Wpx/Hpx are available in the draw() scope where _drawHoverOnly is called
+              if (tx + boxW > rect.width) tx = hx2 - boxW - 20;
+              ty = clamp(ty, 10, rect.height - boxH - 10);
+
+              ctx.shadowColor = 'rgba(0,0,0,0.45)';
+              ctx.shadowBlur = 12;
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+              ctx.lineWidth = 1;
+              roundRect(ctx, tx, ty, boxW, boxH, 10);
+              ctx.fill();
+              ctx.stroke();
+              ctx.shadowBlur = 0;
+
+              for (var j = 0; j < lines.length; j++) {
+                var line = lines[j];
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                if (line.indexOf('Result:') === 0) {
+                  var isPos = line.indexOf('-') === -1 && line.indexOf('0.00%') === -1;
+                  ctx.fillStyle = isPos ? '#4ade80' : '#fb7185';
+                }
+                ctx.fillText(line, tx + pad, ty + pad + j * lh + lh/2);
+              }
+              ctx.restore();
+            } catch (e) {
+              console.warn('Failed to draw trade tooltip', e);
+            }
+          })();
+        }
       } catch(_eHover){}
     }
 
@@ -298,6 +378,9 @@
         return;
       }
     } catch(_eFast){}
+
+    state.pickables = []; // Reset pickables only on a full redraw
+    var hoveredTradeCoords = []; // Shared coordinate list for connector lines
 
     // Suppress hover rendering during base draw so we can cache it.
     var _savedHoverIdx = state.hoverIdx;
@@ -775,51 +858,59 @@
         if (!strat) return;
 
         // Strategy-time artifacts (intent):
-        // - entry + side (preferred canonical)
-        // - long_entry + direction (back-compat)
-        // - discretionary exits: long_exit + exit_direction
         var entryArr = strat.entry || strat.long_entry || [];
-        var sideArr = strat.side || []; // +1 long, -1 short (if present)
-        var directions = strat.direction || []; // back-compat: 'bullish'|'bearish'|None
+        var sideArr = strat.side || [];
+        var directions = strat.direction || [];
         var longExits = strat.long_exit || [];
         var exitDirections = strat.exit_direction || [];
         var yOverrides = strat.cross_y || [];
         var exitYOverrides = strat.exit_y || [];
 
-        // Backtest-time artifacts: if a stop/TP fired on a bar, do not also draw a discretionary exit arrow there.
-        var execByT = {};
-        try{
-          var bt = state.backtest || {};
-          var showExec = (
-            bt.executionEvents
-            && Array.isArray(bt.executionEvents)
-            && bt.executionEvents.length
-            && String(bt.executionEventsStrategy || '') === String(selected || '')
-          );
-          if(showExec){
-            for(var ei=0; ei<bt.executionEvents.length; ei++){
-              var ev = bt.executionEvents[ei] || {};
-              var tms = Number(ev.t_ms);
-              if(Number.isFinite(tms)) execByT[String(tms)] = ev;
-            }
+        // Backtest-time artifacts: link triangles to trade_ids if available
+        var evsByT = {};
+        var bt = state.backtest || {};
+        var showExec = (
+          bt.executionEvents
+          && Array.isArray(bt.executionEvents)
+          && bt.executionEvents.length
+          && String(bt.executionEventsStrategy || '') === String(selected || '')
+        );
+        if(showExec){
+          for(var ei=0; ei<bt.executionEvents.length; ei++){
+            var ev = bt.executionEvents[ei] || {};
+            var tms = String(Number(ev.t_ms));
+            if(!evsByT[tms]) evsByT[tms] = [];
+            evsByT[tms].push(ev);
           }
-        } catch(_eExec){}
+        }
         
         ctx.save();
+        // Dim intent markers if a specific execution trade is hovered
+        if (state.hoverTradeId != null) {
+          ctx.globalAlpha = 0.2;
+        }
         
         for(var bi=start; bi<=end; bi++){
           var d = state.data[bi];
           if(!d || d.idx === undefined) continue;
           var fidx = d.idx;
+          var tKey = String(Number(d.t));
+          var barEvs = evsByT[tKey] || [];
           
           var cx = xForIndex(bi + 0.5, plot, barsVisible);
-          // Padding for markers to sit outside the candle
           var candleRange = Math.abs(d.h - d.l) || 0.01;
           var markerOffset = candleRange * 0.4;
 
-          // Entry intent markers (encoded direction+action):
-          // Entry:   long => ▲ green, short => ▼ red
+          // Entry intent markers
           if (entryArr[fidx]) {
+            // Find a matching entry event from backtest to get trade_id
+            var entryEv = barEvs.find(e => e.event === 'entry');
+            var tid = entryEv ? entryEv.trade_id : null;
+            var isHovered = (state.hoverTradeId != null && tid === state.hoverTradeId);
+
+            ctx.save();
+            if (isHovered) ctx.globalAlpha = 1.0;
+            
             var side = 1;
             if(sideArr && sideArr.length){
               var sv = Number(sideArr[fidx]);
@@ -830,23 +921,42 @@
             }
             var isShort = side < 0;
             var color = isShort ? '#e74c3c' : '#2ecc71';
-            var yVal = (yOverrides[fidx] != null && !isNaN(yOverrides[fidx])) ? yOverrides[fidx] : (isShort ? d.h : d.l);
-            var markerY = yForPrice(isShort ? (yVal + markerOffset) : (yVal - markerOffset), pricePlot, yMin, yMax);
-            drawTriangle(ctx, cx, markerY, 12, color, isShort); // short => ▼, long => ▲
+            var price = (yOverrides[fidx] != null && !isNaN(yOverrides[fidx])) ? yOverrides[fidx] : (isShort ? d.h : d.l);
+            
+            var priceY = yForPrice(price, pricePlot, yMin, yMax);
+            // Positioning: Long entries below wick, short entries above wick
+            var markerY = yForPrice(isShort ? (d.h + markerOffset) : (d.l - markerOffset), pricePlot, yMin, yMax);
+            
+            var size = isHovered ? 16 : 12;
+            
+            drawMarkerWithStem(ctx, cx, priceY, markerY, color, size, function(c, x, y, s, clr) {
+              drawTriangle(c, x, y, s, clr, isShort); // isShort=true means downward arrow
+            });
+
+            if (tid != null) {
+              state.pickables.push({ x: cx, y: markerY, trade_id: tid });
+              if (isHovered) {
+                hoveredTradeCoords.push({ x: cx, y: markerY, trade_id: tid, isEntry: true });
+              }
+            }
+            ctx.restore();
           }
 
-          // Discretionary exit intent markers:
-          // Exit: long => ▼ green, short => ▲ red
-          // Suppress if this bar was actually closed by stop/TP in the backtest.
-          var tKey = String(Number(d.t));
-          var hasExecHere = !!(execByT && execByT[tKey]);
+          // Discretionary exit intent markers
+          var hasExecHere = barEvs.some(e => e.event === 'exit');
           if (!hasExecHere && longExits[fidx]) {
             var dirE = exitDirections[fidx];
             var exitIsShort = (dirE === 'bearish'); // exiting short position
             var colorE = exitIsShort ? '#e74c3c' : '#2ecc71';
-            var yValE = (exitYOverrides[fidx] != null && !isNaN(exitYOverrides[fidx])) ? exitYOverrides[fidx] : (exitIsShort ? d.l : d.h);
-            var markerYE = yForPrice(exitIsShort ? (yValE - markerOffset) : (yValE + markerOffset), pricePlot, yMin, yMax);
-            drawTriangle(ctx, cx, markerYE, 12, colorE, !exitIsShort); // long => ▼, short => ▲
+            var priceE = (exitYOverrides[fidx] != null && !isNaN(exitYOverrides[fidx])) ? exitYOverrides[fidx] : (exitIsShort ? d.l : d.h);
+            
+            var priceYE = yForPrice(priceE, pricePlot, yMin, yMax);
+            // Positioning: Long exit above wick, short exit below wick
+            var markerYE = yForPrice(exitIsShort ? (d.l - markerOffset) : (d.h + markerOffset), pricePlot, yMin, yMax);
+            
+            drawMarkerWithStem(ctx, cx, priceYE, markerYE, colorE, 12, function(c, x, y, s, clr) {
+              drawTriangle(c, x, y, s, clr, !exitIsShort); // Long exit (isShort=false) => downward ▼
+            });
           }
         }
         
@@ -856,7 +966,7 @@
       }
     })();
 
-    // Backtest resolution markers (Stop/TP) — only after execution.
+    // Backtest resolution markers (Entry/Stop/TP) — only after execution.
     (function drawExecutionMarkers(){
       try{
         if(!state || !state.backtest) return;
@@ -889,42 +999,119 @@
         if(!bt) return;
 
         // Index events by exact t_ms; current chart bars use `d.t` in epoch ms.
-        var evByT = {};
+        // We now support multiple events per bar (e.g. entry and exit on same candle).
+        var evsByT = {};
         for(var ei=0; ei<bt.executionEvents.length; ei++){
           var ev = bt.executionEvents[ei] || {};
           var tms = Number(ev.t_ms);
           if(!Number.isFinite(tms)) continue;
-          // If multiple events land on the same bar, keep the first.
-          if(!evByT[String(tms)]) evByT[String(tms)] = ev;
+          if(!evsByT[String(tms)]) evsByT[String(tms)] = [];
+          evsByT[String(tms)].push(ev);
         }
 
         ctx.save();
+        
+        // Pass 1: Draw markers
+        
         for(var bi=start; bi<=end; bi++){
           var d = state.data[bi];
           if(!d) continue;
-          var ev2 = evByT[String(Number(d.t))];
-          if(!ev2) continue;
+          var barEvs = evsByT[String(Number(d.t))];
+          if(!barEvs || !barEvs.length) continue;
 
           var cx = xForIndex(bi + 0.5, plot, barsVisible);
           var candleRange = Math.abs(d.h - d.l) || 0.01;
-          var markerOffset = candleRange * 0.55;
+          
+          for (var j = 0; j < barEvs.length; j++) {
+            var ev2 = barEvs[j];
+            var tradeId = ev2.trade_id;
+            var isHoveredTrade = (state.hoverTradeId != null && tradeId === state.hoverTradeId);
+            
+            // Dim others if something is hovered
+            ctx.globalAlpha = (state.hoverTradeId == null || isHoveredTrade) ? 1.0 : 0.2;
 
-          var typ = String(ev2.event || '');
-          var price = Number(ev2.price);
-          var yBase = Number.isFinite(price) ? price : d.c;
-          // Place above for TP, below for SL (so you can quickly read the outcome).
-          var isTp = (typ === 'take_profit');
-          var markerY = yForPrice(isTp ? (yBase - markerOffset) : (yBase + markerOffset), pricePlot, yMin, yMax);
+            var typ = String(ev2.event || '');
+            var subTyp = String(ev2.exit_reason || '');
+            var isEntry = (typ === 'entry');
+            var side = String(ev2.side || 'long');
+            var isLong = (side === 'long');
+            
+            var price = Number(ev2.price);
+            var yBase = Number.isFinite(price) ? price : (isEntry ? d.o : d.c);
+            var priceY = yForPrice(yBase, pricePlot, yMin, yMax);
+            
+            // Positioning logic:
+            var markerY;
+            var size = isHoveredTrade ? 16 : 12;
 
-          if(typ === 'stop_loss'){
-            drawX(ctx, cx, markerY, 12, '#e74c3c');
-          } else if(typ === 'take_profit'){
-            drawDiamond(ctx, cx, markerY, 12, '#2ecc71');
+            if (isEntry) {
+              // Standard Entry positioning (matching Strategy Markers)
+              var entryOffset = candleRange * 0.45;
+              markerY = yForPrice(isLong ? (d.l - entryOffset) : (d.h + entryOffset), pricePlot, yMin, yMax);
+              
+              drawMarkerWithStem(ctx, cx, priceY, markerY, isLong ? '#2ecc71' : '#e74c3c', size, function(c, x, y, s, clr) {
+                drawTriangle(c, x, y, s, clr, !isLong); // !isLong means downward arrow for shorts
+              });
+            } else {
+              var exitOffset = candleRange * 0.55;
+              var isTp = (subTyp === 'take_profit');
+              
+              // Positioning for Exits:
+              // TP Long: Above wick
+              // TP Short: Below wick
+              // SL Long: Below wick
+              // SL Short: Above wick
+              var aboveWick = (isTp && isLong) || (!isTp && !isLong);
+              markerY = yForPrice(aboveWick ? (d.h + exitOffset) : (d.l - exitOffset), pricePlot, yMin, yMax);
+              
+              drawMarkerWithStem(ctx, cx, priceY, markerY, isTp ? '#2ecc71' : '#e74c3c', size, function(c, x, y, s, clr) {
+                if(subTyp === 'stop_loss' || subTyp === 'end_of_data'){
+                  drawX(c, x, y, s, clr);
+                } else if(isTp){
+                  drawDiamond(c, x, y, s, clr);
+                } else {
+                  drawX(c, x, y, s, '#94a3b8');
+                }
+              });
+            }
+
+            // Register for hit-testing
+            state.pickables.push({ x: cx, y: markerY, trade_id: tradeId });
+
+            if (isHoveredTrade) {
+              hoveredTradeCoords.push({ x: cx, y: markerY, trade_id: tradeId, isEntry: isEntry });
+            }
           }
         }
+
         ctx.restore();
       } catch(e){
         console.warn('Failed to draw execution markers', e);
+      }
+    })();
+
+    // Shared connector lines for the hovered trade (drawn on top of markers)
+    (function drawTradeConnectors(){
+      if (hoveredTradeCoords.length > 1) {
+        ctx.save();
+        ctx.globalAlpha = 1.0;
+        ctx.beginPath();
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.lineWidth = 1.5;
+        
+        // Find entry (if multiple, use first)
+        var entry = hoveredTradeCoords.find(c => c.isEntry);
+        if (entry) {
+          for (var k = 0; k < hoveredTradeCoords.length; k++) {
+            var c = hoveredTradeCoords[k];
+            if (c === entry) continue;
+            ctx.moveTo(entry.x, entry.y);
+            ctx.lineTo(c.x, c.y);
+          }
+        }
+        ctx.stroke();
+        ctx.restore();
       }
     })();
 
@@ -1313,6 +1500,32 @@
     state.hoverIdx = clamp(idx, 0, n-1);
     state.hoverX = x;
     state.hoverY = y;
+
+    // Hit-testing for markers (pickables)
+    var nearestTradeId = null;
+    var minDist = Infinity;
+    var hitRadius = 15; // px
+
+    if (state.pickables && state.pickables.length) {
+      for (var pi = 0; pi < state.pickables.length; pi++) {
+        var p = state.pickables[pi];
+        var dx = x - p.x;
+        var dy = y - p.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < hitRadius && dist < minDist) {
+          minDist = dist;
+          nearestTradeId = p.trade_id;
+        }
+      }
+    }
+
+    if (state.hoverTradeId !== nearestTradeId) {
+      state.hoverTradeId = nearestTradeId;
+      // If we found a marker, we don't necessarily want to force a full redraw
+      // if it hasn't changed, but crosshairs usually do. 
+      // Marker highlighting needs a redraw.
+    }
+
     requestDraw('hover');
   }
 
@@ -1358,6 +1571,30 @@
     state.yDragging = false;
     requestDraw('hover');
   });
+
+  function drawMarkerWithStem(ctx, cx, priceY, markerY, color, size, drawFunc) {
+    // 1. Black dot at the actual price point
+    ctx.beginPath();
+    ctx.fillStyle = '#000000';
+    ctx.arc(cx, priceY, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // 2. Vertical dashed line connecting dot to marker
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 2]);
+    ctx.moveTo(cx, priceY);
+    ctx.lineTo(cx, markerY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 3. Draw the actual marker shape
+    drawFunc(ctx, cx, markerY, size, color);
+  }
 
   function drawTriangle(ctx, x, y, size, color, isDown) {
     ctx.save();

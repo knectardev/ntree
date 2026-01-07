@@ -67,18 +67,56 @@ class RiskRewardExecutionModel:
 
         trades = []
         execution_events = []
+        trade_id_counter = 0
+
+        def get_ts_info(idx):
+            """Helper to get standardized timestamp and ISO string for an index."""
+            try:
+                ts = df.index[idx]
+                if isinstance(ts, pd.Timestamp):
+                    if ts.tzinfo is None:
+                        ts = ts.tz_localize("UTC")
+                    else:
+                        ts = ts.tz_convert("UTC")
+                    t_ms = int(ts.value // 1_000_000)
+                    ts_iso = ts.isoformat()
+                    return t_ms, ts_iso
+                else:
+                    ts2 = pd.to_datetime(ts, utc=True, errors="coerce")
+                    if pd.notna(ts2):
+                        ts_pd = pd.Timestamp(ts2)
+                        return int(ts_pd.value // 1_000_000), ts_pd.isoformat()
+            except Exception:
+                pass
+            return None, None
+
         i = 0
         while i < len(df):
             if i < len(entry_signals) and entry_signals[i]:
                 # Entry at next bar's open
                 if i + 1 < len(df):
+                    trade_id_counter += 1
+                    trade_id = trade_id_counter
                     entry_idx = i + 1
                     entry_price = float(df.iloc[entry_idx]["open"])
 
                     side = int(sides[i]) if i < len(sides) else 1
                     is_long = side >= 0
 
-                    # Stop loss / take profit
+                    # Standard entry event
+                    e_t_ms, e_ts_iso = get_ts_info(entry_idx)
+                    execution_events.append({
+                        "trade_id": trade_id,
+                        "event": "entry",
+                        "side": "long" if is_long else "short",
+                        "t_ms": e_t_ms,
+                        "ts": e_ts_iso,
+                        "price": float(entry_price),
+                        "idx": int(entry_idx),
+                        "qty_delta": 1.0  # +1.0 for entry
+                    })
+
+                    # Stop loss / take profit targets
                     if is_long:
                         stop_loss = entry_price * (1 - risk)
                         take_profit = entry_price * (1 + reward_mult * risk)
@@ -138,45 +176,19 @@ class RiskRewardExecutionModel:
 
                     trades.append(ret)
 
-                    # Backtest-time artifact: only exists after execution.
-                    # Emit stop-loss / take-profit events for charting/debugging.
-                    try:
-                        if exit_reason in ("stop_loss", "take_profit"):
-                            t_ms = None
-                            ts_iso = None
-                            try:
-                                ts = df.index[exit_idx]
-                                if isinstance(ts, pd.Timestamp):
-                                    if ts.tzinfo is None:
-                                        ts = ts.tz_localize("UTC")
-                                    else:
-                                        ts = ts.tz_convert("UTC")
-                                    t_ms = int(ts.value // 1_000_000)
-                                    ts_iso = ts.isoformat()
-                                else:
-                                    # Best-effort: try pandas conversion
-                                    ts2 = pd.to_datetime(ts, utc=True, errors="coerce")
-                                    if pd.notna(ts2):
-                                        t_ms = int(pd.Timestamp(ts2).value // 1_000_000)
-                                        ts_iso = pd.Timestamp(ts2).isoformat()
-                            except Exception:
-                                t_ms = None
-                                ts_iso = None
-
-                            execution_events.append(
-                                {
-                                    "event": exit_reason,  # "stop_loss" | "take_profit"
-                                    "side": "long" if is_long else "short",
-                                    "t_ms": t_ms,
-                                    "ts": ts_iso,
-                                    "price": float(exit_price),
-                                    "entry_idx": int(entry_idx),
-                                    "exit_idx": int(exit_idx),
-                                }
-                            )
-                    except Exception:
-                        # Never let optional diagnostics break metrics.
-                        pass
+                    # Standard exit event
+                    x_t_ms, x_ts_iso = get_ts_info(exit_idx)
+                    execution_events.append({
+                        "trade_id": trade_id,
+                        "event": "exit",
+                        "exit_reason": exit_reason, # "stop_loss" | "take_profit" | "end_of_data"
+                        "side": "long" if is_long else "short",
+                        "t_ms": x_t_ms,
+                        "ts": x_ts_iso,
+                        "price": float(exit_price),
+                        "idx": int(exit_idx),
+                        "qty_delta": -1.0 # -1.0 for full exit
+                    })
 
                     # Skip to after exit to avoid overlapping trades
                     i = exit_idx + 1
