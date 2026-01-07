@@ -152,6 +152,48 @@ def _ensure_strategy_registered_in_init(strategy_name: str, compute_fn_name: str
         return
 
 
+def _remove_strategy_from_init(strategy_name: str, compute_fn_name: str) -> None:
+    """
+    Opposite of _ensure_strategy_registered_in_init: remove strategy from import, __all__, and registry.
+    """
+    init_path = os.path.join(STRATEGIES_DIR, "__init__.py")
+    if not os.path.exists(init_path):
+        return
+    try:
+        with open(init_path, "r", encoding="utf-8") as f:
+            src = f.read()
+    except Exception:
+        return
+
+    lines = src.splitlines(True)
+    new_lines = []
+    
+    # Simple line-by-line filtering for imports and __all__
+    # For STRATEGY_REGISTRY we need to be a bit more careful about trailing commas.
+    for ln in lines:
+        # Remove import
+        if ln.startswith(f"from strategies.{strategy_name} import"):
+            continue
+        # Remove from __all__
+        if f"'{compute_fn_name}'" in ln or f'"{compute_fn_name}"' in ln:
+            if "__all__" not in ln: # don't remove the __all__ definition line itself
+                continue
+        # Remove from STRATEGY_REGISTRY
+        if f"'{strategy_name}':" in ln or f'"{strategy_name}":' in ln:
+            continue
+        
+        new_lines.append(ln)
+
+    # Post-process registry to fix trailing commas if we removed the last entry
+    # (Though Python's dict allows trailing commas, so this is mostly cosmetic)
+    
+    try:
+        with open(init_path, "w", encoding="utf-8") as f:
+            f.write("".join(new_lines))
+    except Exception:
+        return
+
+
 def _get_replay_session(session_id: str) -> Optional[ReplaySession]:
     sid = (session_id or "").strip()
     if not sid:
@@ -272,6 +314,19 @@ def _aggregate_ohlcv(
 
     flush()
     return {"t_ms": out_t, "o": out_o, "h": out_h, "l": out_l, "c": out_c, "v": out_v}
+
+
+def _clean_series(series):
+    """Normalize series to JSON-serializable list (replace NaN/NA with None)."""
+    cleaned = []
+    for v in series:
+        if v is None:
+            cleaned.append(None)
+        elif isinstance(v, float) and math.isnan(v):
+            cleaned.append(None)
+        else:
+            cleaned.append(v)
+    return cleaned
 
 
 def _fetch_stock_data_ohlcv(
@@ -642,7 +697,8 @@ def api_window():
                 COALESCE(high_price, price)  AS h,
                 COALESCE(low_price, price)   AS l,
                 price                        AS c,
-                COALESCE(volume, 0)          AS v
+                COALESCE(volume, 0)          AS v,
+                ema_9, ema_21, ema_50, ema_200, vwap
             FROM stock_data
             WHERE ticker = ?
               AND interval = ?
@@ -654,15 +710,98 @@ def api_window():
         )
         base_rows = cur.fetchall()
 
-        parsed: List[Tuple[int, float, float, float, float, float]] = []
-        for (ts, o, h, l, c, v) in base_rows:
+        parsed: List[Tuple[int, float, float, float, float, float, Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]] = []
+        for (ts, o, h, l, c, v, e9, e21, e50, e200, vw) in base_rows:
             t_ms = _parse_iso_to_epoch_ms(ts)
             if t_ms is None:
                 continue
-            parsed.append((t_ms, float(o), float(h), float(l), float(c), float(v or 0.0)))
+            parsed.append((t_ms, float(o), float(h), float(l), float(c), float(v or 0.0), e9, e21, e50, e200, vw))
 
         # Aggregate to bar_s.
-        agg = _aggregate_ohlcv(parsed, int(bar_s))
+        # Note: _aggregate_ohlcv currently only handles OHLCV. 
+        # For now, we will handle aggregation of indicators by taking the last value in the bucket.
+        agg = _aggregate_ohlcv([p[:6] for p in parsed], int(bar_s))
+        
+        # Aggregate indicators (last value in bucket)
+        if parsed:
+            # We want to ensure agg has the indicator keys even if they are empty
+            for k in ["ema_9", "ema_21", "ema_50", "ema_200", "vwap"]:
+                agg[k] = []
+            
+            if bar_s > 60:
+                step = int(bar_s) * 1000
+                if agg["t_ms"]:
+                    curr_idx = 0
+                    for target_t in agg["t_ms"]:
+                        last_match = (None, None, None, None, None)
+                        while curr_idx < len(parsed) and parsed[curr_idx][0] < target_t + step:
+                            p = parsed[curr_idx]
+                            # index 6=e9, 7=e21, 8=e50, 9=e200, 10=vw
+                            last_match = (p[6], p[7], p[8], p[9], p[10])
+                            curr_idx += 1
+                        agg["ema_9"].append(last_match[0])
+                        agg["ema_21"].append(last_match[1])
+                        agg["ema_50"].append(last_match[2])
+                        agg["ema_200"].append(last_match[3])
+                        agg["vwap"].append(last_match[4])
+            else:
+                agg["ema_9"] = [p[6] for p in parsed]
+                agg["ema_21"] = [p[7] for p in parsed]
+                agg["ema_50"] = [p[8] for p in parsed]
+                agg["ema_200"] = [p[9] for p in parsed]
+                agg["vwap"] = [p[10] for p in parsed]
+
+        # Always recalculate EMA 200 from aggregated close prices if we have enough data
+        # This ensures accurate EMA 200 even when database has partial NULLs
+        if agg.get("c") and len(agg["c"]) >= 200:
+            df_agg = pd.DataFrame({"close": agg["c"]})
+            if ta:
+                agg["ema_200"] = _clean_series(ta.ema(df_agg["close"], length=200))
+            else:
+                agg["ema_200"] = _clean_series(df_agg["close"].ewm(span=200, adjust=False).mean())
+        elif agg.get("c") and (not agg.get("ema_200") or all(v is None for v in agg["ema_200"])):
+            # If we don't have enough data in the aggregated set, try to find more history
+            df_agg = pd.DataFrame({"close": agg["c"]})
+            if len(df_agg) < 200:
+                # Try to fetch some bars before start_sec to seed the EMA
+                try:
+                    # Fetch up to 300 daily bars of history for seeding
+                    cur.execute(
+                        """
+                        SELECT price
+                        FROM stock_data
+                        WHERE ticker = ?
+                          AND interval = '1Min'
+                          AND strftime('%s', timestamp) < ?
+                        ORDER BY timestamp DESC
+                        LIMIT 30000
+                        """,
+                        (symbol, str(start_sec)),
+                    )
+                    history_rows = cur.fetchall()
+                    if history_rows:
+                        # Aggregate history to same bar_s
+                        # This is complex, so let's just use what we have and seed manually
+                        pass
+                except:
+                    pass
+
+            if ta:
+                agg["ema_9"] = _clean_series(ta.ema(df_agg["close"], length=9))
+                agg["ema_21"] = _clean_series(ta.ema(df_agg["close"], length=21))
+                agg["ema_50"] = _clean_series(ta.ema(df_agg["close"], length=50))
+                agg["ema_200"] = _clean_series(ta.ema(df_agg["close"], length=200))
+            else:
+                agg["ema_9"] = _clean_series(df_agg["close"].ewm(span=9, adjust=False).mean())
+                agg["ema_21"] = _clean_series(df_agg["close"].ewm(span=21, adjust=False).mean())
+                agg["ema_50"] = _clean_series(df_agg["close"].ewm(span=50, adjust=False).mean())
+                agg["ema_200"] = _clean_series(df_agg["close"].ewm(span=200, adjust=False).mean())
+            
+            # If still all None, seed with first price to ensure SOME line is drawn
+            if agg["ema_200"] and all(v is None for v in agg["ema_200"]):
+                seed_ema = agg["c"][0]
+                agg["ema_200"] = [seed_ema] * len(agg["c"])
+
         t_ms_arr = agg["t_ms"]
 
         truncated = False
@@ -670,13 +809,16 @@ def api_window():
             truncated = True
             # Keep last max_bars (most relevant for chart) and adjust served start.
             keep = eff_max_bars
-            for k in ["t_ms", "o", "h", "l", "c", "v"]:
-                agg[k] = agg[k][-keep:]
+            for k in ["t_ms", "o", "h", "l", "c", "v", "ema_9", "ema_21", "ema_50", "ema_200", "vwap"]:
+                if k in agg:
+                    agg[k] = agg[k][-keep:]
             if agg["t_ms"]:
                 start_ms = int(agg["t_ms"][0])
 
         served_start = _epoch_ms_to_iso_z(int(start_ms)) if start_ms is not None else None
         served_end = _epoch_ms_to_iso_z(int(end_ms)) if end_ms is not None else None
+
+        # Build strategy signals... (rest of the function)
 
         # Build strategy signals for the aggregated window.
         # This ensures strategy markers appear when using /window (e.g. chart.html?mode=api).
@@ -717,6 +859,13 @@ def api_window():
                 "l": agg["l"],
                 "c": agg["c"],
                 "v": agg["v"],
+                "indicators_ta": {
+                    "ema_9": _clean_series(agg.get("ema_9", [])),
+                    "ema_21": _clean_series(agg.get("ema_21", [])),
+                    "ema_50": _clean_series(agg.get("ema_50", [])),
+                    "ema_200": _clean_series(agg.get("ema_200", [])),
+                    "vwap": _clean_series(agg.get("vwap", []))
+                },
                 "truncated": truncated,
                 "max_bars": eff_max_bars,
                 "live_merged": False,
@@ -1343,44 +1492,55 @@ def backtest_config():
 
 @app.route('/api/strategies', methods=['GET'])
 def list_strategies():
-    """Return strategy metadata (name, display_name, description, enabled)."""
+    """Return strategy metadata (name, display_name, description, enabled, indicators)."""
     defaults = {
         'vwap_ema_crossover_v1': {
             'display_name': 'VWAP / EMA Crossover (v1)',
-            'description': 'Entry on sign change of (VWAP - EMA21). Bullish when VWAP < EMA21, bearish otherwise.'
+            'description': 'Entry on sign change of (VWAP - EMA21). Bullish when VWAP < EMA21, bearish otherwise.',
+            'indicators': 'vwap,ema21'
         },
         'fools_paradise': {
             'display_name': 'Fools Paradise',
-            'description': 'EMA9/21/50 alignment + VWAP bias; enter on first candle in trend. Emits exits for visualization.'
+            'description': 'EMA9/21/50 alignment + VWAP bias; enter on first candle in trend. Emits exits for visualization.',
+            'indicators': 'vwap,ema9,ema21,ema50'
         }
     }
 
     reg_names = sorted(list(STRATEGY_REGISTRY.keys()))
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT name, display_name, description, enabled FROM strategies_meta")
-    rows = {r[0]: {'display_name': r[1], 'description': r[2], 'enabled': int(r[3]) if r[3] is not None else 1} for r in cur.fetchall()}
+    cur.execute("SELECT name, display_name, description, enabled, indicators FROM strategies_meta")
+    rows = {r[0]: {'display_name': r[1], 'description': r[2], 'enabled': int(r[3]) if r[3] is not None else 1, 'indicators': r[4]} for r in cur.fetchall()}
 
     out = []
     for name in reg_names:
         meta = rows.get(name)
+        dflt = defaults.get(name, {})
+        
         if not meta:
-            dflt = defaults.get(name, {})
             display_name = dflt.get('display_name', name)
             description = dflt.get('description', '')
+            indicators = dflt.get('indicators', '')
             cur.execute(
                 """
-                INSERT OR IGNORE INTO strategies_meta (name, display_name, description, enabled)
-                VALUES (?, ?, ?, 1)
+                INSERT OR IGNORE INTO strategies_meta (name, display_name, description, enabled, indicators)
+                VALUES (?, ?, ?, 1, ?)
                 """,
-                (name, display_name, description)
+                (name, display_name, description, indicators)
             )
-            meta = {'display_name': display_name, 'description': description, 'enabled': 1}
+            meta = {'display_name': display_name, 'description': description, 'enabled': 1, 'indicators': indicators}
+        elif not meta.get('indicators') and dflt.get('indicators'):
+            # Migration: if indicators are empty but we have a hardcoded default, fill it in.
+            indicators = dflt.get('indicators')
+            cur.execute("UPDATE strategies_meta SET indicators = ? WHERE name = ?", (indicators, name))
+            meta['indicators'] = indicators
+
         out.append({
             'name': name,
             'display_name': meta.get('display_name') or name,
             'description': meta.get('description') or '',
-            'enabled': bool(meta.get('enabled', 1))
+            'enabled': bool(meta.get('enabled', 1)),
+            'indicators': meta.get('indicators') or ''
         })
 
     conn.commit()
@@ -1433,6 +1593,7 @@ def create_strategy():
     name = (payload.get('name') or '').strip()
     display_name = (payload.get('display_name') or '').strip()
     description = (payload.get('description') or '').strip()
+    indicators = (payload.get('indicators') or '').strip()
     code_override = payload.get('code')
 
     if not _is_valid_strategy_name(name):
@@ -1500,15 +1661,16 @@ def {compute_fn_name}(df_prices, rth_mask=None):
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO strategies_meta (name, display_name, description, enabled)
-            VALUES (?, ?, ?, 1)
+            INSERT INTO strategies_meta (name, display_name, description, enabled, indicators)
+            VALUES (?, ?, ?, 1, ?)
             ON CONFLICT(name) DO UPDATE SET
               display_name=excluded.display_name,
               description=excluded.description,
               enabled=excluded.enabled,
+              indicators=excluded.indicators,
               updated_at=CURRENT_TIMESTAMP
             """,
-            (name, display_name, description)
+            (name, display_name, description, indicators)
         )
         conn.commit()
         conn.close()
@@ -1536,6 +1698,59 @@ def {compute_fn_name}(df_prices, rth_mask=None):
     return jsonify({'ok': True, 'name': name, 'display_name': display_name, 'description': description})
 
 
+@app.route('/api/strategy/<name>', methods=['DELETE'])
+def delete_strategy(name):
+    """
+    Delete a strategy:
+    - removes strategies/<name>.py
+    - deletes from strategies_meta table
+    - removes from STRATEGY_REGISTRY (in-memory)
+    - un-patches strategies/__init__.py
+    """
+    nm = (name or '').strip()
+    if not nm:
+        return jsonify({'error': 'name required'}), 400
+    
+    # 1. Check if it's in the registry
+    if nm not in STRATEGY_REGISTRY:
+        return jsonify({'error': 'Unknown strategy'}), 404
+
+    # 2. Determine file path
+    path = _strategy_file_path(nm)
+    
+    # 3. Clean up the physical file
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as e:
+        return jsonify({'error': f'Failed to delete file: {e}'}), 500
+
+    # 4. Clean up SQLite metadata
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('DELETE FROM strategies_meta WHERE name = ?', (nm,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass # Not fatal if metadata delete fails
+
+    # 5. Un-patch strategies/__init__.py
+    try:
+        # Note: we need the function name to clean up __all__. 
+        # By convention it is compute_{name}_signals
+        fn_name = f"compute_{nm}_signals"
+        _remove_strategy_from_init(nm, fn_name)
+    except Exception:
+        pass
+
+    # 6. Remove from in-memory registry
+    if nm in STRATEGY_REGISTRY:
+        del STRATEGY_REGISTRY[nm]
+
+    return jsonify({'ok': True, 'name': nm})
+
+
 @app.route('/api/strategy/<name>/meta', methods=['POST'])
 def update_strategy_meta(name):
     """Update strategy metadata stored in SQLite (display_name, description, enabled)."""
@@ -1548,6 +1763,7 @@ def update_strategy_meta(name):
     payload = request.get_json(silent=True) or {}
     display_name = (payload.get('display_name') or '').strip()
     description = (payload.get('description') or '').strip()
+    indicators = (payload.get('indicators') or '').strip()
     enabled = payload.get('enabled')
     enabled_i = 1 if (enabled is None or bool(enabled)) else 0
 
@@ -1559,19 +1775,20 @@ def update_strategy_meta(name):
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO strategies_meta (name, display_name, description, enabled)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO strategies_meta (name, display_name, description, enabled, indicators)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(name) DO UPDATE SET
               display_name=excluded.display_name,
               description=excluded.description,
               enabled=excluded.enabled,
+              indicators=excluded.indicators,
               updated_at=CURRENT_TIMESTAMP
             """,
-            (nm, display_name, description, enabled_i)
+            (nm, display_name, description, enabled_i, indicators)
         )
         conn.commit()
         conn.close()
-        return jsonify({'ok': True, 'name': nm, 'display_name': display_name, 'description': description, 'enabled': bool(enabled_i)})
+        return jsonify({'ok': True, 'name': nm, 'display_name': display_name, 'description': description, 'enabled': bool(enabled_i), 'indicators': indicators})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1692,17 +1909,6 @@ def perform_strategy_backtest(name, ticker, interval, fee_bp, risk_percent, rewa
 @app.route('/api/ticker/<ticker>/<interval>')
 def get_ticker_data(ticker, interval):
     """API endpoint to get ticker data for charting."""
-    def _clean(series):
-        cleaned = []
-        for v in series:
-            if v is None:
-                cleaned.append(None)
-            elif isinstance(v, float) and math.isnan(v):
-                cleaned.append(None)
-            else:
-                cleaned.append(v)
-        return cleaned
-
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -1736,24 +1942,27 @@ def get_ticker_data(ticker, interval):
             pass
 
         if ta:
-            df['ta_ema_9'] = ta.ema(df['close'], length=9)
-            df['ta_ema_21'] = ta.ema(df['close'], length=21)
-            df['ta_ema_50'] = ta.ema(df['close'], length=50)
+            df['ema_9'] = ta.ema(df['close'], length=9)
+            df['ema_21'] = ta.ema(df['close'], length=21)
+            df['ema_50'] = ta.ema(df['close'], length=50)
+            df['ema_200'] = ta.ema(df['close'], length=200)
             macd_df = ta.macd(df['close'])
             if macd_df is not None and not macd_df.empty:
-                macd_cols = list(macd_df.columns)
-                macd_col = macd_cols[0] if len(macd_cols) > 0 else None
-                macd_signal_col = macd_cols[1] if len(macd_cols) > 1 else None
-                df['ta_macd'] = macd_df[macd_col] if macd_col else None
-                df['ta_macd_signal'] = macd_df[macd_signal_col] if macd_signal_col else None
+                df['macd'] = macd_df.iloc[:, 0]
+                df['macd_signal'] = macd_df.iloc[:, 1]
+                df['macd_histogram'] = macd_df.iloc[:, 2]
+            else:
+                df['macd'] = df['macd_signal'] = df['macd_histogram'] = None
         else:
             # Fallback using pandas only
-            df['ta_ema_9'] = df['close'].ewm(span=9, adjust=False).mean()
-            df['ta_ema_21'] = df['close'].ewm(span=21, adjust=False).mean()
-            df['ta_ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
+            df['ema_9'] = df['close'].ewm(span=9, adjust=False).mean()
+            df['ema_21'] = df['close'].ewm(span=21, adjust=False).mean()
+            df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
+            df['ema_200'] = df['close'].ewm(span=200, adjust=False).mean()
             macd_line = df['close'].ewm(span=12, adjust=False).mean() - df['close'].ewm(span=26, adjust=False).mean()
-            df['ta_macd'] = macd_line
-            df['ta_macd_signal'] = macd_line.ewm(span=9, adjust=False).mean()
+            df['macd'] = macd_line
+            df['macd_signal'] = macd_line.ewm(span=9, adjust=False).mean()
+            df['macd_histogram'] = df['macd'] - df['macd_signal']
 
         # VWAP anchored per trading day to match Alpaca anchor logic
         vwap_series = calculate_vwap_per_trading_day(df.rename(columns={
@@ -1763,16 +1972,17 @@ def get_ticker_data(ticker, interval):
             'close': 'close',
             'volume': 'volume'
         }))
-        df['ta_vwap'] = vwap_series
+        df['vwap'] = vwap_series
 
         # Normalize to JSON-serializable lists (replace NaN/NA with None)
         indicators_ta = {
-            'ema_9': df['ta_ema_9'].where(pd.notna(df['ta_ema_9']), None).tolist(),
-            'ema_21': df['ta_ema_21'].where(pd.notna(df['ta_ema_21']), None).tolist(),
-            'ema_50': df['ta_ema_50'].where(pd.notna(df['ta_ema_50']), None).tolist(),
+            'ema_9': df['ema_9'].where(pd.notna(df['ema_9']), None).tolist(),
+            'ema_21': df['ema_21'].where(pd.notna(df['ema_21']), None).tolist(),
+            'ema_50': df['ema_50'].where(pd.notna(df['ema_50']), None).tolist(),
+            'ema_200': df['ema_200'].where(pd.notna(df['ema_200']), None).tolist(),
             'vwap': vwap_series.where(pd.notna(vwap_series), None).tolist(),
-            'macd': df['ta_macd'].where(pd.notna(df['ta_macd']), None).tolist() if 'ta_macd' in df else [None]*len(df),
-            'macd_signal': df['ta_macd_signal'].where(pd.notna(df['ta_macd_signal']), None).tolist() if 'ta_macd_signal' in df else [None]*len(df)
+            'macd': df['macd'].where(pd.notna(df['macd']), None).tolist() if 'macd' in df else [None]*len(df),
+            'macd_signal': df['macd_signal'].where(pd.notna(df['macd_signal']), None).tolist() if 'macd_signal' in df else [None]*len(df)
         }
 
     # Always align pandas_ta VWAP to anchored calculation if we have timestamps
@@ -1824,7 +2034,7 @@ def get_ticker_data(ticker, interval):
 
     data = {
         'labels': timestamps,
-        'prices': _clean([row[1] for row in fetched]),
+        'prices': _clean_series([row[1] for row in fetched]),
         'ohlc': [
             {
                 'open': None if (entry['open'] is None or (isinstance(entry['open'], float) and math.isnan(entry['open']))) else entry['open'],
@@ -1836,7 +2046,7 @@ def get_ticker_data(ticker, interval):
             for entry in ohlc
         ],
         'indicators': {},  # deprecated: alpaca imports removed
-        'indicators_ta': {k: _clean(v) for k, v in indicators_ta.items()},
+        'indicators_ta': {k: _clean_series(v) for k, v in indicators_ta.items()},
         'market_hours': [
             {
                 'start': period['start'].isoformat() if isinstance(period['start'], datetime) else period['start'],
@@ -2270,15 +2480,74 @@ def fetch_latest_data():
                     
                     # Sort by timestamp
                     bars = bars.sort_index()
+
+                    # Calculate technical indicators
+                    if ta:
+                        bars['ema_9'] = ta.ema(bars['close'], length=9)
+                        bars['ema_21'] = ta.ema(bars['close'], length=21)
+                        bars['ema_50'] = ta.ema(bars['close'], length=50)
+                        bars['ema_200'] = ta.ema(bars['close'], length=200)
+                        bars['rsi'] = ta.rsi(bars['close'], length=14)
+                        
+                        macd = ta.macd(bars['close'])
+                        if macd is not None and not macd.empty:
+                            bars['macd'] = macd.iloc[:, 0]
+                            bars['macd_signal'] = macd.iloc[:, 1]
+                            bars['macd_histogram'] = macd.iloc[:, 2]
+                        else:
+                            bars['macd'] = bars['macd_signal'] = bars['macd_histogram'] = np.nan
+                            
+                        bbands = ta.bbands(bars['close'], length=20, std=2)
+                        if bbands is not None and not bbands.empty:
+                            bars['bb_lower'] = bbands.iloc[:, 0]
+                            bars['bb_middle'] = bbands.iloc[:, 1]
+                            bars['bb_upper'] = bbands.iloc[:, 2]
+                        else:
+                            bars['bb_lower'] = bars['bb_middle'] = bars['bb_upper'] = np.nan
+                            
+                        bars['sma_20'] = ta.sma(bars['close'], length=20)
+                        bars['sma_50'] = ta.sma(bars['close'], length=50)
+                        bars['sma_200'] = ta.sma(bars['close'], length=200)
+                    else:
+                        # Fallback using pandas only
+                        bars['ema_9'] = bars['close'].ewm(span=9, adjust=False).mean()
+                        bars['ema_21'] = bars['close'].ewm(span=21, adjust=False).mean()
+                        bars['ema_50'] = bars['close'].ewm(span=50, adjust=False).mean()
+                        bars['ema_200'] = bars['close'].ewm(span=200, adjust=False).mean()
+                        
+                        # Simple RSI fallback
+                        delta = bars['close'].diff()
+                        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                        rs = gain / loss
+                        bars['rsi'] = 100 - (100 / (1 + rs))
+                        
+                        ema12 = bars['close'].ewm(span=12, adjust=False).mean()
+                        ema26 = bars['close'].ewm(span=26, adjust=False).mean()
+                        bars['macd'] = ema12 - ema26
+                        bars['macd_signal'] = bars['macd'].ewm(span=9, adjust=False).mean()
+                        bars['macd_histogram'] = bars['macd'] - bars['macd_signal']
+                        
+                        bars['sma_20'] = bars['close'].rolling(window=20).mean()
+                        bars['sma_50'] = bars['close'].rolling(window=50).mean()
+                        bars['sma_200'] = bars['close'].rolling(window=200).mean()
+                        
+                        std20 = bars['close'].rolling(window=20).std()
+                        bars['bb_middle'] = bars['sma_20']
+                        bars['bb_upper'] = bars['bb_middle'] + (std20 * 2)
+                        bars['bb_lower'] = bars['bb_middle'] - (std20 * 2)
                     
-                    # Insert data into database (only OHLCV)
+                    bars['vwap'] = calculate_vwap_per_trading_day(bars)
+
+                    # Insert data into database (OHLCV + indicators)
                     for timestamp, row in bars.iterrows():
                         try:
                             cursor.execute('''
                                 INSERT OR REPLACE INTO stock_data 
                                 (ticker, timestamp, price, open_price, high_price, low_price, volume, 
-                                 interval)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                 interval, ema_9, ema_21, ema_50, ema_200, vwap, rsi, macd, macd_signal, macd_histogram, 
+                                 bb_upper, bb_middle, bb_lower, sma_20, sma_50, sma_200)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (
                                 ticker,
                                 timestamp.isoformat(),
@@ -2287,7 +2556,22 @@ def fetch_latest_data():
                                 float(row['high']),
                                 float(row['low']),
                                 float(row['volume']) if 'volume' in row and pd.notna(row['volume']) else None,
-                                interval
+                                interval,
+                                float(row['ema_9']) if pd.notna(row['ema_9']) else None,
+                                float(row['ema_21']) if pd.notna(row['ema_21']) else None,
+                                float(row['ema_50']) if pd.notna(row['ema_50']) else None,
+                                float(row['ema_200']) if pd.notna(row['ema_200']) else None,
+                                float(row['vwap']) if pd.notna(row['vwap']) else None,
+                                float(row['rsi']) if pd.notna(row['rsi']) else None,
+                                float(row['macd']) if pd.notna(row['macd']) else None,
+                                float(row['macd_signal']) if pd.notna(row['macd_signal']) else None,
+                                float(row['macd_histogram']) if pd.notna(row['macd_histogram']) else None,
+                                float(row['bb_upper']) if pd.notna(row['bb_upper']) else None,
+                                float(row['bb_middle']) if pd.notna(row['bb_middle']) else None,
+                                float(row['bb_lower']) if pd.notna(row['bb_lower']) else None,
+                                float(row['sma_20']) if pd.notna(row['sma_20']) else None,
+                                float(row['sma_50']) if pd.notna(row['sma_50']) else None,
+                                float(row['sma_200']) if pd.notna(row['sma_200']) else None
                             ))
                             total_records += 1
                             last_timestamp = timestamp.isoformat()

@@ -32,6 +32,7 @@
       ema9: !!(ui.indEma9 && ui.indEma9.checked),
       ema21: !!(ui.indEma21 && ui.indEma21.checked),
       ema50: !!(ui.indEma50 && ui.indEma50.checked),
+      ema200: !!(ui.indEma200 && ui.indEma200.checked),
       vwap: !!(ui.indVwap && ui.indVwap.checked),
         // candlestick bias intentionally disabled/hidden
         candleBias: false
@@ -40,7 +41,7 @@
 
   function anyOverlayEnabled(s){
     if(!s) return false;
-    return !!(s.ema9 || s.ema21 || s.ema50 || s.vwap);
+    return !!(s.ema9 || s.ema21 || s.ema50 || s.ema200 || s.vwap);
   }
 
   // Overlay cache keyed by (symbol, bar_s, firstT, lastT, seriesKey)
@@ -301,6 +302,10 @@
         var s50 = buildSeries(ema["50"], "ema_50", "EMA 50", "rgba(215,224,234,0.52)", 1.25);
         if(s50) out.push(s50);
       }
+      if(settings.ema200){
+        var s200 = buildSeries(ema["200"], "ema_200", "EMA 200", "rgba(255, 0, 0, 1.0)", 2.0);
+        if(s200) out.push(s200);
+      }
       if(settings.vwap){
         var vw = buildSeries(overlaysObj.vwap, "vwap_session", "VWAP", "rgb(255, 215, 0)", 1.55);
         if(vw) out.push(vw);
@@ -394,34 +399,50 @@
     }
 
     // Overlays:
-    // - In replay mode, prefer server-provided overlays only if they actually contain data.
-    //   (Backend may emit `overlays: {}`; in that case we compute locally so EMA/VWAP stays visible.)
-    // - Otherwise, compute locally from the loaded payload.
+    // Always compute overlays against the FULL data set first so that long-period
+    // indicators (like EMA 200) have enough lookback history to be accurate.
     try{
       var os = getOverlaySettings();
-      if(os && anyOverlayEnabled(os) && filtered.length){
-        if(
-          state && state.replay && state.replay.active &&
-          state.replay.lastState && replayOverlaysAvailable(state.replay.lastState.overlays)
-        ){
-          var allowed = new Set();
-          for(var ii=0; ii<filtered.length; ii++){
-            var d2 = filtered[ii];
-            if(d2 && Number.isFinite(Number(d2.t))) allowed.add(Number(d2.t));
+      if(os && anyOverlayEnabled(os) && base.length){
+        // Compute overlays on FULL history
+        var fullArrs = barsToArrays(base);
+        var fullOverlays = computeOverlays(
+          fullArrs,
+          os,
+          { symbol: String(getSymbol() || ''), bar_s: Math.floor(Number(state.windowSec) || 60) }
+        );
+
+        // Now slice those full overlays to match our filtered 'filtered' bars
+        var finalOverlays = [];
+        if(Array.isArray(fullOverlays) && fullOverlays.length){
+          // Map filtered timestamps to indices in the full dataset for fast slicing
+          var tsToIdx = Object.create(null);
+          for(var i0=0; i0<base.length; i0++) {
+            var tval = Number(base[i0].t);
+            if (Number.isFinite(tval)) tsToIdx[tval] = i0;
           }
-          state.overlays = overlaysFromReplayState(state.replay.lastState.overlays, os, allowed);
-        } else {
-          var arrs = barsToArrays(filtered);
-          state.overlays = computeOverlays(
-            arrs,
-            os,
-            { symbol: String(getSymbol() || ''), bar_s: Math.floor(Number(state.windowSec) || 60) }
-          );
+
+          for(var si=0; si<fullOverlays.length; si++){
+            var s0 = fullOverlays[si];
+            if (!s0 || !Array.isArray(s0.y)) continue;
+            var slicedY = new Array(filtered.length);
+            var slicedT = new Array(filtered.length);
+            for(var fi=0; fi<filtered.length; fi++){
+              var tm = Number(filtered[fi].t);
+              var idx = tsToIdx[tm];
+              slicedY[fi] = (idx !== undefined) ? s0.y[idx] : NaN;
+              slicedT[fi] = tm;
+            }
+            var sFinal = Object.assign({}, s0, { t_ms: slicedT, y: slicedY });
+            finalOverlays.push(sFinal);
+          }
         }
+        state.overlays = finalOverlays;
       } else {
         state.overlays = [];
       }
     } catch(_e2){
+      console.error('Overlay computation failed:', _e2);
       state.overlays = [];
     }
 
@@ -544,7 +565,7 @@
     return { t_ms: t_ms.slice(0, n), y: y, key: 'vwap_session', label: 'VWAP' };
   }
 
-  function computeOverlays(bars, settings, meta){
+  function computeOverlays(bars, settings, meta, indicators_ta){
     var out = [];
     if(!bars || !Array.isArray(bars.t_ms) || !bars.t_ms.length) return out;
     if(!settings || !anyOverlayEnabled(settings)) return out;
@@ -557,6 +578,46 @@
     var n0 = Math.floor(Number(bars.t_ms.length) || 0);
     var baseKey = sym + '|' + barS + '|' + String(firstT) + '|' + String(lastT) + '|' + String(n0) + '|';
 
+    // Helper to convert server indicator array to overlay series format
+    function seriesFromServerIndicator(key, color, width, label){
+      if(!indicators_ta || !indicators_ta[key]) {
+        if(key === 'ema_200') console.log('EMA 200: indicators_ta missing or key not found', indicators_ta ? Object.keys(indicators_ta) : 'no indicators_ta');
+        return null;
+      }
+      var arr = indicators_ta[key];
+      if(!Array.isArray(arr)) {
+        if(key === 'ema_200') console.log('EMA 200: not an array', typeof arr);
+        return null;
+      }
+      if(arr.length !== bars.t_ms.length) {
+        if(key === 'ema_200') console.log('EMA 200: length mismatch', arr.length, 'vs', bars.t_ms.length);
+        return null;
+      }
+      // Filter out null/NaN values and check if we have enough valid data
+      var validCount = 0;
+      var firstValidIdx = -1;
+      for(var i=0; i<arr.length; i++){
+        var v = arr[i];
+        if(v !== null && v !== undefined && Number.isFinite(Number(v))) {
+          validCount++;
+          if(firstValidIdx < 0) firstValidIdx = i;
+        }
+      }
+      if(key === 'ema_200') console.log('EMA 200: valid count', validCount, 'out of', arr.length, 'first valid at', firstValidIdx);
+      if(validCount < 2) {
+        if(key === 'ema_200') console.log('EMA 200: not enough valid points');
+        return null; // Need at least 2 points to draw a line
+      }
+      var y = new Array(arr.length);
+      for(var i=0; i<arr.length; i++){
+        var v = arr[i];
+        y[i] = (v !== null && v !== undefined && Number.isFinite(Number(v))) ? Number(v) : NaN;
+      }
+      var result = { t_ms: bars.t_ms.slice(), y: y, key: key, label: label || key, color: color, width: width };
+      if(key === 'ema_200') console.log('EMA 200: created series with', y.filter(function(v){ return Number.isFinite(v); }).length, 'valid values');
+      return result;
+    }
+
     function getOrCompute(seriesKey, computeFn){
       var k = baseKey + seriesKey;
       var cached = cacheGet(k);
@@ -567,19 +628,30 @@
     }
 
     if(settings.ema9){
-      var s9 = getOrCompute('ema_9', function(){ return emaFromClose(bars.t_ms, bars.c, 9); });
+      // Prefer server-provided data, fall back to client computation
+      var s9 = seriesFromServerIndicator('ema_9', 'rgba(215,224,234,0.92)', 1.25, 'EMA 9');
+      if(!s9) s9 = getOrCompute('ema_9', function(){ return emaFromClose(bars.t_ms, bars.c, 9); });
       if(s9){ s9.color = 'rgba(215,224,234,0.92)'; s9.width = 1.25; out.push(s9); }
     }
     if(settings.ema21){
-      var s21 = getOrCompute('ema_21', function(){ return emaFromClose(bars.t_ms, bars.c, 21); });
+      var s21 = seriesFromServerIndicator('ema_21', 'rgba(215,224,234,0.72)', 1.25, 'EMA 21');
+      if(!s21) s21 = getOrCompute('ema_21', function(){ return emaFromClose(bars.t_ms, bars.c, 21); });
       if(s21){ s21.color = 'rgba(215,224,234,0.72)'; s21.width = 1.25; out.push(s21); }
     }
     if(settings.ema50){
-      var s50 = getOrCompute('ema_50', function(){ return emaFromClose(bars.t_ms, bars.c, 50); });
+      var s50 = seriesFromServerIndicator('ema_50', 'rgba(215,224,234,0.52)', 1.25, 'EMA 50');
+      if(!s50) s50 = getOrCompute('ema_50', function(){ return emaFromClose(bars.t_ms, bars.c, 50); });
       if(s50){ s50.color = 'rgba(215,224,234,0.52)'; s50.width = 1.25; out.push(s50); }
     }
+    if(settings.ema200){
+      // EMA 200 especially benefits from server-provided data (needs 200 bars of history)
+      var s200 = seriesFromServerIndicator('ema_200', 'rgba(255, 0, 0, 1.0)', 2.0, 'EMA 200');
+      if(!s200) s200 = getOrCompute('ema_200', function(){ return emaFromClose(bars.t_ms, bars.c, 200); });
+      if(s200){ s200.color = 'rgba(255, 0, 0, 1.0)'; s200.width = 2.0; out.push(s200); }
+    }
     if(settings.vwap){
-      var vw = getOrCompute('vwap_session', function(){ return vwapSession(bars); });
+      var vw = seriesFromServerIndicator('vwap', 'rgb(255, 215, 0)', 1.55, 'VWAP');
+      if(!vw) vw = getOrCompute('vwap_session', function(){ return vwapSession(bars); });
       if(vw){ vw.color = 'rgb(255, 215, 0)'; vw.width = 1.55; out.push(vw); }
     }
     return out;

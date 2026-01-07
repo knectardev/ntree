@@ -16,6 +16,7 @@
     const runBacktestBtn = document.getElementById('runBacktestBtn');
     const resultsBox = document.getElementById('strategyResults');
     const showExecMarkersChk = document.getElementById('showExecMarkers');
+    const autoIndChk = document.getElementById('autoInd');
     const execLegend = document.getElementById('execLegend');
 
     const backtestState = {
@@ -106,6 +107,32 @@
             }
         }
         if (resultsBox) resultsBox.style.display = 'none';
+        
+        // Auto-enable relevant indicators if the checkbox is checked.
+        if (autoIndChk && autoIndChk.checked && val !== 'none') {
+            const meta = backtestState.strategyMeta[val];
+            if (meta && meta.indicators) {
+                const requested = String(meta.indicators).toLowerCase().split(',').map(s => s.trim());
+                // Map of short indicator names to their UI checkbox IDs
+                const idMap = {
+                    'ema9': 'indEma9',
+                    'ema21': 'indEma21',
+                    'ema50': 'indEma50',
+                    'vwap': 'indVwap'
+                };
+                
+                Object.keys(idMap).forEach(key => {
+                    const el = document.getElementById(idMap[key]);
+                    if (el) {
+                        const shouldBeChecked = requested.includes(key);
+                        if (el.checked !== shouldBeChecked) {
+                            el.checked = shouldBeChecked;
+                        }
+                    }
+                });
+            }
+        }
+
         if (typeof window.loadFromAPI === 'function') window.loadFromAPI();
     });
 
@@ -175,7 +202,7 @@
                     item.title = s.description || '';
                     item.textContent = s.display_name || s.name;
                     strategyMenu.appendChild(item);
-                    backtestState.strategyMeta[s.name] = s;
+                    backtestState.strategyMeta[s.name] = s; // Stores name, display_name, description, enabled, indicators
                 });
             }
 

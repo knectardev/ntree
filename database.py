@@ -37,7 +37,22 @@ def init_database():
         ('open_price', 'REAL'),
         ('high_price', 'REAL'),
         ('low_price', 'REAL'),
-        ('volume', 'REAL')
+        ('volume', 'REAL'),
+        ('ema_9', 'REAL'),
+        ('ema_21', 'REAL'),
+        ('ema_50', 'REAL'),
+        ('ema_200', 'REAL'),
+        ('vwap', 'REAL'),
+        ('rsi', 'REAL'),
+        ('macd', 'REAL'),
+        ('macd_signal', 'REAL'),
+        ('macd_histogram', 'REAL'),
+        ('bb_upper', 'REAL'),
+        ('bb_middle', 'REAL'),
+        ('bb_lower', 'REAL'),
+        ('sma_20', 'REAL'),
+        ('sma_50', 'REAL'),
+        ('sma_200', 'REAL')
     ]
     
     for column_name, column_type in columns_to_add:
@@ -190,11 +205,17 @@ def init_database():
             name TEXT PRIMARY KEY,
             display_name TEXT,
             description TEXT,
+            indicators TEXT,
             enabled INTEGER NOT NULL DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # Migration: add indicators column if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE strategies_meta ADD COLUMN indicators TEXT")
+    except sqlite3.OperationalError:
+        pass
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_strat_meta_enabled ON strategies_meta(enabled)
     ''')

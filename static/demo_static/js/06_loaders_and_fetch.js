@@ -209,6 +209,14 @@
       var txt = await res.text();
       var t2 = (window.performance && performance.now) ? performance.now() : Date.now();
       var j = JSON.parse(txt);
+      if (j && j.indicators_ta) {
+        console.log('Server indicators received:', Object.keys(j.indicators_ta));
+        if (j.indicators_ta.ema_200) {
+          var e200 = j.indicators_ta.ema_200;
+          var nonNull = e200.filter(v => v !== null).length;
+          console.log('EMA 200 values:', e200.length, 'total,', nonNull, 'non-null');
+        }
+      }
       var t3 = (window.performance && performance.now) ? performance.now() : Date.now();
       if(myReq !== state._reqSeq) return; // stale response
 
@@ -345,7 +353,8 @@
           overlaysFull = computeOverlays(
             { t_ms: t, o: o, h: h, l: l, c: c, v: v },
             overlaySettings0,
-            { symbol: symbol, bar_s: effBar }
+            { symbol: symbol, bar_s: effBar },
+            j.indicators_ta
           );
         }
       } catch(_e){}
@@ -402,6 +411,7 @@
 
       // Store unfiltered window, then apply TradingView-style session filtering to build state.data.
       state.dataFull = out;
+      state.indicators_ta_full = j.indicators_ta || {};
       state.strategies = j.strategies || {};
       state.overlaysFull = overlaysFull || [];
       state.data = out;

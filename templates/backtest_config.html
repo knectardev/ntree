@@ -191,6 +191,7 @@
                 </select>
                 <button type="button" id="strategyLoadBtn" style="width: auto;">Load</button>
                 <button type="button" id="strategySaveBtn" style="width: auto;">Save</button>
+                <button type="button" id="strategyDeleteBtn" style="width: auto; background: #ef4444;">Delete</button>
             </div>
 
             <div style="padding:10px; border:1px solid #334155; border-radius:8px; background:#0b1220; margin-bottom:12px;">
@@ -201,6 +202,8 @@
                 <input id="strategyMetaDisplay" type="text" placeholder="e.g., My Strategy (v1)" />
                 <label for="strategyMetaDesc">Description</label>
                 <input id="strategyMetaDesc" type="text" placeholder="Shown in chart strategy tooltip" />
+                <label for="strategyMetaIndicators">Relevant Indicators (comma-separated)</label>
+                <input id="strategyMetaIndicators" type="text" placeholder="e.g., vwap,ema9,ema21,ema50" />
                 <label style="display:flex; gap:10px; align-items:center; font-weight:600;">
                     <input id="strategyMetaEnabled" type="checkbox" checked style="width:auto; margin:0;" />
                     Enabled
@@ -228,6 +231,7 @@
         const stratSelect = document.getElementById('strategyCodeSelect');
         const stratLoadBtn = document.getElementById('strategyLoadBtn');
         const stratSaveBtn = document.getElementById('strategySaveBtn');
+        const stratDeleteBtn = document.getElementById('strategyDeleteBtn');
         const stratCodeArea = document.getElementById('strategyCodeArea');
         const stratStatus = document.getElementById('strategyStatus');
         let strategyList = [];
@@ -236,6 +240,7 @@
         const metaName = document.getElementById('strategyMetaName');
         const metaDisplay = document.getElementById('strategyMetaDisplay');
         const metaDesc = document.getElementById('strategyMetaDesc');
+        const metaIndicators = document.getElementById('strategyMetaIndicators');
         const metaEnabled = document.getElementById('strategyMetaEnabled');
 
         const CREATE_NEW_VALUE = '__new__';
@@ -373,6 +378,7 @@
                 if (metaName) { metaName.disabled = false; metaName.value = ''; }
                 if (metaDisplay) metaDisplay.value = '';
                 if (metaDesc) metaDesc.value = '';
+                if (metaIndicators) metaIndicators.value = '';
                 if (metaEnabled) metaEnabled.checked = true;
                 if (stratCodeArea) stratCodeArea.value = templateForNewStrategy('', '', '');
                 return;
@@ -382,6 +388,7 @@
             if (metaName) { metaName.value = meta ? meta.name : val; metaName.disabled = true; }
             if (metaDisplay) metaDisplay.value = meta ? (meta.display_name || meta.name) : val;
             if (metaDesc) metaDesc.value = meta ? (meta.description || '') : '';
+            if (metaIndicators) metaIndicators.value = meta ? (meta.indicators || '') : '';
             if (metaEnabled) metaEnabled.checked = meta ? !!meta.enabled : true;
 
             await loadStrategyCode();
@@ -397,6 +404,7 @@
             const name = (sel === CREATE_NEW_VALUE) ? (metaName ? metaName.value.trim() : '') : sel;
             const display_name = metaDisplay ? metaDisplay.value.trim() : '';
             const description = metaDesc ? metaDesc.value.trim() : '';
+            const indicators = metaIndicators ? metaIndicators.value.trim() : '';
             const enabled = metaEnabled ? !!metaEnabled.checked : true;
             const code = stratCodeArea ? (stratCodeArea.value || '') : '';
 
@@ -412,7 +420,7 @@
                     const resp = await fetch('/api/strategies/create', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, display_name, description, code })
+                        body: JSON.stringify({ name, display_name, description, indicators, code })
                     });
                     const data = await resp.json();
                     if (!resp.ok || data.error) throw new Error(data.error || 'Create failed');
@@ -427,7 +435,7 @@
                 const respMeta = await fetch(`/api/strategy/${encodeURIComponent(name)}/meta`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ display_name, description, enabled })
+                    body: JSON.stringify({ display_name, description, indicators, enabled })
                 });
                 const metaResp = await respMeta.json();
                 if (!respMeta.ok || metaResp.error) throw new Error(metaResp.error || 'Meta update failed');
@@ -584,6 +592,35 @@
 
         if (stratLoadBtn) stratLoadBtn.addEventListener('click', loadStrategyCode);
         if (stratSaveBtn) stratSaveBtn.addEventListener('click', saveStrategyAll);
+        
+        if (stratDeleteBtn) stratDeleteBtn.addEventListener('click', async () => {
+            const name = stratSelect.value;
+            if (!name || name === CREATE_NEW_VALUE) {
+                setStratStatus('Choose an existing strategy to delete.', false);
+                return;
+            }
+            if (!confirm(`Are you sure you want to delete strategy "${name}"?\n\nThis will remove the source file, database metadata, and registration entries.`)) {
+                return;
+            }
+            
+            setLoading(true, stratDeleteBtn, 'Deleting');
+            try {
+                const resp = await fetch(`/api/strategy/${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+                const data = await resp.json();
+                if (!resp.ok || data.error) throw new Error(data.error || 'Delete failed');
+                
+                setStratStatus(`Deleted ${name}.`, true);
+                stratCodeArea.value = '';
+                await fetchStrategiesForEditor();
+            } catch (err) {
+                setStratStatus(err.message || 'Delete failed', false);
+            } finally {
+                setLoading(false, stratDeleteBtn, 'Delete');
+            }
+        });
+
         if (stratSelect) stratSelect.addEventListener('change', async () => {
             if (stratCodeArea) stratCodeArea.value = '';
             await onStrategySelected(stratSelect.value);

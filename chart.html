@@ -75,6 +75,14 @@
           </label>
 
           <label class="chkRow">
+            <input id="indEma200" type="checkbox" />
+            <span class="chkLbl">
+              <span class="chkName">EMA 200</span>
+              <span class="swatch ema200" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <label class="chkRow">
             <input id="indVwap" type="checkbox" checked />
             <span class="chkLbl">
               <span class="chkName">VWAP</span>
@@ -223,6 +231,18 @@
 
             <button class="btnPrimary" type="button" id="runBacktestBtn" style="margin-top: 10px;">Run Backtest</button>
             <div id="strategyResults" class="hint" style="margin-top: 10px; display: none; white-space: pre-line; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;"></div>
+
+            <label class="chkRow" title="Automatically enable indicators relevant to the selected strategy" style="margin-top:10px;">
+              <input id="autoInd" type="checkbox" checked />
+              <span class="chkLbl">
+                <span class="chkNameRow">
+                  <span class="chkName">Auto-enable indicators</span>
+                </span>
+                <span class="hint" style="display:block;margin-top:2px;">
+                  Toggle VWAP/EMA based on strategy.
+                </span>
+              </span>
+            </label>
 
             <label class="chkRow" title="Show/hide backtest-time stop-loss and take-profit markers" style="margin-top:10px;">
               <input id="showExecMarkers" type="checkbox" checked />

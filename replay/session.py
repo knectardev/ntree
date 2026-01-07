@@ -390,12 +390,14 @@ class ReplaySession:
                 ema9 = _ema_series(c_list, 9)
                 ema21 = _ema_series(c_list, 21)
                 ema50 = _ema_series(c_list, 50)
+                ema200 = _ema_series(c_list, 200)
                 vwap = _vwap_session_series(ts_utc=ts_list, high=h_list, low=l_list, close=c_list, volume=v_list)
                 overlays = {
                     "ema": {
                         "9": [{"ts": _iso_z(ts_list[i]), "v": ema9[i]} for i in range(n)],
                         "21": [{"ts": _iso_z(ts_list[i]), "v": ema21[i]} for i in range(n)],
                         "50": [{"ts": _iso_z(ts_list[i]), "v": ema50[i]} for i in range(n)],
+                        "200": [{"ts": _iso_z(ts_list[i]), "v": ema200[i]} for i in range(n)],
                     },
                     "vwap": [
                         {"ts": _iso_z(ts_list[i]), "v": vwap[i]} for i in range(n)
@@ -593,6 +595,7 @@ class ReplaySession:
         ema9 = _ema_series(c_list, 9) if c_list else []
         ema21 = _ema_series(c_list, 21) if c_list else []
         ema50 = _ema_series(c_list, 50) if c_list else []
+        ema200 = _ema_series(c_list, 200) if c_list else []
 
         # Reset VWAP state and compute window series using incremental updater (ensures continuity state is correct).
         self._delta_vwap_state = {}
@@ -616,7 +619,12 @@ class ReplaySession:
             return out
 
         self._delta_overlays = {
-            "ema": {"9": points(ts_list, ema9), "21": points(ts_list, ema21), "50": points(ts_list, ema50)},
+            "ema": {
+                "9": points(ts_list, ema9),
+                "21": points(ts_list, ema21),
+                "50": points(ts_list, ema50),
+                "200": points(ts_list, ema200),
+            },
             "vwap": points(ts_list, vwap_vals),
         }
         # Store last EMA values for incremental stepping (None-safe).
@@ -624,6 +632,7 @@ class ReplaySession:
             "9": (ema9[-1] if ema9 else None),
             "21": (ema21[-1] if ema21 else None),
             "50": (ema50[-1] if ema50 else None),
+            "200": (ema200[-1] if ema200 else None),
         }
         self._delta_steps = 0
         self._delta_inited = True
@@ -758,9 +767,10 @@ class ReplaySession:
         k9 = 2.0 / (9.0 + 1.0)
         k21 = 2.0 / (21.0 + 1.0)
         k50 = 2.0 / (50.0 + 1.0)
+        k200 = 2.0 / (200.0 + 1.0)
         c = float(bar["c"])
         ema_append: Dict[str, Dict[str, Any]] = {}
-        for p, k in (("9", k9), ("21", k21), ("50", k50)):
+        for p, k in (("9", k9), ("21", k21), ("50", k50), ("200", k200)):
             prev = self._delta_ema_last.get(p)
             if prev is None:
                 ema = c
@@ -780,7 +790,7 @@ class ReplaySession:
         try:
             ov = self._delta_overlays
             if isinstance(ov.get("ema"), dict):
-                for p in ("9", "21", "50"):
+                for p in ("9", "21", "50", "200"):
                     arr = ov["ema"].get(p)
                     if isinstance(arr, list) and arr:
                         arr.pop(0)
@@ -825,7 +835,12 @@ class ReplaySession:
                 "drop": drop,
                 "append_bars": [bar],
                 "overlays_append": {
-                    "ema": {"9": [ema_append["9"]], "21": [ema_append["21"]], "50": [ema_append["50"]]},
+                    "ema": {
+                        "9": [ema_append["9"]],
+                        "21": [ema_append["21"]],
+                        "50": [ema_append["50"]],
+                        "200": [ema_append["200"]],
+                    },
                     "vwap": [vwap_append],
                 },
             },

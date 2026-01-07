@@ -174,6 +174,7 @@
         os0 && os0.ema9 ? 1 : 0,
         os0 && os0.ema21 ? 1 : 0,
         os0 && os0.ema50 ? 1 : 0,
+        os0 && os0.ema200 ? 1 : 0,
         os0 && os0.vwap ? 1 : 0,
         String(state.hoverTradeId || 'none') // Include hoverTradeId in cache key
       ].join('|');
@@ -834,6 +835,7 @@
         for(var si=0; si<ovs.length; si++){
           var s = ovs[si];
           if(!s || !Array.isArray(s.y) || s.y.length < 2) continue;
+          if (s.key === 'ema_200') console.log('Drawing EMA 200, points:', s.y.length);
           var pts = [];
           for(var bi=start; bi<=end; bi++){
             var x = xForIndex(bi + 0.5, plot, barsVisible);
@@ -1998,37 +2000,29 @@
     applySessionFilter({ skipSave: false, skipDraw: false });
   }
 
-  function recomputeOverlaysFromState(){
-    try{
-      var s = getOverlaySettings();
-      if(!s || !anyOverlayEnabled(s) || !Array.isArray(state.data) || !state.data.length){
-        state.overlays = [];
-        return;
-      }
-      var n = state.data.length;
-      var t_ms = new Array(n);
-      var o = new Array(n);
-      var h = new Array(n);
-      var l = new Array(n);
-      var c = new Array(n);
-      var v = new Array(n);
-      for(var i=0;i<n;i++){
-        var d = state.data[i];
-        t_ms[i] = Number(d.t);
-        o[i] = Number(d.o);
-        h[i] = Number(d.h);
-        l[i] = Number(d.l);
-        c[i] = Number(d.c);
-        v[i] = Number(d.v);
-      }
-      state.overlays = computeOverlays(
-        { t_ms: t_ms, o: o, h: h, l: l, c: c, v: v },
-        s,
-        { symbol: String(getSymbol() || ''), bar_s: Math.floor(Number(state.windowSec) || 60) }
-      );
-    } catch(_e){
-      state.overlays = [];
+  // Debug helper
+  window.debugOverlays = function() {
+    console.log('--- Overlay Debug ---');
+    console.log('Overlay Settings:', getOverlaySettings());
+    console.log('state.data.length:', state.data ? state.data.length : 0);
+    console.log('state.dataFull.length:', state.dataFull ? state.dataFull.length : 0);
+    console.log('state.overlays:', state.overlays);
+    if (state.overlays && state.overlays.length) {
+      state.overlays.forEach(o => {
+        var nonNull = 0;
+        if (o.y) {
+           for(var i=0; i<o.y.length; i++) if(!isNaN(o.y[i])) nonNull++;
+        }
+        console.log(`- ${o.label}: ${o.y ? o.y.length : 0} points, ${nonNull} non-NaN`);
+      });
     }
+    console.log('--- End Debug ---');
+  };
+
+  function recomputeOverlaysFromState(){
+    // Use applySessionFilter to recompute overlays correctly (using FULL data history)
+    // while preserving the current session filters.
+    applySessionFilter({ skipSave: true, skipDraw: true });
   }
 
   async function onOverlayToggleChanged(){
@@ -2066,6 +2060,7 @@
   if(ui.indEma9) ui.indEma9.addEventListener('change', onOverlayToggleChanged);
   if(ui.indEma21) ui.indEma21.addEventListener('change', onOverlayToggleChanged);
   if(ui.indEma50) ui.indEma50.addEventListener('change', onOverlayToggleChanged);
+  if(ui.indEma200) ui.indEma200.addEventListener('change', onOverlayToggleChanged);
   if(ui.indVwap) ui.indVwap.addEventListener('change', onOverlayToggleChanged);
   // Candle bias removed.
   if(ui.showBands) ui.showBands.addEventListener('change', onToggleDraw);
@@ -3041,6 +3036,9 @@
           if(os.ema50 && Array.isArray(ema['50']) && ema['50'].length){
             out.push({ t_ms: [], y: yFromPoints(ema['50']), key: 'ema_50', label: 'EMA 50', color: 'rgba(215,224,234,0.52)', width: 1.25 });
           }
+          if(os.ema200 && Array.isArray(ema['200']) && ema['200'].length){
+            out.push({ t_ms: [], y: yFromPoints(ema['200']), key: 'ema_200', label: 'EMA 200', color: 'rgba(255, 0, 0, 1.0)', width: 2.0 });
+          }
           if(os.vwap && Array.isArray(st2.overlays && st2.overlays.vwap) && st2.overlays.vwap.length){
             out.push({ t_ms: [], y: yFromPoints(st2.overlays.vwap), key: 'vwap_session', label: 'VWAP', color: 'rgb(255, 215, 0)', width: 1.55 });
           }
@@ -3207,6 +3205,7 @@
                   if(os2.ema9) appendSeries('ema_9', ema2['9']);
                   if(os2.ema21) appendSeries('ema_21', ema2['21']);
                   if(os2.ema50) appendSeries('ema_50', ema2['50']);
+                  if(os2.ema200) appendSeries('ema_200', ema2['200']);
                   if(os2.vwap) appendSeries('vwap_session', st.overlays.vwap);
                 }
               } else {
@@ -3375,9 +3374,11 @@
           var p9 = (Array.isArray(emaLS['9']) && emaLS['9'].length) ? emaLS['9'][emaLS['9'].length - 1] : null;
           var p21 = (Array.isArray(emaLS['21']) && emaLS['21'].length) ? emaLS['21'][emaLS['21'].length - 1] : null;
           var p50 = (Array.isArray(emaLS['50']) && emaLS['50'].length) ? emaLS['50'][emaLS['50'].length - 1] : null;
+          var p200 = (Array.isArray(emaLS['200']) && emaLS['200'].length) ? emaLS['200'][emaLS['200'].length - 1] : null;
           ovLS.ema['9'] = shiftAppend(ovLS.ema['9'], p9);
           ovLS.ema['21'] = shiftAppend(ovLS.ema['21'], p21);
           ovLS.ema['50'] = shiftAppend(ovLS.ema['50'], p50);
+          ovLS.ema['200'] = shiftAppend(ovLS.ema['200'], p200);
         } catch(_eEmaLS){}
         try{
           var vwLS = (Array.isArray(oaLS.vwap) && oaLS.vwap.length) ? oaLS.vwap[oaLS.vwap.length - 1] : null;
@@ -3463,6 +3464,7 @@
           if(os.ema9 && Array.isArray(ema['9']) && ema['9'].length) pushPoint('ema_9', ema['9'][ema['9'].length - 1]);
           if(os.ema21 && Array.isArray(ema['21']) && ema['21'].length) pushPoint('ema_21', ema['21'][ema['21'].length - 1]);
           if(os.ema50 && Array.isArray(ema['50']) && ema['50'].length) pushPoint('ema_50', ema['50'][ema['50'].length - 1]);
+          if(os.ema200 && Array.isArray(ema['200']) && ema['200'].length) pushPoint('ema_200', ema['200'][ema['200'].length - 1]);
           if(os.vwap && Array.isArray(vwap) && vwap.length) pushPoint('vwap_session', vwap[vwap.length - 1]);
         } else {
           state.overlays = [];
