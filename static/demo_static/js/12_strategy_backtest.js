@@ -118,6 +118,7 @@
                     'ema9': 'indEma9',
                     'ema21': 'indEma21',
                     'ema50': 'indEma50',
+                    'ema200': 'indEma200',
                     'vwap': 'indVwap'
                 };
                 

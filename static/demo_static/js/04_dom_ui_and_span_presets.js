@@ -13,6 +13,7 @@
     indEma9: document.getElementById('indEma9'),
     indEma21: document.getElementById('indEma21'),
     indEma50: document.getElementById('indEma50'),
+    indEma200: document.getElementById('indEma200'),
     indVwap: document.getElementById('indVwap'),
     indCandleBias: null,
     practiceBtn: document.getElementById('practiceBtn'),

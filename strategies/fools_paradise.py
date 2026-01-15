@@ -63,6 +63,12 @@ def compute_fools_paradise_signals(df_prices, rth_mask=None):
         else:
             df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
     
+    if 'ema200' not in df.columns:
+        if ta:
+            df['ema200'] = ta.ema(df['close'], length=200)
+        else:
+            df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+    
     if 'vwap' not in df.columns:
         vwap_series = calculate_vwap_per_trading_day(df.rename(columns={
             'open': 'open',
@@ -87,6 +93,10 @@ def compute_fools_paradise_signals(df_prices, rth_mask=None):
     # Price relative to VWAP
     price_above_vwap = df['close'] > df['vwap']
     price_below_vwap = df['close'] < df['vwap']
+    
+    # Optional: Price relative to EMA 200 (not currently used for signals)
+    price_above_ema200 = df['close'] > df['ema200']
+    price_below_ema200 = df['close'] < df['ema200']
     
     # Determine if candle is green (close > open) or red (close < open)
     is_green = df['close'] > df['open']
@@ -202,6 +212,7 @@ def compute_fools_paradise_signals(df_prices, rth_mask=None):
         'ema9': clean_series(df['ema9']),
         'ema21': clean_series(df['ema21']),
         'ema50': clean_series(df['ema50']),
+        'ema200': clean_series(df['ema200']),
         'vwap': clean_series(df['vwap']),
         'timestamp': [ts.isoformat() for ts in df.index]
     }

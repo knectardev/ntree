@@ -294,6 +294,7 @@
       if(ui.indEma9 && cfg.ind_ema9 !== undefined) ui.indEma9.checked = coerceBool(cfg.ind_ema9, ui.indEma9.checked);
       if(ui.indEma21 && cfg.ind_ema21 !== undefined) ui.indEma21.checked = coerceBool(cfg.ind_ema21, ui.indEma21.checked);
       if(ui.indEma50 && cfg.ind_ema50 !== undefined) ui.indEma50.checked = coerceBool(cfg.ind_ema50, ui.indEma50.checked);
+      if(ui.indEma200 && cfg.ind_ema200 !== undefined) ui.indEma200.checked = coerceBool(cfg.ind_ema200, ui.indEma200.checked);
       if(ui.indVwap && cfg.ind_vwap !== undefined) ui.indVwap.checked = coerceBool(cfg.ind_vwap, ui.indVwap.checked);
       // Candle bias UI is intentionally removed.
 
@@ -391,6 +392,7 @@
       ind_ema9: !!(ui.indEma9 && ui.indEma9.checked),
       ind_ema21: !!(ui.indEma21 && ui.indEma21.checked),
       ind_ema50: !!(ui.indEma50 && ui.indEma50.checked),
+      ind_ema200: !!(ui.indEma200 && ui.indEma200.checked),
       ind_vwap: !!(ui.indVwap && ui.indVwap.checked),
       ind_candle_bias: false,
       // Continuous detrend / trends (sidebar)
