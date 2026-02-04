@@ -255,6 +255,19 @@
 
           <div class="sideDivider"></div>
 
+          <!-- Speed Control -->
+          <div style="margin-bottom:12px;">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
+              <span class="hint" style="min-width:50px;">Speed</span>
+              <input id="audioSpeed" type="range" min="30" max="240" step="10" value="60" style="flex:1;accent-color:#ff69b4;" />
+              <span class="hint mono" id="audioSpeedLabel" style="min-width:40px;text-align:right;">60</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:0 4px;">
+              <span class="hint" style="font-size:10px;">Slow (30)</span>
+              <span class="hint" style="font-size:10px;">Fast (240)</span>
+            </div>
+          </div>
+
           <!-- Playback Controls -->
           <div style="display:flex;gap:10px;margin-top:10px;">
             <button class="btnPrimary" type="button" id="audioStartBtn" style="flex:1;background:#ff69b4;">
@@ -625,6 +638,14 @@
     </main>
   </div>
 
+  <!-- Tone.js for audio synthesis (loaded before other scripts) -->
+  <script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
+  <script>
+    // Fallback: if unpkg fails, try cdnjs
+    if (typeof Tone === 'undefined') {
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"><\/script>');
+    }
+  </script>
   <script src="static/demo_static/js/01_core_overlays_sessions.js"></script>
   <script src="static/demo_static/js/02_mode_and_static_loader.js"></script>
   <script src="static/demo_static/js/03_persistence_and_catalog.js"></script>

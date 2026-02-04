@@ -132,10 +132,12 @@
     var maxOff = Math.max(0, n - barsVisibleData);
     // Keep the view right-aligned (to real data) when following latest (replay + normal mode).
     // This keeps the "now" head fixed, with the projection padding rendered to the right.
-    if(state.followLatest && !state.dragging && !state.yDragging){
+    // EXCEPTION: If audio playback is active, respect its xOffset control.
+    var audioPlaying = !!(window.audioState && window.audioState.playing);
+    if(state.followLatest && !state.dragging && !state.yDragging && !audioPlaying){
       state.xOffset = maxOff;
-    } else if(!Number.isFinite(state.xOffset) || state.xOffset === 0){
-      // Initial load fallback: right-align once.
+    } else if(!audioPlaying && (!Number.isFinite(state.xOffset) || state.xOffset === 0)){
+      // Initial load fallback: right-align once (but not during audio playback).
       state.xOffset = maxOff;
     }
     state.xOffset = clamp(state.xOffset, 0, maxOff);
@@ -1154,6 +1156,113 @@
       ctx.stroke();
       ctx.restore();
     }
+
+    // Audio playhead visualization - FIXED at center, chart scrolls past it
+    (function drawAudioPlayhead(){
+      try{
+        if(!window.audioState || !window.audioState.playing) return;
+        
+        // Playhead is ALWAYS at a FIXED position: center of the screen (50%)
+        // The chart scrolls past it - the playhead never moves
+        var FIXED_PLAYHEAD_POSITION = 0.5;
+        var playheadX = plot.x + (plot.w * FIXED_PLAYHEAD_POSITION);
+        
+        if(!Number.isFinite(playheadX)) return;
+        
+        // Get device pixel ratio for crisp thin lines (like crosshairs)
+        var _dprPH = Math.max(1, window.devicePixelRatio || 1);
+        
+        ctx.save();
+        
+        // Draw vertical playhead line - THIN like crosshairs, extends to x-axis
+        ctx.strokeStyle = 'rgba(255, 50, 150, 0.85)';  // Bright magenta
+        ctx.lineWidth = 1 / _dprPH;  // Super thin like crosshairs
+        ctx.beginPath();
+        ctx.moveTo(playheadX, plot.y);  // Start at top of entire plot
+        ctx.lineTo(playheadX, plot.y + plot.h);  // Extend to bottom (x-axis)
+        ctx.stroke();
+        
+        ctx.restore();
+      } catch(_ePlayhead){}
+    })();
+
+    // Audio note visualization - HORIZONTAL BARS that scroll with chart (like Market Inventions)
+    (function drawAudioNotes(){
+      try{
+        if(!window._audioNoteEvents || !window._audioNoteEvents.length) return;
+        if(!window.audioState || !window.audioState.displayNotes) return;
+        if(!window.audioState.playing) return;
+        
+        var now = performance.now();
+        var barWidth = plot.w / barsVisible;
+        
+        // Calculate BPM-aware note width
+        // At 60 BPM: 1 bar = 1 second, so durationMs/1000 * barWidth = visual width
+        var bpm = (window.audioState && window.audioState._currentBpm) ? window.audioState._currentBpm : 60;
+        var msPerBar = 60000 / bpm;  // Milliseconds per bar
+        
+        ctx.save();
+        
+        // Draw each note as a horizontal bar
+        for(var ni = 0; ni < window._audioNoteEvents.length; ni++){
+          var noteEv = window._audioNoteEvents[ni];
+          if(!noteEv || noteEv.barIndex === undefined) continue;
+          
+          // Check if note is within visible range (with some padding)
+          if(noteEv.barIndex < start - 5 || noteEv.barIndex > end + 5) continue;
+          
+          // Calculate X position based on bar index (scrolls with chart)
+          var noteX = xForIndex(noteEv.barIndex, plot, barsVisible);
+          if(!Number.isFinite(noteX)) continue;
+          
+          // Calculate note width: duration in ms → bars → pixels
+          // noteWidth = (durationMs / msPerBar) * barWidth
+          var durationBars = noteEv.durationMs / msPerBar;
+          var noteWidth = durationBars * barWidth;
+          // Clamp: minimum visible, maximum reasonable
+          noteWidth = Math.max(4, Math.min(noteWidth, barWidth * 4));
+          
+          // Map price to Y coordinate
+          var noteY = yForPrice(noteEv.price, pricePlot, yMin, yMax);
+          if(!Number.isFinite(noteY)) continue;
+          
+          // Clamp to plot bounds
+          noteY = Math.max(pricePlot.y + 5, Math.min(pricePlot.y + pricePlot.h - 5, noteY));
+          
+          // Determine if note is "active" (glowing)
+          var isActive = now < noteEv.glowUntil;
+          var noteHeight = isActive ? 10 : 6;
+          
+          // Colors: soprano = green, bass = blue
+          var baseColor = (noteEv.voice === 'soprano') ? '#7cffc2' : '#7aa7ff';
+          var rgbaBase = (noteEv.voice === 'soprano') ? 'rgba(124, 255, 194,' : 'rgba(122, 167, 255,';
+          
+          if(isActive){
+            ctx.shadowColor = baseColor;
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = '#ffffff';
+          } else {
+            var age = now - noteEv.time;
+            var maxAge = 10000;
+            var alpha = Math.max(0.4, 1 - (age / maxAge));
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = rgbaBase + alpha + ')';
+          }
+          
+          // Draw the horizontal bar
+          ctx.fillRect(noteX, noteY - (noteHeight / 2), noteWidth, noteHeight);
+          ctx.shadowBlur = 0;
+        }
+        
+        ctx.restore();
+        
+        // Clean up old events
+        var cutoff = now - 10000;
+        window._audioNoteEvents = window._audioNoteEvents.filter(function(e){
+          return e && e.time > cutoff;
+        });
+      } catch(_eAudioVis){}
+    })();
 
     // End of plot clip region
     ctx.restore();
@@ -2264,6 +2373,24 @@
         _renderReplayState(item, { skipDraw: true });
       }
       state.replay._needsDraw = true;
+      
+      // Audio hook: notify audio engine when a bar advances
+      try{
+        if(typeof window.onReplayBarAdvance === 'function'){
+          // Get the current bar from chart data (rightmost visible bar)
+          var barData = null;
+          var barIndex = 0;
+          if(state.data && state.data.length > 0){
+            // The "now" bar is the last bar in the visible data
+            barIndex = state.data.length - 1;
+            barData = state.data[barIndex];
+          }
+          if(barData){
+            window.onReplayBarAdvance(barData, barIndex, state.replay.lastState);
+          }
+        }
+      } catch(_eAudio){ console.warn('[Audio Hook Error]', _eAudio); }
+      
       return true;
     } catch(_e){
       return false;

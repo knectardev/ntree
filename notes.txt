@@ -1,70 +1,51 @@
-Combining your existing **ntree** dashboard (Flask) with the **Market Inventions** engine (FastAPI) into a unified server is the best way to leverage your 90-day historical data while maintaining the sub-second musical performance.
+That is an important distinction. We want to treat the **Practice Tool** as a "read-only" data source—the music engine will "piggyback" on the animation frames to trigger sounds, but the core trading logic remains untouched.
 
-Based on the current structure, here is the recommended path forward:
+To do this without refactoring your existing code, you can use a **"Observer"** or **"Listener"** pattern. As your animation loop updates the current bar on the screen, it simply "pings" the Audio Engine with the new data.
 
-### 1. The Mounting Strategy: Root vs. `/dashboard`
+### 1. The "Non-Invasive" Hook
 
-The cleanest approach for a trading app is to let the **Flask Dashboard take the root (`/`)** while the **Market Inventions performance lives at `/market_inventions/**`.
+In your current practice tool's animation loop (likely a `requestAnimationFrame` or a `setInterval`), you simply add one line that passes the current bar to a global `MarketInventionsAudio` controller.
 
-* **Why?** Your existing Flask routes (like `/ticker/SPY`) are likely already hardcoded in your templates. Moving them to `/dashboard/ticker/SPY` would require a tedious search-and-replace across your HTML files.
-* **The Compromise**: We will mount Flask at the root level using `WSGIMiddleware`. FastAPI will intercept specific paths (like `/market_inventions/`) first, and everything else will "fall through" to the Flask app.
-
-### 2. Solving the Import Path Challenge
-
-Since `main.py` is in a subdirectory (`market_inventions_port/`) and `app.py` is in the root, we will use a **Root Entry Point**.
-
-I recommend creating a new file at the project root called `run_unified.py`. This avoids `ModuleNotFoundError` by ensuring both folders are in the Python path simultaneously.
-
-```python
-# run_unified.py (Place in c:\local_dev\ntree)
-import sys
-import os
-from fastapi import FastAPI
-from fastapi.middleware.wsgi import WSGIMiddleware
-from fastapi.staticfiles import StaticFiles
-
-# 1. Add current directory to path so we can find app.py and market_inventions_port
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# 2. Import the two apps
-from app import app as flask_app
-from market_inventions_port.main import app as fast_api_app
-
-# 3. Mount Flask into FastAPI
-# This allows Flask to handle all routes not captured by FastAPI
-fast_api_app.mount("/", WSGIMiddleware(flask_app))
-
-app = fast_api_app # Export the unified app for uvicorn
+```javascript
+// Inside your existing Practice Tool animation loop:
+function animateNextBar() {
+    let currentBar = data[currentIndex];
+    updateChart(currentBar); // Existing logic
+    
+    // NEW: Only run if the audio toggle is active
+    if (audioIsActive && window.InventionEngine) {
+        window.InventionEngine.playMeasure(currentBar);
+    }
+}
 
 ```
 
-### 3. Unified Startup Command
+### 2. Audio Tab "In Play" Logic
 
-Once `run_unified.py` is created, your startup becomes much simpler:
+You can create a small "Bridge" script that manages the state between the two tabs/components. When the user switches to the Audio Tab and hits "Enable":
 
-```bash
-cd c:\local_dev\ntree
-uvicorn run_unified:app --port 8001 --reload
+1. It initializes the **Tone.js** context.
+2. It sets `audioIsActive = true`.
+3. The Practice tool's animation loop—which is already running—now starts "sending" the bars to the synth.
 
-```
+### 3. Implementation Checklist for Cursor
 
-*Note: Use port 8001 for both now. Your browser will access `http://localhost:8001/` for the ntree dashboard and `http://localhost:8001/market_inventions/` for the music.*
+When you're ready for Cursor to add this "Overlay Animation" logic, use this prompt:
 
-### 4. Shared Config: "Minimal First" then "Refactor"
+> "I want to add an audio animation layer to the Practice Tool without changing its core data logic:
+> 1. **Bridge Variable**: Create a global `window.InventionEngine` object that stays dormant until the Audio Tab is activated.
+> 2. **Hook the Loop**: Find the function that increments the bar index in the practice playback. Add a conditional hook that calls `InventionEngine.onBarUpdate(currentBar)` whenever a new bar renders.
+> 3. **Tone.js Scheduler**: Inside the `InventionEngine`, use `Tone.Draw` to ensure the audio triggers happen at the exact same time the browser renders the next animation frame.
+> 4. **Adaptive Controls**: Ensure that if the user pauses the practice tool, the `InventionEngine` also halts its oscillators immediately."
+> 
+> 
 
-Since you are in the middle of a migration, **Option 2 (Minimal Integration first)** is the safer play.
+---
 
-* **Step 1**: Get the unified server running using the existing hardcoded keys in both files.
-* **Step 2**: Once you verify the WebSocket hasn't lost its "16-step" performance, create a `config.py` in the root and move your Alpaca keys there.
+### The "Fractal" Result
 
-### 5. Managing Shared Resources (The DB)
+Because you aren't changing the practice tool, you get a powerful side effect:
 
-Because you’re running in one process now, you can eventually share the database connection.
+* **Time-Scaling for Free**: If the user speeds up the practice playback to "10x," the bars will hit the `InventionEngine` faster, and the music will naturally speed up into a high-tempo "Techno" rhythm.
+* **Scale Independence**: Whether the practice tool is showing 1-minute bars or 1-hour bars, the music engine just sees "Next Bar" and plays the corresponding "Measure."
 
-### Final Instruction for Cursor:
-
-To implement this, you can tell Cursor:
-
-> "Create a `run_unified.py` in the root directory. Use `WSGIMiddleware` to mount the `app` from `app.py` onto the `app` from `market_inventions_port/main.py`. Ensure the root path `/` is handled by Flask, but keep the `/market_inventions/` routes explicitly in FastAPI so the high-frequency WebSockets aren't slowed down by the Flask middleware."
-
-**Does this unified structure solve the port conflict while keeping your existing dashboard accessible?**
