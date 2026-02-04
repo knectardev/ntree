@@ -93,6 +93,182 @@
         </div>
       </details>
 
+      <details class="sideCard sideCard--collapsible" aria-label="Audio playback controls">
+        <summary class="sideCardTitle" style="color: #ff69b4;">Audio Visual Settings</summary>
+        <div class="sideCardBody">
+          
+          <!-- Channel Instruments -->
+          <div class="subCard" aria-label="Channel instruments">
+            <div class="subCardTitle">Channel Instruments</div>
+            <div class="sideList">
+              <!-- Upper wick -->
+              <label class="chkRow">
+                <input id="audioUpperWick" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Upper wick</span>
+                </span>
+              </label>
+              <div style="display:flex;gap:8px;align-items:center;margin:6px 0 10px 24px;">
+                <input id="audioUpperVolume" type="range" min="-60" max="0" step="1" value="-23" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioUpperVolumeLabel" style="min-width:42px;text-align:right;">23 DB</span>
+              </div>
+              <div style="display:flex;gap:8px;margin:0 0 12px 24px;">
+                <div class="dd" id="audioUpperInstrumentDD" style="flex:1;">
+                  <button class="ddBtn" id="audioUpperInstrumentBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioUpperInstrumentLabel">Harpsichord</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioUpperInstrumentMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="harpsichord">Harpsichord</div>
+                    <div class="ddItem" role="option" data-value="synth_lead">Synth Lead</div>
+                    <div class="ddItem" role="option" data-value="pipe_organ">Pipe Organ</div>
+                    <div class="ddItem" role="option" data-value="strings">Strings</div>
+                    <div class="ddItem" role="option" data-value="flute">Flute</div>
+                  </div>
+                </div>
+                <div class="dd" id="audioUpperRhythmDD" style="flex:1;">
+                  <button class="ddBtn" id="audioUpperRhythmBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioUpperRhythmLabel">Quarter (1/4)</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioUpperRhythmMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="4">Quarter (1/4)</div>
+                    <div class="ddItem" role="option" data-value="8">Eighth (1/8)</div>
+                    <div class="ddItem" role="option" data-value="16">Sixteenth (1/16)</div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Lower wick -->
+              <label class="chkRow">
+                <input id="audioLowerWick" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Lower wick</span>
+                </span>
+              </label>
+              <div style="display:flex;gap:8px;align-items:center;margin:6px 0 10px 24px;">
+                <input id="audioLowerVolume" type="range" min="-60" max="0" step="1" value="-17" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioLowerVolumeLabel" style="min-width:42px;text-align:right;">17 DB</span>
+              </div>
+              <div style="display:flex;gap:8px;margin:0 0 6px 24px;">
+                <div class="dd" id="audioLowerInstrumentDD" style="flex:1;">
+                  <button class="ddBtn" id="audioLowerInstrumentBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioLowerInstrumentLabel">Acoustic Bass</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioLowerInstrumentMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="acoustic_bass">Acoustic Bass</div>
+                    <div class="ddItem" role="option" data-value="electric_bass">Electric Bass</div>
+                    <div class="ddItem" role="option" data-value="synth_pad">Synth Pad</div>
+                    <div class="ddItem" role="option" data-value="pipe_organ">Pipe Organ</div>
+                  </div>
+                </div>
+                <div class="dd" id="audioLowerRhythmDD" style="flex:1;">
+                  <button class="ddBtn" id="audioLowerRhythmBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioLowerRhythmLabel">Half (1/2)</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioLowerRhythmMenu" role="listbox">
+                    <div class="ddItem" role="option" data-value="4">Quarter (1/4)</div>
+                    <div class="ddItem sel" role="option" data-value="2">Half (1/2)</div>
+                    <div class="ddItem" role="option" data-value="1">Whole (1/1)</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sideDivider"></div>
+
+          <!-- Music and Genre Settings -->
+          <div class="subCard" aria-label="Music and genre settings" style="margin-top:10px;">
+            <div class="subCardTitle">Music and Genre Settings</div>
+            <div class="sideList">
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                <span class="hint" style="min-width:110px;">Chord Progression:</span>
+                <div class="dd" id="audioChordProgressionDD" style="flex:1;">
+                  <button class="ddBtn" id="audioChordProgressionBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioChordProgressionLabel">Canon</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioChordProgressionMenu" role="listbox">
+                    <div class="ddItem" role="option" data-value="classical">Classical</div>
+                    <div class="ddItem" role="option" data-value="pop">Pop (I-V-vi-IV)</div>
+                    <div class="ddItem" role="option" data-value="blues">Blues (12-bar)</div>
+                    <div class="ddItem" role="option" data-value="jazz">Jazz (ii-V-I)</div>
+                    <div class="ddItem sel" role="option" data-value="canon">Canon</div>
+                    <div class="ddItem" role="option" data-value="fifties">50s Doo-Wop</div>
+                  </div>
+                </div>
+              </div>
+              <label class="chkRow">
+                <input id="audioDisplayNotes" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Display musical notes</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="sideDivider"></div>
+
+          <!-- Audio Visual Sync Tuning -->
+          <div class="subCard" aria-label="Audio visual sync tuning" style="margin-top:10px;">
+            <div class="subCardTitle">Audio Visual Sync Tuning</div>
+            <div class="sideList">
+              <!-- Price Sensitivity -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                <span class="hint" style="min-width:130px;">Price Sensitivity:</span>
+                <input id="audioSensitivity" type="range" min="0.1" max="5" step="0.1" value="0.7" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioSensitivityLabel" style="min-width:36px;text-align:right;">0.7X</span>
+              </div>
+              
+              <!-- Price Noise -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                <span class="hint" style="min-width:130px;">Price Noise (synthetic):</span>
+                <input id="audioPriceNoise" type="range" min="0.1" max="20" step="0.1" value="6.9" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioPriceNoiseLabel" style="min-width:36px;text-align:right;">6.9X</span>
+              </div>
+              
+              <!-- Sync Offset -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                <span class="hint" style="min-width:130px;">Sync Offset:</span>
+                <input id="audioSyncOffset" type="range" min="0" max="3000" step="10" value="1190" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioSyncOffsetLabel" style="min-width:50px;text-align:right;">1190MS</span>
+              </div>
+              
+              <!-- Glow Duration -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                <span class="hint" style="min-width:130px;">Glow Duration:</span>
+                <input id="audioGlowDuration" type="range" min="1" max="8" step="1" value="3" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioGlowDurationLabel" style="min-width:50px;text-align:right;">3 UNITS</span>
+              </div>
+              
+              <!-- Future Notes -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                <span class="hint" style="min-width:130px;">Future Notes:</span>
+                <input id="audioFutureNotes" type="range" min="0" max="5000" step="100" value="0" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioFutureNotesLabel" style="min-width:50px;text-align:right;">0MS</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="sideDivider"></div>
+
+          <!-- Playback Controls -->
+          <div style="display:flex;gap:10px;margin-top:10px;">
+            <button class="btnPrimary" type="button" id="audioStartBtn" style="flex:1;background:#ff69b4;">
+              Start Audio
+            </button>
+            <button class="btn" type="button" id="audioStopBtn" style="flex:1;" disabled>
+              Stop
+            </button>
+          </div>
+          <div class="hint" id="audioStatus" style="margin-top:8px;text-align:center;">Audio stopped</div>
+
+        </div>
+      </details>
+
       <details class="sideCard sideCard--collapsible" aria-label="Feature controls">
         <summary class="sideCardTitle">Features</summary>
         <div class="sideCardBody">
@@ -461,6 +637,7 @@
   <script src="static/demo_static/js/09_dials_and_boot.js"></script>
   <script src="static/demo_static/js/11_feature_ui.js"></script>
   <script src="static/demo_static/js/12_strategy_backtest.js"></script>
+  <script src="static/demo_static/js/13_audio_controls.js"></script>
 </body>
 </html>
 
