@@ -9,3 +9,9 @@ pandas-ta==0.4.71b0
 python-dotenv>=1.0.0
 zstandard>=0.22.0
 
+# Market Inventions module (FastAPI-based music/price visualization)
+fastapi>=0.109.0
+uvicorn>=0.27.0
+# Note: yfinance conflicts with alpaca-trade-api (websockets version)
+# Market Inventions uses simulated prices; for real data, use Alpaca instead
+

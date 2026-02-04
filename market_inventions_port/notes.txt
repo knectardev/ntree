@@ -1,0 +1,57 @@
+
+TO Restructure your `main.py` (which is currently around 500+ lines), you should separate the **Web/API layer**, the **Musical Intelligence**, and the **Market Simulation**. This follows the "Separation of Concerns" principle, making it much easier to tweak your musical algorithms without accidentally breaking your WebSocket connections.
+
+Here is a proposed modular structure for your backend:
+
+### 1. `app.py` (The Web & API Layer)
+
+This file should handle only the FastAPI setup, routes, and WebSocket lifecycle.
+
+* **Imports**: `FastAPI`, `WebSocket`, and your custom engine modules.
+* **Contents**: `app` initialization, `@app.post("/config")`, and the `websocket` endpoints.
+* **Logic**: It receives data from the engine and pushes it to the client, but it doesn't "know" how the music is made.
+
+### 2. `engine.py` (The Orchestration Layer)
+
+Move the `InventionEngine` class here. This is the "brain" that coordinates the price and music.
+
+* **Contents**: `generate_price_data()`, `generate_music_from_prices()`, and the session reset logic.
+* **Refactor Tip**: Break the 150-line `generate_music_from_prices` method into smaller helper methods like `_generate_soprano()` and `_generate_bass()` to improve readability.
+
+### 3. `theory.py` (The Musical Logic)
+
+Extract the pure music theory and mathematical mapping classes.
+
+* **Contents**: `VoiceLeading` class, `HarmonicClock` class, and the constant dictionaries for `SCALES`, `CHORD_PROGRESSIONS`, and `CHORD_MAP`.
+* **Purpose**: This allows you to test your "pick closest chord tone" logic in isolation from the stock market data.
+
+### 4. `market.py` (The Price Simulation)
+
+Isolate the price generation logic.
+
+* **Contents**: Move the `_next_price` logic and any future API calls to real stock data (like YFinance) here.
+* **Purpose**: If you decide to switch from simulated random walks to real-time data, you only have to change this one file.
+
+---
+
+### Key Improvements to Functionality During Restructure
+
+While breaking the file apart, I recommend these specific logic fixes to solve the "monotony" and "sensitivity" issues we identified:
+
+* **Dynamic Bass Progression**: In your new `theory.py`, ensure the `chord_degree` is determined by `self.chord_progressions[regime][self.clock.step]` instead of being hard-coded to `1`. This will immediately make the bassline move through different harmonies.
+* **Correct Sensitivity Scaling**: In `market.py`, refactor the `_price_to_midi` math. Currently, increasing sensitivity makes the `step_pct` larger, which mathematically *reduces* the number of semitones moved. It should be: `raw_semitones = delta_pct / (base_step_pct / sensitivity)`.
+* **Bass Independence**: Remove the `if i % 4 == 0` restriction in the bass logic or make it a variable. This will allow the bass to move on 8th or 16th notes, making it look and sound less "flat".
+
+### Example Folder Structure:
+
+```text
+/backend
+├── app.py          # FastAPI & WebSockets
+├── engine.py       # InventionEngine (The Coordinator)
+├── theory.py       # VoiceLeading, HarmonicClock, Scales
+├── market.py       # Price generation & Price-to-MIDI math
+└── requirements.txt
+
+```
+
+By moving to this structure, you can iterate on your **walking bass algorithm** in `theory.py` without having to scroll through 400 lines of WebSocket boilerplate. 

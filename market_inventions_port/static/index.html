@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Market Inventions</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #111215;
+        --panel: #1b1d22;
+        --text: #e7e9ee;
+        --accent: #7cffc2;
+        --muted: #9aa3ad;
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+        transition: background 1.5s ease-in-out;
+      }
+      
+      .main-container {
+        display: grid;
+        grid-template-columns: 16% 1fr;
+        flex: 1;
+        overflow: hidden;
+      }
+
+      body.regime-bg-major {
+        background: linear-gradient(135deg, #0a1f12, #111215);  /* Green tint - bullish/up */
+      }
+
+      body.regime-bg-minor {
+        background: linear-gradient(135deg, #1f0a0a, #111215);  /* Red tint - bearish/down */
+      }
+
+      body.regime-bg-whole-tone {
+        background: linear-gradient(135deg, #1a1224, #111215);
+      }
+
+      body.regime-bg-diminished {
+        background: linear-gradient(135deg, #241a0f, #111215);
+      }
+
+      header {
+        padding: 12px 16px;
+        background: var(--panel);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .cache-buster {
+        margin: 0;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: #ff7a00;
+        color: #111215;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+      }
+
+      h1 {
+        font-family: "Times New Roman", ui-serif, serif;
+        font-size: 18px;
+        margin: 0;
+        letter-spacing: 0.4px;
+      }
+
+      main {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px;
+        flex: 1;
+        overflow: hidden;
+      }
+      
+      .left-sidebar {
+        background: var(--panel);
+        padding: 16px;
+        border-right: 1px solid rgba(255, 255, 255, 0.05);
+        overflow-y: auto;
+      }
+      
+      .main-content {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        flex: 1;
+        overflow: hidden;
+      }
+
+      .card {
+        background: var(--panel);
+        border-radius: 8px;
+        padding: 12px;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
+      }
+      
+      .card.visualizer {
+        padding-bottom: 20px; /* Extra padding at bottom for consistent border */
+      }
+
+      .row {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      .metric {
+        flex: 1 1 200px;
+      }
+
+      .metric h2 {
+        margin: 0 0 8px 0;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--muted);
+      }
+
+      .metric div {
+        font-size: 20px;
+      }
+
+      #regime {
+        transition: color 0.3s ease;
+        font-weight: 600;
+      }
+
+      .regime-major {
+        color: #7cffc2;
+      }
+
+      .regime-minor {
+        color: #7aa7ff;
+      }
+
+      .regime-whole-tone {
+        color: #b18cff;
+      }
+
+      .regime-diminished {
+        color: #f1c04a;
+      }
+
+      button {
+        background: var(--accent);
+        border: none;
+        color: #101014;
+        padding: 10px 16px;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      select {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-weight: 600;
+      }
+
+      .controls {
+        display: grid;
+        gap: 12px;
+      }
+
+      .control-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .stat-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .label {
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .visualizer {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .visualizer-row {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: minmax(0, 1fr) 20%;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+      
+      .info-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px 8px;
+      }
+      
+      .info-panel .metric {
+        flex: none;
+      }
+      
+      .info-panel .metric h2 {
+        font-size: 10px;
+        margin: 0 0 4px 0;
+      }
+      
+      .info-panel .metric div {
+        font-size: 14px;
+      }
+      
+      .info-panel .stat-row {
+        flex-direction: column;
+        gap: 2px;
+        align-items: flex-start;
+      }
+      
+      .info-panel .label {
+        font-size: 10px;
+      }
+
+      #log {
+        height: 100%;
+        overflow-y: auto;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      #log .log-title {
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        font-weight: 600;
+        letter-spacing: 1px;
+        margin-bottom: 8px;
+      }
+
+      #piano-roll {
+        width: 100%;
+        height: 100%;
+        max-height: 100%;
+        display: block;
+        border-radius: 6px;
+        background: rgba(8, 9, 12, 0.7);
+      }
+
+      #status {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .left-sidebar .metric {
+        margin-bottom: 14px;
+      }
+      
+      .left-sidebar .metric h2 {
+        font-size: 10px;
+        margin: 0 0 6px 0;
+        color: var(--muted);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      
+      .left-sidebar .metric div {
+        font-size: 14px;
+        font-weight: 500;
+      }
+      
+      .left-sidebar .stat-row {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      
+      .left-sidebar .label {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      
+      /* Color-coded instrument labels to match visualization */
+      .left-sidebar .metric:first-child h2 {
+        color: #7cffc2; /* QQQ/Soprano - green/cyan */
+      }
+      
+      .left-sidebar .metric:first-child #soprano,
+      .left-sidebar .metric:first-child #qqq-price {
+        color: #7cffc2; /* QQQ price - green/cyan */
+      }
+      
+      .left-sidebar .metric:nth-child(2) h2 {
+        color: #7aa7ff; /* SPY/Bass - blue */
+      }
+      
+      .left-sidebar .metric:nth-child(2) #bass,
+      .left-sidebar .metric:nth-child(2) #spy-price {
+        color: #7aa7ff; /* SPY price - blue */
+      }
+
+      @media (max-width: 1400px) {
+        .main-container {
+          grid-template-columns: 1fr;
+        }
+        
+        .left-sidebar {
+          display: none;
+        }
+        
+        .visualizer-row {
+          grid-template-columns: 1fr;
+        }
+        
+        .info-panel {
+          flex-direction: row;
+          flex-wrap: wrap;
+        }
+
+        #log {
+          height: auto;
+          max-height: 240px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Market Inventions</h1>
+      <div class="cache-buster">CHORD_FIX_V111</div>
+      <div id="status">Disconnected</div>
+    </header>
+    <div class="main-container">
+    <div class="left-sidebar">
+      <div class="metric">
+        <h2>Soprano (QQQ)</h2>
+        <div class="stat-row">
+          <div id="soprano">--</div>
+          <div id="qqq-price" class="label">--</div>
+        </div>
+      </div>
+      <div class="metric">
+        <h2>Bass (SPY)</h2>
+        <div class="stat-row">
+          <div id="bass">--</div>
+          <div id="spy-price" class="label">--</div>
+        </div>
+      </div>
+      <div class="metric">
+        <h2>Regime</h2>
+        <div id="regime">--</div>
+      </div>
+      <div class="metric">
+        <h2>Chord</h2>
+        <div id="chord">--</div>
+      </div>
+      <div class="metric">
+        <h2>Root Offset</h2>
+        <div class="stat-row">
+          <div id="root-offset">--</div>
+          <div id="root-offset-note" class="label">--</div>
+        </div>
+      </div>
+      <div class="metric">
+        <h2>Tick</h2>
+        <div id="tick">--</div>
+      </div>
+      <div class="metric">
+        <h2>RVOL</h2>
+        <div id="rvol">--</div>
+      </div>
+      <div class="metric">
+        <h2>Build</h2>
+        <div class="stat-row">
+          <div id="build-id">--</div>
+          <div id="build-runtime" class="label">--</div>
+        </div>
+      </div>
+    </div>
+    <main>
+      <div class="card">
+        <div class="controls">
+          <div class="control-row">
+            <button id="start">Start Audio</button>
+            <span class="label">Controls</span>
+          </div>
+          <div class="control-row">
+            <label>
+              QQQ Instrument
+              <select id="instrument-qqq">
+                <optgroup label="Classic">
+                  <option value="electric_organ">Electric Organ</option>
+                  <option value="harpsichord">Harpsichord</option>
+                  <option value="pipe_organ">Pipe Organ</option>
+                  <option value="strings">Strings</option>
+                  <option value="flute">Flute</option>
+                </optgroup>
+                <optgroup label="Electronica">
+                  <option value="synth_lead" selected>Synth Lead</option>
+                  <option value="synth_saw">Synth Saw</option>
+                  <option value="synth_pad">Synth Pad</option>
+                  <option value="synth_brass">Synth Brass</option>
+                </optgroup>
+              </select>
+            </label>
+            <label>
+              SPY Instrument
+              <select id="instrument-spy">
+                <optgroup label="Classic">
+                  <option value="electric_organ">Electric Organ</option>
+                  <option value="harpsichord">Harpsichord</option>
+                  <option value="pipe_organ">Pipe Organ</option>
+                  <option value="strings">Strings</option>
+                  <option value="flute">Flute</option>
+                </optgroup>
+                <optgroup label="Electronica">
+                  <option value="synth_lead">Synth Lead</option>
+                  <option value="synth_saw">Synth Saw</option>
+                  <option value="synth_pad">Synth Pad</option>
+                  <option value="synth_brass">Synth Brass</option>
+                </optgroup>
+                <optgroup label="Bass">
+                  <option value="acoustic_bass" selected>Acoustic Bass</option>
+                  <option value="electric_bass">Electric Bass</option>
+                  <option value="slap_bass">Slap Bass</option>
+                </optgroup>
+              </select>
+            </label>
+            <label>
+              <input id="toggle-qqq" type="checkbox" checked />
+              QQQ Visible
+            </label>
+            <label>
+              Soprano Volume
+              <input
+                id="soprano-volume"
+                type="range"
+                min="-60"
+                max="0"
+                step="1"
+                value="-6"
+              />
+              <span id="soprano-volume-value" class="label">-6 dB</span>
+            </label>
+            <label>
+              <input id="toggle-spy" type="checkbox" checked />
+              SPY Visible
+            </label>
+            <label>
+              Bass Volume
+              <input
+                id="bass-volume"
+                type="range"
+                min="-60"
+                max="0"
+                step="1"
+                value="-6"
+              />
+              <span id="bass-volume-value" class="label">-6 dB</span>
+            </label>
+            <label>
+              <input id="toggle-note-labels" type="checkbox" />
+              Note Labels
+            </label>
+            <label>
+              Sensitivity
+              <input
+                id="sensitivity"
+                type="range"
+                min="0.1"
+                max="5"
+                step="0.1"
+                value="0.7"
+              />
+              <span id="sensitivity-value" class="label">0.7x</span>
+            </label>
+            <label>
+              Price Noise
+              <input
+                id="price-noise"
+                type="range"
+                min="0.1"
+                max="20"
+                step="0.1"
+                value="6.7"
+              />
+              <span id="price-noise-value" class="label">6.7x</span>
+            </label>
+            <label>
+              QQQ Rhythm
+              <select id="soprano-rhythm">
+                <option value="4">Quarter Notes (1/4)</option>
+                <option value="8" selected>Eighth Notes (1/8)</option>
+                <option value="16">Sixteenth Notes (1/16)</option>
+              </select>
+            </label>
+            <label>
+              SPY Rhythm
+              <select id="bass-rhythm">
+                <option value="4">Quarter Notes (1/4)</option>
+                <option value="2" selected>Half Notes (1/2)</option>
+                <option value="1">Whole Notes (1/1)</option>
+              </select>
+            </label>
+            <label>
+              Trend Cycle
+              <input
+                id="trend-cycle"
+                type="range"
+                min="10"
+                max="120"
+                step="5"
+                value="40"
+              />
+              <span id="trend-cycle-value" class="label">40s</span>
+            </label>
+            <label>
+              Chord Progression
+              <select id="chord-progression">
+                <option value="classical" selected>Classical</option>
+                <option value="pop">Pop (I-V-vi-IV)</option>
+                <option value="blues">Blues (12-bar)</option>
+                <option value="jazz">Jazz (ii-V-I)</option>
+                <option value="canon">Canon</option>
+                <option value="fifties">50s Doo-Wop</option>
+              </select>
+            </label>
+          </div>
+          <div class="control-row" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; margin-top: 8px;">
+            <span class="label" style="color: #f1c04a;">Audio-Visual Sync Tuning</span>
+            <label>
+              Sync Offset
+              <input
+                id="sync-offset"
+                type="range"
+                min="0"
+                max="3000"
+                step="10"
+                value="1670"
+              />
+              <span id="sync-offset-value" class="label">1670ms</span>
+            </label>
+            <label>
+              Glow Duration
+              <input
+                id="glow-duration"
+                type="range"
+                min="1"
+                max="8"
+                step="1"
+                value="3"
+              />
+              <span id="glow-duration-value" class="label">3 units</span>
+            </label>
+            <label>
+              Future Notes
+              <input
+                id="future-visibility"
+                type="range"
+                min="0"
+                max="5000"
+                step="100"
+                value="0"
+              />
+              <span id="future-visibility-value" class="label">0ms</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-row">
+        <div class="card visualizer">
+          <canvas id="piano-roll"></canvas>
+        </div>
+        <div class="card" id="log">
+          <div class="log-title">Log</div>
+        </div>
+      </div>
+    </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
+    <script type="module" src="static/main.js"></script>
+  </body>
+</html>
