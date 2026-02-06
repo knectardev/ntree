@@ -285,6 +285,7 @@
       if(ui.fills && cfg.fills !== undefined) ui.fills.checked = coerceBool(cfg.fills, ui.fills.checked);
       if(ui.smooth && cfg.smooth !== undefined) ui.smooth.checked = coerceBool(cfg.smooth, ui.smooth.checked);
       if(ui.outer && cfg.outer !== undefined) ui.outer.checked = coerceBool(cfg.outer, ui.outer.checked);
+      if(ui.inner && cfg.inner !== undefined) ui.inner.checked = coerceBool(cfg.inner, ui.inner.checked);
       if(ui.avgline && cfg.avgline !== undefined) ui.avgline.checked = coerceBool(cfg.avgline, ui.avgline.checked);
       // Session shading toggles (footer)
       if(ui.sessPreMarket && cfg.sess_pre_market !== undefined) ui.sessPreMarket.checked = coerceBool(cfg.sess_pre_market, ui.sessPreMarket.checked);
@@ -385,6 +386,7 @@
       fills: !!(ui.fills && ui.fills.checked),
       smooth: !!(ui.smooth && ui.smooth.checked),
       outer: !!(ui.outer && ui.outer.checked),
+      inner: !!(ui.inner && ui.inner.checked),
       avgline: !!(ui.avgline && ui.avgline.checked),
       sess_pre_market: !!(ui.sessPreMarket && ui.sessPreMarket.checked),
       sess_after_hours: !!(ui.sessAfterHours && ui.sessAfterHours.checked),

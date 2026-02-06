@@ -117,7 +117,72 @@
         7: [10, 14, 17]  // VII - major
     };
 
-    // Scale intervals for quantization
+    // Genre-based scale configurations
+    // Each genre has two scales: one for uptrend, one for downtrend
+    const GENRES = {
+        classical: {
+            label: "Classical / Baroque",
+            scales: { 
+                UPTREND: [0, 2, 4, 5, 7, 9, 11],   // Major (Ionian)
+                DOWNTREND: [0, 2, 3, 5, 7, 8, 10]  // Natural Minor (Aeolian)
+            },
+            complexity: {
+                ornamentChance: 0.1,      // Chance of adding ornamental notes
+                trillChance: 0.05,        // Chance of trill-like patterns
+                passingToneChance: 0.08   // Chance of chromatic passing tones
+            }
+        },
+        indian_raags: {
+            label: "Indian Raags",
+            scales: { 
+                UPTREND: [0, 2, 4, 6, 7, 9, 11],   // Yaman (Lydian-like)
+                DOWNTREND: [0, 1, 3, 5, 7, 8, 10]  // Bhairavi (Phrygian-like)
+            },
+            complexity: {
+                meendChance: 0.15,        // Glissando/slide between notes
+                gamakaChance: 0.12,       // Oscillation around a note
+                passingToneChance: 0.05
+            }
+        },
+        jazz: {
+            label: "Jazz Bebop",
+            scales: { 
+                UPTREND: [0, 2, 3, 5, 7, 9, 10],   // Dorian
+                DOWNTREND: [0, 1, 3, 4, 6, 8, 10]  // Altered (Super Locrian)
+            },
+            complexity: {
+                chromaticPassingChance: 0.20,  // Chromatic approach notes
+                bebopEnclosureChance: 0.12,    // Target note enclosure
+                tritoneSubChance: 0.08         // Tritone substitution
+            }
+        },
+        rock_bluegrass: {
+            label: "Rock / Bluegrass",
+            scales: { 
+                UPTREND: [0, 2, 4, 5, 7, 9, 10],   // Mixolydian
+                DOWNTREND: [0, 2, 4, 7, 9]         // Major Pentatonic
+            },
+            complexity: {
+                blueNoteChance: 0.15,      // Add blue notes (b3, b5, b7)
+                bendChance: 0.10,          // String bend simulation
+                slideChance: 0.08
+            }
+        },
+        techno_experimental: {
+            label: "Techno / Experimental",
+            scales: { 
+                UPTREND: [0, 1, 3, 5, 7, 8, 10],   // Phrygian
+                DOWNTREND: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]  // Chromatic
+            },
+            complexity: {
+                randomJumpChance: 0.18,    // Random octave jumps
+                clusterChance: 0.10,       // Note clusters
+                silenceChance: 0.12        // Random rests for rhythmic interest
+            }
+        }
+    };
+
+    // Legacy SCALES mapping for compatibility
     const SCALES = {
         MAJOR: [0, 2, 4, 5, 7, 9, 11],
         MINOR: [0, 2, 3, 5, 7, 8, 10]
@@ -125,7 +190,8 @@
 
     // Music theory state
     const musicState = {
-        regime: 'MAJOR',
+        regime: 'UPTREND',  // Now uses UPTREND/DOWNTREND to match genre scales
+        currentGenre: 'classical',  // Default genre
         consecutiveDownBars: 0,
         consecutiveUpBars: 0,
         prevBarClose: null,
@@ -135,11 +201,15 @@
         prevSoprano: 72,
         prevBass: 48,
         _prevSopranoPrice: null,  // For trend-aware MIDI mapping
-        _prevBassPrice: null
+        _prevBassPrice: null,
+        // Complexity state for ornaments
+        lastOrnamentTime: 0,
+        ornamentCooldown: 500  // ms between ornaments
     };
 
     /**
-     * Update regime based on price trend (MAJOR for uptrend, MINOR for downtrend)
+     * Update regime based on price trend (UPTREND or DOWNTREND)
+     * Uses the current genre's scales for melodic generation
      */
     function updateRegimeFromPrice(currentClose) {
         if (musicState.prevBarClose === null) {
@@ -151,18 +221,20 @@
             musicState.consecutiveDownBars++;
             musicState.consecutiveUpBars = 0;
             if (musicState.consecutiveDownBars >= musicState.regimeSwitchThreshold) {
-                if (musicState.regime !== 'MINOR') {
-                    musicState.regime = 'MINOR';
-                    console.log('[Music] Regime -> MINOR (downtrend)');
+                if (musicState.regime !== 'DOWNTREND') {
+                    musicState.regime = 'DOWNTREND';
+                    const genre = GENRES[musicState.currentGenre];
+                    console.log(`[Music] Regime -> DOWNTREND (${genre.label})`);
                 }
             }
         } else if (currentClose > musicState.prevBarClose) {
             musicState.consecutiveUpBars++;
             musicState.consecutiveDownBars = 0;
             if (musicState.consecutiveUpBars >= musicState.regimeSwitchThreshold) {
-                if (musicState.regime !== 'MAJOR') {
-                    musicState.regime = 'MAJOR';
-                    console.log('[Music] Regime -> MAJOR (uptrend)');
+                if (musicState.regime !== 'UPTREND') {
+                    musicState.regime = 'UPTREND';
+                    const genre = GENRES[musicState.currentGenre];
+                    console.log(`[Music] Regime -> UPTREND (${genre.label})`);
                 }
             }
         }
@@ -170,10 +242,23 @@
     }
 
     /**
-     * Get all scale notes within a range (like Market Inventions _get_scale_notes)
+     * Get all scale notes within a range using current genre's scales
+     * Falls back to legacy SCALES if genre not found
      */
     function getScaleNotes(regime, rootMidi, minMidi, maxMidi) {
-        const intervals = SCALES[regime] || SCALES.MAJOR;
+        // Try to get intervals from current genre
+        let intervals;
+        const genre = GENRES[musicState.currentGenre];
+        if (genre && genre.scales) {
+            // Map MAJOR/MINOR to UPTREND/DOWNTREND for backwards compatibility
+            if (regime === 'MAJOR') regime = 'UPTREND';
+            if (regime === 'MINOR') regime = 'DOWNTREND';
+            intervals = genre.scales[regime] || genre.scales.UPTREND;
+        } else {
+            // Fallback to legacy SCALES
+            intervals = SCALES[regime] || SCALES.MAJOR;
+        }
+        
         const notes = [];
         for (let midi = minMidi; midi <= maxMidi; midi++) {
             if (intervals.includes((midi - rootMidi + 120) % 12)) {
@@ -191,8 +276,11 @@
         const progression = CHORD_PROGRESSIONS[progressionKey] || CHORD_PROGRESSIONS.canon;
         const regime = musicState.regime;
         
-        const degree = progression[regime][musicState.progressionStep % 16];
-        const chordMap = regime === 'MAJOR' ? CHORD_MAP_MAJOR : CHORD_MAP_MINOR;
+        // Map UPTREND/DOWNTREND to MAJOR/MINOR for chord progressions
+        const chordRegime = (regime === 'DOWNTREND' || regime === 'MINOR') ? 'MINOR' : 'MAJOR';
+        
+        const degree = progression[chordRegime][musicState.progressionStep % 16];
+        const chordMap = chordRegime === 'MAJOR' ? CHORD_MAP_MAJOR : CHORD_MAP_MINOR;
         const intervals = chordMap[degree] || [0, 4, 7];
         
         // Return chord tones as mod-12 set
@@ -247,7 +335,7 @@
     }
 
     /**
-     * Generate soprano note with full Market Inventions logic
+     * Generate soprano note with genre-specific complexity heuristics
      */
     function generateSopranoNote(rawMidi, subStepInBar) {
         const regime = musicState.regime;
@@ -260,16 +348,22 @@
         // On chord beats (every 4th sub-step), prefer chord tones
         const allowedPool = (subStepInBar % 4 === 0 && chordPool.length > 0) ? chordPool : sopranoPool;
         
+        // Get current genre complexity settings
+        const genre = GENRES[musicState.currentGenre] || GENRES.classical;
+        const complexity = genre.complexity || {};
+        
         // Sensitivity-based behavior:
         // HIGH sensitivity = direct price tracking, large jumps allowed
         // LOW sensitivity = musical constraints, melodic variation
         const sensitivity = audioState.sensitivity || 0.7;
         
+        // Get price direction from musicState
+        const priceDirection = musicState._sopranoDirection || 0;  // +1 up, -1 down, 0 stable
+        
         let soprano;
         
         if (sensitivity >= 3.5) {
             // HIGH SENSITIVITY: Direct price tracking - find nearest scale note to raw MIDI
-            // Allow large jumps (24 semitones = 2 octaves) to follow price closely
             soprano = nearestScaleNote(rawMidi, allowedPool, 24);
         } else if (sensitivity >= 2.0) {
             // MEDIUM SENSITIVITY: Balanced - moderate jump constraint
@@ -282,7 +376,6 @@
             // Melodic variation at low sensitivity
             const variationChance = Math.max(0.0, 0.5 - (sensitivity * 0.15));
             if (musicState.prevSoprano !== null && Math.random() < variationChance) {
-                // Get notes within ±2 scale degrees
                 const nearbyNotes = [-2, -1, 0, 1, 2]
                     .map(offset => offsetScaleDegree(soprano, sopranoPool, offset))
                     .filter(n => n !== null && n >= NOTE_CONFIG.sopranoMin && n <= NOTE_CONFIG.sopranoMax);
@@ -292,6 +385,118 @@
                     soprano = uniqueNotes[Math.floor(Math.random() * uniqueNotes.length)];
                 }
             }
+        }
+        
+        // ANTI-REPETITION: If same note as before, add directional movement
+        if (musicState.prevSoprano !== null && soprano === musicState.prevSoprano) {
+            // Use price direction to guide melodic direction
+            let moveDir = priceDirection !== 0 ? priceDirection : (Math.random() < 0.5 ? 1 : -1);
+            
+            // Find next scale note in that direction
+            const sortedPool = [...sopranoPool].sort((a, b) => a - b);
+            const currentIndex = sortedPool.indexOf(soprano);
+            
+            if (currentIndex !== -1) {
+                const targetIndex = Math.max(0, Math.min(sortedPool.length - 1, currentIndex + moveDir));
+                if (targetIndex !== currentIndex) {
+                    soprano = sortedPool[targetIndex];
+                } else {
+                    // At edge, try opposite direction
+                    const altIndex = Math.max(0, Math.min(sortedPool.length - 1, currentIndex - moveDir));
+                    if (altIndex !== currentIndex) {
+                        soprano = sortedPool[altIndex];
+                    }
+                }
+            }
+        }
+        
+        // =====================================================
+        // GENRE-SPECIFIC COMPLEXITY HEURISTICS
+        // =====================================================
+        const now = performance.now();
+        const canOrnament = (now - musicState.lastOrnamentTime) > musicState.ornamentCooldown;
+        
+        // CLASSICAL: Ornamental notes, trills, passing tones
+        if (musicState.currentGenre === 'classical' && canOrnament) {
+            if (Math.random() < (complexity.ornamentChance || 0)) {
+                // Add upper/lower neighbor ornament
+                const ornamentDir = Math.random() < 0.5 ? 1 : -1;
+                const ornamentNote = offsetScaleDegree(soprano, sopranoPool, ornamentDir);
+                if (ornamentNote && ornamentNote !== soprano) {
+                    // Return the ornament first, next call will get the target
+                    musicState.lastOrnamentTime = now;
+                    soprano = ornamentNote;
+                }
+            }
+        }
+        
+        // INDIAN RAAGS: Meend (glissando) - slide between notes
+        if (musicState.currentGenre === 'indian_raags' && canOrnament) {
+            if (Math.random() < (complexity.meendChance || 0) && musicState.prevSoprano !== null) {
+                // Create an intermediate note between previous and target
+                const midPoint = Math.round((musicState.prevSoprano + soprano) / 2);
+                const meendNote = nearestScaleNote(midPoint, sopranoPool, 6);
+                if (meendNote !== soprano && meendNote !== musicState.prevSoprano) {
+                    musicState.lastOrnamentTime = now;
+                    soprano = meendNote;
+                }
+            }
+            // Gamaka - slight oscillation around note
+            if (Math.random() < (complexity.gamakaChance || 0)) {
+                const gamakaOffset = Math.random() < 0.5 ? 1 : -1;
+                soprano = soprano + gamakaOffset; // Slight microtonal feel
+            }
+        }
+        
+        // JAZZ: Chromatic passing tones, bebop enclosures
+        if (musicState.currentGenre === 'jazz' && canOrnament) {
+            if (Math.random() < (complexity.chromaticPassingChance || 0) && musicState.prevSoprano !== null) {
+                // Chromatic approach: half-step below or above target
+                const chromaticApproach = Math.random() < 0.5 ? soprano - 1 : soprano + 1;
+                if (chromaticApproach >= NOTE_CONFIG.sopranoMin && chromaticApproach <= NOTE_CONFIG.sopranoMax) {
+                    musicState.lastOrnamentTime = now;
+                    soprano = chromaticApproach;
+                }
+            }
+            // Bebop enclosure: approach target from above and below
+            if (Math.random() < (complexity.bebopEnclosureChance || 0)) {
+                const enclosureNote = soprano + (Math.random() < 0.5 ? 2 : -2);
+                if (enclosureNote >= NOTE_CONFIG.sopranoMin && enclosureNote <= NOTE_CONFIG.sopranoMax) {
+                    musicState.lastOrnamentTime = now;
+                    soprano = enclosureNote;
+                }
+            }
+        }
+        
+        // ROCK/BLUEGRASS: Blue notes (b3, b5, b7)
+        if (musicState.currentGenre === 'rock_bluegrass' && canOrnament) {
+            if (Math.random() < (complexity.blueNoteChance || 0)) {
+                // Blue notes relative to root
+                const blueIntervals = [3, 6, 10]; // b3, b5, b7
+                const randomBlue = blueIntervals[Math.floor(Math.random() * blueIntervals.length)];
+                const blueNote = musicState.rootMidi + randomBlue;
+                // Find blue note in soprano range
+                const octaveShift = Math.floor((soprano - blueNote) / 12) * 12;
+                const adjustedBlue = blueNote + octaveShift;
+                if (adjustedBlue >= NOTE_CONFIG.sopranoMin && adjustedBlue <= NOTE_CONFIG.sopranoMax) {
+                    musicState.lastOrnamentTime = now;
+                    soprano = adjustedBlue;
+                }
+            }
+        }
+        
+        // TECHNO/EXPERIMENTAL: Random octave jumps, silences
+        if (musicState.currentGenre === 'techno_experimental' && canOrnament) {
+            if (Math.random() < (complexity.randomJumpChance || 0)) {
+                // Random octave jump
+                const octaveJump = (Math.random() < 0.5 ? 12 : -12);
+                const jumpedNote = soprano + octaveJump;
+                if (jumpedNote >= NOTE_CONFIG.sopranoMin && jumpedNote <= NOTE_CONFIG.sopranoMax) {
+                    musicState.lastOrnamentTime = now;
+                    soprano = jumpedNote;
+                }
+            }
+            // Note: silenceChance would be handled at the playback level, not note generation
         }
         
         return soprano;
@@ -357,6 +562,32 @@
             }
         }
         
+        // ANTI-REPETITION: If same note as before, add directional movement
+        if (musicState.prevBass !== null && bassNote === musicState.prevBass) {
+            // Use price direction to guide bass direction, or walk up/down alternately
+            let moveDir = priceDirection !== 0 ? priceDirection : 
+                (musicState._lastBassMove === 1 ? -1 : 1);  // Alternate direction
+            
+            // Find next scale note in that direction
+            const sortedPool = [...bassPool].sort((a, b) => a - b);
+            const currentIndex = sortedPool.indexOf(bassNote);
+            
+            if (currentIndex !== -1) {
+                const targetIndex = Math.max(0, Math.min(sortedPool.length - 1, currentIndex + moveDir));
+                if (targetIndex !== currentIndex) {
+                    bassNote = sortedPool[targetIndex];
+                    musicState._lastBassMove = moveDir;
+                } else {
+                    // At edge, try opposite direction
+                    const altIndex = Math.max(0, Math.min(sortedPool.length - 1, currentIndex - moveDir));
+                    if (altIndex !== currentIndex) {
+                        bassNote = sortedPool[altIndex];
+                        musicState._lastBassMove = -moveDir;
+                    }
+                }
+            }
+        }
+        
         return bassNote;
     }
 
@@ -412,6 +643,7 @@
             instrument: 'acoustic_bass',
             rhythm: '2'  // Half notes
         },
+        genre: 'classical',
         chordProgression: 'canon',
         displayNotes: true,
         sensitivity: 0.7,
@@ -468,6 +700,12 @@
         lowerRhythmMenu: document.getElementById('audioLowerRhythmMenu'),
         lowerRhythmLabel: document.getElementById('audioLowerRhythmLabel'),
 
+        // Genre selection
+        genreDD: document.getElementById('audioGenreDD'),
+        genreBtn: document.getElementById('audioGenreBtn'),
+        genreMenu: document.getElementById('audioGenreMenu'),
+        genreLabel: document.getElementById('audioGenreLabel'),
+        
         // Chord progression
         chordProgressionDD: document.getElementById('audioChordProgressionDD'),
         chordProgressionBtn: document.getElementById('audioChordProgressionBtn'),
@@ -736,9 +974,14 @@
     function priceToMidi(price, voice) {
         if (!Number.isFinite(price)) return null;
         
-        // Configuration matching Market Inventions
+        // Configuration - adjusted for more responsive pitch changes
         const baseMidi = voice === 'soprano' ? 72 : 48;  // C5 for soprano, C3 for bass
-        const stepPct = voice === 'soprano' ? 0.0008 : 0.0010;  // Percentage change per semitone
+        
+        // Base step percentage per semitone (smaller = more responsive)
+        // At sensitivity 1.0: 0.05% price change = 1 semitone
+        // At sensitivity 5.0: 0.01% price change = 1 semitone
+        const baseStepPct = voice === 'soprano' ? 0.0005 : 0.0006;
+        
         const refPrice = voice === 'soprano' ? 
             (audioState._sopranoRef || price) : 
             (audioState._bassRef || price);
@@ -746,30 +989,48 @@
         // Calculate percentage delta from reference
         const deltaPct = (price - refPrice) / refPrice;
         
-        // Convert to semitones (sensitivity affects responsiveness)
+        // Convert to semitones - sensitivity now has stronger effect
+        // Higher sensitivity = smaller effective stepPct = more pitch variation
         const sensitivity = audioState.sensitivity || 0.7;
-        const rawSemitones = (deltaPct / stepPct) * sensitivity;
+        const effectiveStepPct = baseStepPct / sensitivity;  // Sensitivity divides, not multiplies
+        const rawSemitones = deltaPct / effectiveStepPct;
         
         // Trend-aware rounding (like Market Inventions)
         const prevPrice = voice === 'soprano' ? musicState._prevSopranoPrice : musicState._prevBassPrice;
         let semitones;
+        let direction = 0;  // Track price direction: +1 up, -1 down, 0 stable
+        
         if (prevPrice !== null && prevPrice !== undefined) {
             if (price > prevPrice) {
                 semitones = Math.ceil(rawSemitones);
+                direction = 1;
             } else if (price < prevPrice) {
                 semitones = Math.floor(rawSemitones);
+                direction = -1;
             } else {
                 semitones = Math.round(rawSemitones);
+                direction = 0;
             }
         } else {
             semitones = Math.round(rawSemitones);
         }
         
-        // Store for next comparison
+        // Store price and direction for next comparison
         if (voice === 'soprano') {
             musicState._prevSopranoPrice = price;
+            musicState._sopranoDirection = direction;
         } else {
             musicState._prevBassPrice = price;
+            musicState._bassDirection = direction;
+        }
+        
+        // Slowly drift reference toward current price to prevent extreme clustering
+        // This makes the algorithm track relative changes, not absolute drift from start
+        const refDriftRate = 0.02;  // 2% drift per note toward current price
+        if (voice === 'soprano' && audioState._sopranoRef) {
+            audioState._sopranoRef = audioState._sopranoRef * (1 - refDriftRate) + price * refDriftRate;
+        } else if (voice === 'bass' && audioState._bassRef) {
+            audioState._bassRef = audioState._bassRef * (1 - refDriftRate) + price * refDriftRate;
         }
         
         // Calculate final MIDI and clamp to voice range
@@ -919,7 +1180,8 @@
         musicState.prevBarClose = null;
         musicState.consecutiveDownBars = 0;
         musicState.consecutiveUpBars = 0;
-        musicState.regime = 'MAJOR';
+        musicState.regime = 'UPTREND';
+        musicState.lastOrnamentTime = 0;  // Reset ornament cooldown
         
         // Set initial reference prices from starting bar
         const startBar = state.data[startBarIndex];
@@ -1135,10 +1397,8 @@
                     } catch (e) {}
                 }
                 
-                // Emit visual note
-                if (audioState.displayNotes) {
-                    emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow);
-                }
+                // Always emit visual note (labels controlled separately in renderer)
+                emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow);
                 
                 musicState.prevSoprano = sopranoMidi;
             }
@@ -1154,16 +1414,11 @@
         
         if (audioState.lowerWick.enabled) {
             if (shouldPlayBass) {
-                // Get raw MIDI from price
+                // Get raw MIDI from price - this also sets musicState._bassDirection
                 const rawBass = priceToMidi(barData.l, 'bass');
                 
-                // Calculate price direction for walking bass
-                let priceDirection = 0;
-                if (musicState._prevBassPrice !== null) {
-                    const priceDelta = barData.l - musicState._prevBassPrice;
-                    if (priceDelta > 0.02) priceDirection = 1;
-                    else if (priceDelta < -0.02) priceDirection = -1;
-                }
+                // Use the direction calculated inside priceToMidi
+                const priceDirection = musicState._bassDirection || 0;
                 
                 if (rawBass !== null) {
                     // Use full Market Inventions walking bass algorithm
@@ -1182,10 +1437,8 @@
                     } catch (e) {}
                 }
                 
-                // Emit visual note
-                if (audioState.displayNotes) {
-                    emitSubStepNote('bass', bassMidi, barData.l, preciseBarIndex, bassDurationMs, perfNow);
-                }
+                // Always emit visual note (labels controlled separately in renderer)
+                emitSubStepNote('bass', bassMidi, barData.l, preciseBarIndex, bassDurationMs, perfNow);
                 
                 musicState.prevBass = bassMidi;
             }
@@ -1536,9 +1789,9 @@
     function updateStatus(text) {
         if (ui.statusLabel) {
             ui.statusLabel.textContent = text;
-            // Color based on regime: green for MAJOR (uptrend), red for MINOR (downtrend)
+            // Color based on regime: green for uptrend, red for downtrend
             if (audioState.playing) {
-                ui.statusLabel.style.color = (musicState.regime === 'MINOR') 
+                ui.statusLabel.style.color = (musicState.regime === 'MINOR' || musicState.regime === 'DOWNTREND') 
                     ? '#ff4444'   // Red for MINOR/downtrend
                     : '#2ecc71';  // Green for MAJOR/uptrend
             } else {
@@ -1571,6 +1824,7 @@
                     instrument: audioState.lowerWick.instrument,
                     rhythm: audioState.lowerWick.rhythm
                 },
+                genre: audioState.genre,
                 chordProgression: audioState.chordProgression,
                 displayNotes: audioState.displayNotes,
                 sensitivity: audioState.sensitivity,
@@ -1608,6 +1862,8 @@
                 audioState.lowerWick.instrument = settings.lowerWick.instrument || 'acoustic_bass';
                 audioState.lowerWick.rhythm = settings.lowerWick.rhythm || '2';
             }
+            audioState.genre = settings.genre || 'classical';
+            musicState.currentGenre = audioState.genre;  // Sync with musicState
             audioState.chordProgression = settings.chordProgression || 'canon';
             audioState.displayNotes = settings.displayNotes ?? true;
             audioState.sensitivity = settings.sensitivity ?? 0.7;
@@ -1642,6 +1898,9 @@
         }
         applyDropdownSelection(ui.lowerInstrumentMenu, ui.lowerInstrumentLabel, audioState.lowerWick.instrument);
         applyDropdownSelection(ui.lowerRhythmMenu, ui.lowerRhythmLabel, audioState.lowerWick.rhythm);
+        
+        // Genre
+        applyDropdownSelection(ui.genreMenu, ui.genreLabel, audioState.genre);
         
         // Chord progression
         applyDropdownSelection(ui.chordProgressionMenu, ui.chordProgressionLabel, audioState.chordProgression);
@@ -1744,6 +2003,16 @@
                 saveSettings();
             });
 
+        // Genre Selection
+        setupDropdown(ui.genreDD, ui.genreBtn, ui.genreMenu, ui.genreLabel,
+            (val) => { 
+                audioState.genre = val;
+                musicState.currentGenre = val;
+                const genre = GENRES[val];
+                console.log(`[Audio] Genre changed to: ${genre ? genre.label : val}`);
+                saveSettings();
+            });
+        
         // Chord Progression
         setupDropdown(ui.chordProgressionDD, ui.chordProgressionBtn, ui.chordProgressionMenu, ui.chordProgressionLabel,
             (val) => { 

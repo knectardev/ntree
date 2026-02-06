@@ -190,6 +190,7 @@
         ui.fills && ui.fills.checked ? 1 : 0,
         ui.smooth && ui.smooth.checked ? 1 : 0,
         ui.outer && ui.outer.checked ? 1 : 0,
+        ui.inner && ui.inner.checked ? 1 : 0,
         ui.avgline && ui.avgline.checked ? 1 : 0,
         ui.showVolume && ui.showVolume.checked ? 1 : 0,
         ui.toggleDetrend && ui.toggleDetrend.checked ? 1 : 0,
@@ -585,6 +586,7 @@
     // Important: band fill should be able to render even when band outlines are hidden.
     // So outer-band selection must not depend on `isBands` (the outlines toggle).
     var showOuterBands = !!ui.outer.checked;
+    var showInnerBands = !!(ui.inner && ui.inner.checked);
     // The "High/Low bands (or wicks)" toggle:
     // - In Bands mode: controls whether we draw the outer high/low envelope.
     // - In Candles mode: controls whether we draw candle wicks.
@@ -702,13 +704,19 @@
     // - Bands + Fill: outlines + fill
     // - Fill only: fill only (no outlines)
     if(useNoCross && doFill){
-      if(showOuterBands){
+      if(showOuterBands && showInnerBands){
+        // All bands: green (high-close), blue (close-open), red (open-low)
         fillBetween(ctx, pts3, pts2, 'rgba(80,220,140,0.18)', doSmooth);
         fillBetween(ctx, pts2, pts1, 'rgba(90,150,255,0.18)', doSmooth);
         fillBetween(ctx, pts1, pts0, 'rgba(255,110,110,0.18)', doSmooth);
-      } else {
+      } else if(showOuterBands && !showInnerBands){
+        // Only outer bands: fill from high to low directly
+        fillBetween(ctx, pts3, pts0, 'rgba(90,150,255,0.12)', doSmooth);
+      } else if(!showOuterBands && showInnerBands){
+        // Only inner bands: blue (close-open)
         fillBetween(ctx, pts2, pts1, 'rgba(90,150,255,0.18)', doSmooth);
       }
+      // If both are off, no fill
     }
 
     // Candles
@@ -762,15 +770,22 @@
 
     // Band lines
     if(isBands && useNoCross){
-      if(showOuterBands){
+      if(showOuterBands && showInnerBands){
+        // All four band lines
         strokePolyline(ctx, pts0, strokeLower, 1.4, doSmooth);
         strokePolyline(ctx, pts1, strokeMiddle, 1.6, doSmooth);
         strokePolyline(ctx, pts2, strokeMiddle, 1.6, doSmooth);
         strokePolyline(ctx, pts3, strokeTop, 1.8, doSmooth);
-      } else {
+      } else if(showOuterBands && !showInnerBands){
+        // Only outer (high/low) lines
+        strokePolyline(ctx, pts0, strokeLower, 1.4, doSmooth);
+        strokePolyline(ctx, pts3, strokeTop, 1.8, doSmooth);
+      } else if(!showOuterBands && showInnerBands){
+        // Only inner (open/close) lines
         strokePolyline(ctx, pts1, strokeMiddle, 1.7, doSmooth);
         strokePolyline(ctx, pts2, strokeMiddle, 1.7, doSmooth);
       }
+      // If both are off, no lines drawn
     } else if(isBands) {
       strokePolyline(ctx, ptsO, strokeAlt, 1.25, doSmooth);
       strokePolyline(ctx, ptsC, strokeMain, 1.8, doSmooth);
@@ -1192,9 +1207,9 @@
         if(!Number.isFinite(playheadX)) return;
         
         // Determine playhead color based on regime (trend direction)
-        // MAJOR = uptrend = green, MINOR = downtrend = red
-        var regime = (window._musicState && window._musicState.regime) || 'MAJOR';
-        var playheadColor = (regime === 'MAJOR') 
+        // UPTREND/MAJOR = green, DOWNTREND/MINOR = red
+        var regime = (window._musicState && window._musicState.regime) || 'UPTREND';
+        var playheadColor = (regime === 'UPTREND' || regime === 'MAJOR') 
           ? 'rgba(0, 255, 153, 0.75)'   // Green for uptrend
           : 'rgba(255, 68, 68, 0.85)';  // Red for downtrend
         
@@ -1254,25 +1269,25 @@
           var noteWidth = durationBars * barWidth;
           noteWidth = Math.max(4, Math.min(noteWidth, barWidth * 4));
           
-          // Map note to Y coordinate using MIDI pitch mapped to FULL DATA price range
-          // This gives notes fixed "virtual prices" that scale with chart zoom
+          // Map note to Y coordinate using PURE MIDI mapping (same as left axis)
+          // Same MIDI note = ALWAYS same Y position, aligned with left axis
           var noteY;
           
           if (noteEv.midi !== undefined && noteEv.midi !== null) {
-            // Map MIDI to a fixed price within the FULL data range
-            // MIDI 36 (C2) = fullDataMin, MIDI 84 (C6) = fullDataMax
-            var midiMin = 36;
-            var midiMax = 84;
+            // Use EXACT same formula as the left note axis
+            // Map MIDI to FIXED price within full data range
+            var midiMin = 24;   // C1 (extended lower for bass)
+            var midiMax = 84;   // C6
             var midiNorm = (noteEv.midi - midiMin) / (midiMax - midiMin);
             midiNorm = Math.max(0, Math.min(1, midiNorm));
             
-            // Map to FIXED price based on full data range (not visible range)
+            // Map to price using full data range (same as axis)
             var notePrice = fullDataMin + midiNorm * (fullDataMax - fullDataMin);
             
-            // Use yForPrice with current yMin/yMax so it scales with zoom
+            // Convert to Y coordinate (scales with zoom)
             noteY = yForPrice(notePrice, pricePlot, yMin, yMax);
           } else {
-            // Fallback if no MIDI
+            // Fallback for notes without MIDI
             noteY = yForPrice(noteEv.price, pricePlot, yMin, yMax);
           }
           if(!Number.isFinite(noteY)) continue;
@@ -1341,8 +1356,8 @@
         // Note names array (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
         var noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
         
-        // MIDI range matching note visualization
-        var midiMin = 36;  // C2
+        // MIDI range matching note visualization (extended lower for bass visibility)
+        var midiMin = 24;  // C1
         var midiMax = 84;  // C6
         
         // Draw axis background (in left margin area)

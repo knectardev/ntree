@@ -48,6 +48,7 @@
     fills: document.getElementById('fills'),
     smooth: document.getElementById('smooth'),
     outer: document.getElementById('outer'),
+    inner: document.getElementById('inner'),
     avgline: document.getElementById('avgline'),
     showBands: document.getElementById('showBands'),
     showCandles: document.getElementById('showCandles'),

@@ -184,6 +184,23 @@
           <div class="subCard" aria-label="Music and genre settings" style="margin-top:10px;">
             <div class="subCardTitle">Music and Genre Settings</div>
             <div class="sideList">
+              <!-- Genre Selection -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                <span class="hint" style="min-width:110px;">Genre:</span>
+                <div class="dd" id="audioGenreDD" style="flex:1;">
+                  <button class="ddBtn" id="audioGenreBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioGenreLabel">Classical / Baroque</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioGenreMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="classical">Classical / Baroque</div>
+                    <div class="ddItem" role="option" data-value="indian_raags">Indian Raags</div>
+                    <div class="ddItem" role="option" data-value="jazz">Jazz Bebop</div>
+                    <div class="ddItem" role="option" data-value="rock_bluegrass">Rock / Bluegrass</div>
+                    <div class="ddItem" role="option" data-value="techno_experimental">Techno / Experimental</div>
+                  </div>
+                </div>
+              </div>
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
                 <span class="hint" style="min-width:110px;">Chord Progression:</span>
                 <div class="dd" id="audioChordProgressionDD" style="flex:1;">
@@ -550,6 +567,7 @@
           <div class="pill"><label><input id="fills" type="checkbox" checked /> Fill bands</label></div>
           <div class="pill"><label><input id="smooth" type="checkbox" checked /> Smooth</label></div>
           <div class="pill"><label><input id="outer" type="checkbox" checked /> High/Low bands (or wicks)</label></div>
+          <div class="pill"><label><input id="inner" type="checkbox" checked /> Open/Close bands</label></div>
           <div class="pill"><label><input id="avgline" type="checkbox" checked /> Avg line</label></div>
         </div>
         <div class="right">
