@@ -987,7 +987,7 @@ python app.py
 Open:
 - `http://127.0.0.1:5000/`
 
-### Run tests
+### Run tests 
 
 ```bash
 python -m unittest
