@@ -17,12 +17,15 @@
     var pad = 14;
     // Reserve space for the Y-axis price labels. We render the price axis on the RIGHT side.
     var yAxisW = 50;
+    // Reserve space for LEFT note axis when audio is active (piano keyboard style)
+    var audioActive = !!(window.audioState && window.audioState.playing);
+    var noteAxisW = audioActive ? 40 : 0;
     // Reserve space for X-axis tick labels so they don't get clipped at the bottom.
     // Slightly taller to support 2-line day labels (month + day) when zoomed out.
     var xAxisH = 40;
-    var plotW = Math.max(1, Wpx - (pad*2 + yAxisW));
+    var plotW = Math.max(1, Wpx - (pad*2 + yAxisW + noteAxisW));
     var plotH = Math.max(1, Hpx - pad*2 - xAxisH);
-    var plot = { x: pad, y: pad, w: plotW, h: plotH }; // full plot region (price+volume)
+    var plot = { x: pad + noteAxisW, y: pad, w: plotW, h: plotH }; // full plot region (price+volume)
     var showVolume = ui.showVolume ? !!ui.showVolume.checked : false;
     var volSep = showVolume ? 8 : 0;
     var volH = 0;
@@ -98,6 +101,24 @@
     ctx.restore();
 
     var n = state.data.length;
+    
+    // Compute FULL data range (all bars) for fixed note-to-price mapping
+    // This ensures notes have fixed "virtual prices" that scale with chart zoom
+    var fullDataMin = Infinity, fullDataMax = -Infinity;
+    for (var fi = 0; fi < n; fi++) {
+      var fd = state.data[fi];
+      if (!fd) continue;
+      if (Number.isFinite(fd.l) && fd.l < fullDataMin) fullDataMin = fd.l;
+      if (Number.isFinite(fd.h) && fd.h > fullDataMax) fullDataMax = fd.h;
+    }
+    if (!Number.isFinite(fullDataMin) || !Number.isFinite(fullDataMax) || fullDataMax <= fullDataMin) {
+      fullDataMin = 0; fullDataMax = 100;
+    }
+    // Add small padding to full range
+    var fullDataSpan = fullDataMax - fullDataMin;
+    fullDataMin -= fullDataSpan * 0.02;
+    fullDataMax += fullDataSpan * 0.02;
+    
     if(!n){
       // Grid + "No data" message are still clipped to the plot area.
       ctx.save();
@@ -1158,6 +1179,7 @@
     }
 
     // Audio playhead visualization - FIXED at center, chart scrolls past it
+    // Color changes based on trend: green = MAJOR (uptrend), red = MINOR (downtrend)
     (function drawAudioPlayhead(){
       try{
         if(!window.audioState || !window.audioState.playing) return;
@@ -1169,14 +1191,21 @@
         
         if(!Number.isFinite(playheadX)) return;
         
+        // Determine playhead color based on regime (trend direction)
+        // MAJOR = uptrend = green, MINOR = downtrend = red
+        var regime = (window._musicState && window._musicState.regime) || 'MAJOR';
+        var playheadColor = (regime === 'MAJOR') 
+          ? 'rgba(0, 255, 153, 0.75)'   // Green for uptrend
+          : 'rgba(255, 68, 68, 0.85)';  // Red for downtrend
+        
         // Get device pixel ratio for crisp thin lines (like crosshairs)
         var _dprPH = Math.max(1, window.devicePixelRatio || 1);
         
         ctx.save();
         
-        // Draw vertical playhead line - THIN like crosshairs, extends to x-axis
-        ctx.strokeStyle = 'rgba(255, 50, 150, 0.85)';  // Bright magenta
-        ctx.lineWidth = 1 / _dprPH;  // Super thin like crosshairs
+        // Draw vertical playhead line - extends full height
+        ctx.strokeStyle = playheadColor;
+        ctx.lineWidth = 2 / _dprPH;  // Slightly thicker to show color better
         ctx.beginPath();
         ctx.moveTo(playheadX, plot.y);  // Start at top of entire plot
         ctx.lineTo(playheadX, plot.y + plot.h);  // Extend to bottom (x-axis)
@@ -1190,16 +1219,21 @@
     (function drawAudioNotes(){
       try{
         if(!window._audioNoteEvents || !window._audioNoteEvents.length) return;
-        if(!window.audioState || !window.audioState.displayNotes) return;
-        if(!window.audioState.playing) return;
+        if(!window.audioState || !window.audioState.playing) return;
         
         var now = performance.now();
         var barWidth = plot.w / barsVisible;
         
         // Calculate BPM-aware note width
-        // At 60 BPM: 1 bar = 1 second, so durationMs/1000 * barWidth = visual width
         var bpm = (window.audioState && window.audioState._currentBpm) ? window.audioState._currentBpm : 60;
-        var msPerBar = 60000 / bpm;  // Milliseconds per bar
+        var msPerBar = 60000 / bpm;
+        
+        // MIDI range for Y mapping (soprano: 60-84, bass: 36-60)
+        var midiMin = 36;  // C2
+        var midiMax = 84;  // C6
+        
+        // Should we show note name labels? (controlled by "Display musical notes" checkbox)
+        var showNoteLabels = window.audioState.displayNotes;
         
         ctx.save();
         
@@ -1216,14 +1250,31 @@
           if(!Number.isFinite(noteX)) continue;
           
           // Calculate note width: duration in ms → bars → pixels
-          // noteWidth = (durationMs / msPerBar) * barWidth
           var durationBars = noteEv.durationMs / msPerBar;
           var noteWidth = durationBars * barWidth;
-          // Clamp: minimum visible, maximum reasonable
           noteWidth = Math.max(4, Math.min(noteWidth, barWidth * 4));
           
-          // Map price to Y coordinate
-          var noteY = yForPrice(noteEv.price, pricePlot, yMin, yMax);
+          // Map note to Y coordinate using MIDI pitch mapped to FULL DATA price range
+          // This gives notes fixed "virtual prices" that scale with chart zoom
+          var noteY;
+          
+          if (noteEv.midi !== undefined && noteEv.midi !== null) {
+            // Map MIDI to a fixed price within the FULL data range
+            // MIDI 36 (C2) = fullDataMin, MIDI 84 (C6) = fullDataMax
+            var midiMin = 36;
+            var midiMax = 84;
+            var midiNorm = (noteEv.midi - midiMin) / (midiMax - midiMin);
+            midiNorm = Math.max(0, Math.min(1, midiNorm));
+            
+            // Map to FIXED price based on full data range (not visible range)
+            var notePrice = fullDataMin + midiNorm * (fullDataMax - fullDataMin);
+            
+            // Use yForPrice with current yMin/yMax so it scales with zoom
+            noteY = yForPrice(notePrice, pricePlot, yMin, yMax);
+          } else {
+            // Fallback if no MIDI
+            noteY = yForPrice(noteEv.price, pricePlot, yMin, yMax);
+          }
           if(!Number.isFinite(noteY)) continue;
           
           // Clamp to plot bounds
@@ -1252,6 +1303,19 @@
           // Draw the horizontal bar
           ctx.fillRect(noteX, noteY - (noteHeight / 2), noteWidth, noteHeight);
           ctx.shadowBlur = 0;
+          
+          // Draw note name label if enabled (e.g., "C4", "G#5")
+          if(showNoteLabels && noteEv.midi !== undefined && window._midiToNoteName){
+            var noteName = window._midiToNoteName(noteEv.midi);
+            ctx.fillStyle = (noteEv.voice === 'soprano') 
+              ? 'rgba(124, 255, 194, 0.9)' 
+              : 'rgba(122, 167, 255, 0.9)';
+            ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            // Position label below the note bar
+            ctx.fillText(noteName, noteX + noteWidth / 2, noteY + (noteHeight / 2) + 2);
+          }
         }
         
         ctx.restore();
@@ -1266,6 +1330,85 @@
 
     // End of plot clip region
     ctx.restore();
+
+    // Left Note Axis (piano keyboard style) - shows when audio is playing
+    // Drawn OUTSIDE clip region so it's not clipped to plot area
+    // Uses same FULL DATA price-based scaling as note visualization
+    (function drawNoteAxis(){
+      try{
+        if(!audioActive || noteAxisW <= 0) return;
+        
+        // Note names array (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
+        var noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        
+        // MIDI range matching note visualization
+        var midiMin = 36;  // C2
+        var midiMax = 84;  // C6
+        
+        // Draw axis background (in left margin area)
+        ctx.save();
+        ctx.fillStyle = 'rgba(15, 22, 32, 0.95)';
+        ctx.fillRect(pad, pricePlot.y - 2, noteAxisW, pricePlot.h + 4);
+        
+        // Draw border line on right edge of note axis
+        ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad + noteAxisW, pricePlot.y);
+        ctx.lineTo(pad + noteAxisW, pricePlot.y + pricePlot.h);
+        ctx.stroke();
+        
+        ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        
+        // Draw note labels for the chromatic scale
+        for (var midi = midiMin; midi <= midiMax; midi++) {
+          var pitchClass = midi % 12;
+          var octave = Math.floor(midi / 12) - 1;
+          var noteName = noteNames[pitchClass] + octave;
+          
+          // Calculate Y position using same formula as note drawing
+          // Map MIDI to FIXED price (full data range), then to Y (scales with zoom)
+          var midiNorm = (midi - midiMin) / (midiMax - midiMin);
+          var notePrice = fullDataMin + midiNorm * (fullDataMax - fullDataMin);
+          var noteY = yForPrice(notePrice, pricePlot, yMin, yMax);
+          
+          // Skip if outside visible range
+          if (!Number.isFinite(noteY) || noteY < pricePlot.y - 5 || noteY > pricePlot.y + pricePlot.h + 5) continue;
+          
+          // Determine if this is a natural note (white key) or sharp/flat (black key)
+          var isNatural = [0, 2, 4, 5, 7, 9, 11].indexOf(pitchClass) >= 0;
+          var isOctaveC = (pitchClass === 0);
+          
+          // Color coding: green for soprano range (C4+), blue for bass range
+          var baseAlpha = isOctaveC ? 1.0 : (isNatural ? 0.7 : 0.4);
+          if (midi >= 60) {
+            ctx.fillStyle = 'rgba(124, 255, 194, ' + baseAlpha + ')';
+          } else {
+            ctx.fillStyle = 'rgba(122, 167, 255, ' + baseAlpha + ')';
+          }
+          
+          // Only show select labels to avoid clutter (C notes + E + G for each octave)
+          var showLabel = isOctaveC || pitchClass === 4 || pitchClass === 7; // C, E, G
+          if (showLabel) {
+            ctx.fillText(noteName, pad + noteAxisW - 4, noteY);
+          }
+          
+          // Draw tick marks for all notes
+          ctx.strokeStyle = isOctaveC 
+            ? 'rgba(255, 255, 255, 0.6)' 
+            : (isNatural ? 'rgba(150, 150, 150, 0.3)' : 'rgba(100, 100, 100, 0.15)');
+          ctx.lineWidth = isOctaveC ? 1.5 : 1;
+          ctx.beginPath();
+          ctx.moveTo(pad + noteAxisW - (isOctaveC ? 8 : 4), noteY);
+          ctx.lineTo(pad + noteAxisW, noteY);
+          ctx.stroke();
+        }
+        
+        ctx.restore();
+      } catch(_eNoteAxis){}
+    })();
 
     // Crosshair axis callouts (outside the clip so they're never cut off).
     if(hoverData){
@@ -1583,9 +1726,11 @@
     var r = canvas.getBoundingClientRect();
     var pad = 14;
     var yAxisW = 50;
+    var audioActive = !!(window.audioState && window.audioState.playing);
+    var noteAxisW = audioActive ? 40 : 0;
     var xAxisH = 40;
-    var plotW = Math.max(1, r.width - (pad*2 + yAxisW));
-    var plotX = pad;
+    var plotW = Math.max(1, r.width - (pad*2 + yAxisW + noteAxisW));
+    var plotX = pad + noteAxisW;
     var plotY = pad;
     var plotH = Math.max(1, r.height - pad*2 - xAxisH);
 
@@ -1655,9 +1800,11 @@
       var n = state.data.length;
       var vb = computeVisibleBars(n, state.xZoom);
       var barsVisible = vb.barsVisibleScale;
-      // Keep in sync with draw(): reserve 50px for the right-side Y-axis gutter.
+      // Keep in sync with draw(): reserve space for axes.
       var yAxisW = 50;
-      var plotW = Math.max(1, r.width - (14*2 + yAxisW));
+      var audioActive = !!(window.audioState && window.audioState.playing);
+      var noteAxisW = audioActive ? 40 : 0;
+      var plotW = Math.max(1, r.width - (14*2 + yAxisW + noteAxisW));
       var barsPerPx = barsVisible / plotW;
       state.xOffset = state.xOffset0 - dxPx * barsPerPx;
       state.lastDragDx = dxPx;
@@ -1869,8 +2016,10 @@
     var r = canvas.getBoundingClientRect();
     var pad = 14;
     var yAxisW = 50;
-    var plotX = pad;
-    var plotW = Math.max(1, r.width - (pad*2 + yAxisW));
+    var audioActive = !!(window.audioState && window.audioState.playing);
+    var noteAxisW = audioActive ? 40 : 0;
+    var plotX = pad + noteAxisW;
+    var plotW = Math.max(1, r.width - (pad*2 + yAxisW + noteAxisW));
     var mouseX = (e.clientX - r.left);
     var tt = clamp((mouseX - plotX) / plotW, 0, 1);
 

@@ -10,7 +10,7 @@ This document describes the **current** functionality and technical specificatio
 
 - Viewing **real market OHLCV bars** ingested from **Alpaca** into SQLite (`stock_data.db`)
 - Viewing **synthetic OHLCV + L2-derived features** stored in SQLite (`bars` + `l2_state`)
-- Rendering interactive charts via **Chart.js (candlestick)** and an embedded **bandchart-style** demo page
+- Rendering interactive charts via **Chart.js (candlestick)** and an embedded **bandchart-style** demo page (`chart.html`), including **Audio Visual Settings** (Tone.js sonification tied to replay) and a **Session History** modal for practice/replay sessions
 - Running strategy backtests via a small **engine** with explicit fill/stop/TP assumptions
 
 ### What this repo is *not*
@@ -218,6 +218,8 @@ The standalone oscillation tool (`osc/index.html`) includes its own **client-sid
   - Serves the chart page (`chart.html`)
   - Used by band view: `/ticker/<sym>?band` → iframe → `/chart.html?mode=api&symbol=<sym>`
   - Back-compat: `/demo_static.html` redirects to `/chart.html`
+  - **Page chrome**: App nav links (Dashboard, Backtest Config), status chip (“Last update”) for live feedback; UI refs in `static/demo_static/js/04_dom_ui_and_span_presets.js`.
+  - **Session History modal**: Replay/practice session history in three views — **Cards** (glance), **Ledger** (FIFO lots), **Matrix** (summary). Buttons: Refresh, Close. Opened from Practice toolbar (“History”); wired in `08_replay_and_file_io.js` (open/close, Escape), `07_render_and_interactions.js` (view mode, table render). Data loaded from persisted replay events (SQLite).
   - Grid lines are axis-driven:
     - Horizontal grid aligns to Y-axis price ticks (nice intervals)
     - Vertical grid aligns to X-axis time/date ticks (adaptive with zoom/span)
@@ -317,6 +319,30 @@ Notes:
   r_{t+1} = \text{pos}_t \cdot (\log P_{t+1} - \log P_t) \;-\; \text{cost} \cdot |\text{pos}_t - \text{pos}_{t-1}|
   \]
 - This matches the registry’s core normalization (log returns) and discourages churn.
+
+#### Audio Visual Settings (sonification)
+
+The chart page includes an **Audio Visual Settings** sidebar panel and a **Tone.js**-based audio engine that maps replay/practice bars to musical playback. Implemented in `static/demo_static/js/13_audio_controls.js`; layout integration in `static/demo_static/js/07_render_and_interactions.js`.
+
+**Architecture**
+- Each replay bar acts as a “musical measure”; **high wick** → soprano voice (upper pitch rail), **low wick** → bass voice (lower pitch rail); **volume** → gain envelope; **Speed** slider → Tone.Transport BPM.
+- **Tone.js** is loaded from CDN (unpkg, fallback cdnjs) before other chart scripts; `13_audio_controls.js` is loaded last so it can hook into replay/UI state.
+
+**UI (sidebar, collapsible)**
+- **Channel instruments**: Upper wick and lower wick each have enable checkbox, volume (dB), instrument dropdown, and rhythm dropdown (e.g. quarter, eighth, sixteenth for upper; half, quarter, whole for lower).
+- **Instruments**: MIDI soundfonts (FluidR3_GM via gleitz.github.io): harpsichord, synth lead, pipe organ, strings, flute (upper); acoustic bass, electric bass, synth pad, pipe organ (lower).
+- **Music and genre**: Chord progression (classical, pop, blues, jazz, canon, fifties), optional note labels on chart.
+- **Audio visual sync tuning**: Price sensitivity (0.1×–5×), glow duration (1–8 units).
+- **Speed**: 30–240 (controls BPM for playback).
+- **Start Audio** / **Stop** buttons; status line shows play state.
+
+**Music theory (client-side)**
+- **Regime**: MAJOR/MINOR derived from price trend (consecutive up/down bars with configurable threshold).
+- **Chord progressions**: 16-step patterns per genre (scale degrees); chord maps for major/minor (I, ii, iii, IV, V, vi, vii° etc.).
+- **Note range**: Bass C2–C4, soprano C4–C6 (MIDI 36–84); scale quantization and chord-tone targeting for smoother voice leading.
+
+**Rendering**
+- When audio is **playing**, the main canvas in `07_render_and_interactions.js` reserves a **note axis** (40px) on the **left** of the plot for piano-keyboard-style note labels; `noteAxisW = audioActive ? 40 : 0` so plot width and layout adjust automatically.
 
 ### Oscillation Signal Analysis (Static Web Page)
 
@@ -918,6 +944,10 @@ From `templates/detail.html` / `templates/synthetic_detail.html`:
 - `chartjs-plugin-zoom@1.2.1` (detail view)
 - `hammerjs@2.0.8` (detail view)
 
+From `chart.html` (standalone demo / band view):
+- **Tone.js** (e.g. `tone@14.7.77` from unpkg; fallback cdnjs) — used by Audio Visual Settings sonification (`13_audio_controls.js`). Loaded before other chart scripts; no build step.
+- Chart demo scripts load in order: core/overlays → mode/loader → persistence → DOM/span presets → state/math → loaders → features → render → replay → dials/boot → feature UI → strategy backtest → **audio controls** (last).
+
 ---
 
 ## Common Workflows
@@ -962,6 +992,17 @@ Open:
 ```bash
 python -m unittest
 ```
+
+---
+
+## Recent updates (chart / replay / audio)
+
+The following reflects the latest series of changes to the chart and replay experience:
+
+- **chart.html**: Added app nav (Dashboard, Backtest Config), status chip (“Last update”), and **Session History** modal with Cards / Ledger / Matrix views for replay session history (orders, positions); Refresh and Close actions; Escape to close.
+- **07_render_and_interactions.js**: When Audio Visual playback is active, the canvas reserves a **note axis** (40px) on the left of the plot for piano-style note labels; plot width and layout adjust via `noteAxisW` so the chart and sonification stay aligned.
+- **13_audio_controls.js**: New **Audio Visual Settings** panel and Tone.js-based audio engine — replay bars as measures, high/low wicks mapped to soprano/bass, chord progressions and regime (MAJOR/MINOR from price trend), configurable instruments and rhythm, speed (BPM), sensitivity, and glow duration. Script loaded last; Tone.js from CDN (unpkg/cdnjs).
+- **stock_data.db**: Modified by normal ingestion/backfill or replay event persistence (no schema change implied by the above).
 
 ---
 

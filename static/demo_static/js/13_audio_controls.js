@@ -260,31 +260,37 @@
         // On chord beats (every 4th sub-step), prefer chord tones
         const allowedPool = (subStepInBar % 4 === 0 && chordPool.length > 0) ? chordPool : sopranoPool;
         
-        // Sensitivity-based max jump
+        // Sensitivity-based behavior:
+        // HIGH sensitivity = direct price tracking, large jumps allowed
+        // LOW sensitivity = musical constraints, melodic variation
         const sensitivity = audioState.sensitivity || 0.7;
-        let maxJump;
-        if (sensitivity >= 5.0) {
-            maxJump = 4;  // Tight tracking
+        
+        let soprano;
+        
+        if (sensitivity >= 3.5) {
+            // HIGH SENSITIVITY: Direct price tracking - find nearest scale note to raw MIDI
+            // Allow large jumps (24 semitones = 2 octaves) to follow price closely
+            soprano = nearestScaleNote(rawMidi, allowedPool, 24);
         } else if (sensitivity >= 2.0) {
-            maxJump = 8;  // Moderate
+            // MEDIUM SENSITIVITY: Balanced - moderate jump constraint
+            soprano = nearestScaleNote(rawMidi, allowedPool, 12);
         } else {
-            maxJump = 12;  // Full octave
-        }
-        
-        // Find base note (nearest scale note to price-derived MIDI)
-        let soprano = nearestScaleNote(rawMidi, allowedPool, maxJump);
-        
-        // Melodic variation at low sensitivity
-        const variationChance = Math.max(0.0, 0.5 - (sensitivity * 0.08));
-        if (sensitivity < 3.0 && musicState.prevSoprano !== null && Math.random() < variationChance) {
-            // Get notes within ±2 scale degrees
-            const nearbyNotes = [-2, -1, 0, 1, 2]
-                .map(offset => offsetScaleDegree(soprano, sopranoPool, offset))
-                .filter(n => n !== null && n >= NOTE_CONFIG.sopranoMin && n <= NOTE_CONFIG.sopranoMax);
+            // LOW SENSITIVITY: Musical mode - constrain jumps, add variation
+            const maxJump = 8;
+            soprano = nearestScaleNote(rawMidi, allowedPool, maxJump);
             
-            const uniqueNotes = [...new Set(nearbyNotes)];
-            if (uniqueNotes.length > 1) {
-                soprano = uniqueNotes[Math.floor(Math.random() * uniqueNotes.length)];
+            // Melodic variation at low sensitivity
+            const variationChance = Math.max(0.0, 0.5 - (sensitivity * 0.15));
+            if (musicState.prevSoprano !== null && Math.random() < variationChance) {
+                // Get notes within ±2 scale degrees
+                const nearbyNotes = [-2, -1, 0, 1, 2]
+                    .map(offset => offsetScaleDegree(soprano, sopranoPool, offset))
+                    .filter(n => n !== null && n >= NOTE_CONFIG.sopranoMin && n <= NOTE_CONFIG.sopranoMax);
+                
+                const uniqueNotes = [...new Set(nearbyNotes)];
+                if (uniqueNotes.length > 1) {
+                    soprano = uniqueNotes[Math.floor(Math.random() * uniqueNotes.length)];
+                }
             }
         }
         
@@ -303,55 +309,52 @@
         const chordBassPool = bassPool.filter(note => chordToneMods.has((note - musicState.rootMidi + 120) % 12));
         const allowedBass = chordBassPool.length > 0 ? chordBassPool : bassPool;
         
-        // Sensitivity-based max jump
+        // Sensitivity-based behavior:
+        // HIGH sensitivity = direct price tracking, large jumps allowed
+        // LOW sensitivity = walking bass patterns, musical movement
         const sensitivity = audioState.sensitivity || 0.7;
-        let maxJump;
-        if (sensitivity >= 5.0) {
-            maxJump = 4;
-        } else if (sensitivity >= 2.0) {
-            maxJump = 8;
-        } else {
-            maxJump = 12;
-        }
         
         let bassNote;
         
-        // WALKING BASS ALGORITHM based on price direction
-        if (musicState.prevBass !== null && sensitivity < 4.0) {
-            if (priceDirection > 0) {
-                // Price trending UP: walk up the scale
-                const candidates = allowedBass.filter(n => n > musicState.prevBass && Math.abs(n - musicState.prevBass) <= maxJump);
-                if (candidates.length > 0) {
-                    bassNote = Math.min(...candidates);  // Nearest note above
+        if (sensitivity >= 3.5) {
+            // HIGH SENSITIVITY: Direct price tracking - large jumps allowed
+            bassNote = nearestScaleNote(rawMidi, allowedBass, 24);
+        } else if (sensitivity >= 2.0) {
+            // MEDIUM SENSITIVITY: Some walking bass, moderate constraints
+            const maxJump = 12;
+            if (musicState.prevBass !== null && priceDirection !== 0) {
+                if (priceDirection > 0) {
+                    const candidates = allowedBass.filter(n => n > musicState.prevBass && Math.abs(n - musicState.prevBass) <= maxJump);
+                    bassNote = candidates.length > 0 ? Math.min(...candidates) : nearestScaleNote(rawMidi, allowedBass, maxJump);
                 } else {
-                    bassNote = nearestScaleNote(rawMidi, allowedBass, maxJump);
-                }
-            } else if (priceDirection < 0) {
-                // Price trending DOWN: walk down the scale
-                const candidates = allowedBass.filter(n => n < musicState.prevBass && Math.abs(n - musicState.prevBass) <= maxJump);
-                if (candidates.length > 0) {
-                    bassNote = Math.max(...candidates);  // Nearest note below
-                } else {
-                    bassNote = nearestScaleNote(rawMidi, allowedBass, maxJump);
+                    const candidates = allowedBass.filter(n => n < musicState.prevBass && Math.abs(n - musicState.prevBass) <= maxJump);
+                    bassNote = candidates.length > 0 ? Math.max(...candidates) : nearestScaleNote(rawMidi, allowedBass, maxJump);
                 }
             } else {
-                // Price FLAT: alternate between root and fifth
-                const rootNote = chordBassPool.length > 0 ? Math.min(...chordBassPool) : musicState.prevBass;
-                const fifthCandidates = chordBassPool.filter(n => (n - musicState.rootMidi + 120) % 12 === 7);
-                const fifthNote = fifthCandidates.length > 0 ? 
-                    fifthCandidates.reduce((a, b) => Math.abs(a - musicState.prevBass) < Math.abs(b - musicState.prevBass) ? a : b) :
-                    rootNote;
-                
-                // Alternate
-                if (musicState.prevBass === rootNote || Math.abs(musicState.prevBass - rootNote) <= 2) {
-                    bassNote = fifthNote;
-                } else {
-                    bassNote = rootNote;
-                }
+                bassNote = nearestScaleNote(rawMidi, allowedBass, maxJump);
             }
         } else {
-            // High sensitivity or no previous: pure price tracking
-            bassNote = nearestScaleNote(rawMidi, allowedBass, maxJump);
+            // LOW SENSITIVITY: Full walking bass algorithm with musical patterns
+            const maxJump = 8;
+            if (musicState.prevBass !== null) {
+                if (priceDirection > 0) {
+                    const candidates = allowedBass.filter(n => n > musicState.prevBass && Math.abs(n - musicState.prevBass) <= maxJump);
+                    bassNote = candidates.length > 0 ? Math.min(...candidates) : nearestScaleNote(rawMidi, allowedBass, maxJump);
+                } else if (priceDirection < 0) {
+                    const candidates = allowedBass.filter(n => n < musicState.prevBass && Math.abs(n - musicState.prevBass) <= maxJump);
+                    bassNote = candidates.length > 0 ? Math.max(...candidates) : nearestScaleNote(rawMidi, allowedBass, maxJump);
+                } else {
+                    // Price FLAT: alternate between root and fifth for musical interest
+                    const rootNote = chordBassPool.length > 0 ? Math.min(...chordBassPool) : musicState.prevBass;
+                    const fifthCandidates = chordBassPool.filter(n => (n - musicState.rootMidi + 120) % 12 === 7);
+                    const fifthNote = fifthCandidates.length > 0 ? 
+                        fifthCandidates.reduce((a, b) => Math.abs(a - musicState.prevBass) < Math.abs(b - musicState.prevBass) ? a : b) :
+                        rootNote;
+                    bassNote = (musicState.prevBass === rootNote) ? fifthNote : rootNote;
+                }
+            } else {
+                bassNote = nearestScaleNote(rawMidi, allowedBass, maxJump);
+            }
         }
         
         return bassNote;
@@ -412,10 +415,7 @@
         chordProgression: 'canon',
         displayNotes: true,
         sensitivity: 0.7,
-        priceNoise: 6.9,
-        syncOffset: 1190,
         glowDuration: 3,
-        futureNotes: 0,
         playing: false,
         
         // Internal Tone.js state
@@ -478,14 +478,8 @@
         // Sync tuning sliders
         sensitivity: document.getElementById('audioSensitivity'),
         sensitivityLabel: document.getElementById('audioSensitivityLabel'),
-        priceNoise: document.getElementById('audioPriceNoise'),
-        priceNoiseLabel: document.getElementById('audioPriceNoiseLabel'),
-        syncOffset: document.getElementById('audioSyncOffset'),
-        syncOffsetLabel: document.getElementById('audioSyncOffsetLabel'),
         glowDuration: document.getElementById('audioGlowDuration'),
         glowDurationLabel: document.getElementById('audioGlowDurationLabel'),
-        futureNotes: document.getElementById('audioFutureNotes'),
-        futureNotesLabel: document.getElementById('audioFutureNotesLabel'),
         
         // Speed control
         speed: document.getElementById('audioSpeed'),
@@ -988,6 +982,13 @@
      */
     function smoothAnimationLoop(timestamp) {
         if (!audioState._animationRunning || !audioState.playing) {
+            console.warn('[Audio] Animation stopped - running:', audioState._animationRunning, 'playing:', audioState.playing);
+            stopAudioAnimation();
+            return;
+        }
+        
+        if (!audioState._initialized) {
+            console.warn('[Audio] Animation running but not initialized');
             stopAudioAnimation();
             return;
         }
@@ -1038,14 +1039,29 @@
                 const subStepInBar = subStep % SUB_STEP_COUNT;
                 
                 if (barIndex < state.data.length) {
-                    processSubStep(barIndex, subStepInBar, subStep);
+                    try {
+                        processSubStep(barIndex, subStepInBar, subStep);
+                    } catch (e) {
+                        console.error('[Audio] Error in processSubStep:', e);
+                    }
                 }
             }
             audioState._lastSubStep = currentSubStep;
         }
         
         // Update the chart scroll position EVERY FRAME for smooth animation
-        updateSmoothScroll(audioState._smoothPosition);
+        try {
+            updateSmoothScroll(audioState._smoothPosition);
+        } catch (e) {
+            console.error('[Audio] Error in updateSmoothScroll:', e);
+        }
+        
+        // Debug: log every ~2 seconds (120 frames at 60fps)
+        if (!audioState._frameCount) audioState._frameCount = 0;
+        audioState._frameCount++;
+        if (audioState._frameCount % 120 === 0) {
+            console.log('[Audio] Frame', audioState._frameCount, 'bar:', Math.floor(audioState._smoothPosition), 'subStep:', currentSubStep);
+        }
         
         // Continue the loop
         audioState._animationFrame = requestAnimationFrame(smoothAnimationLoop);
@@ -1056,10 +1072,16 @@
      * Full Market Inventions logic with scale pools, walking bass, melodic variation
      */
     function processSubStep(barIndex, subStepInBar, globalSubStep) {
-        if (!audioState.playing || !audioState._initialized) return;
+        if (!audioState.playing || !audioState._initialized) {
+            console.warn('[Audio] processSubStep skipped - playing:', audioState.playing, 'init:', audioState._initialized);
+            return;
+        }
         
         const barData = state.data[barIndex];
-        if (!barData) return;
+        if (!barData) {
+            console.warn('[Audio] No bar data at index', barIndex);
+            return;
+        }
         
         const now = Tone.now();
         const perfNow = performance.now();
@@ -1072,6 +1094,10 @@
             // Kick drum on downbeat
             if (audioState._kickSynth) {
                 audioState._kickSynth.triggerAttackRelease('C1', '8n', now, 0.4);
+            }
+            // Log every 10 bars for debugging
+            if (barIndex % 10 === 0) {
+                console.log('[Audio] Bar', barIndex, 'regime:', musicState.regime, 'upper:', audioState.upperWick.enabled, 'lower:', audioState.lowerWick.enabled);
             }
         }
         
@@ -1188,6 +1214,9 @@
     function emitSubStepNote(voice, midi, price, barIndex, durationMs, startTime) {
         if (!window._audioNoteEvents) window._audioNoteEvents = [];
         
+        // Glow duration from slider (units * 200ms base)
+        const glowMs = (audioState.glowDuration || 3) * 200;
+        
         window._audioNoteEvents.push({
             voice: voice,
             midi: midi,
@@ -1196,7 +1225,7 @@
             time: startTime,
             endTime: startTime + durationMs,
             durationMs: durationMs,
-            glowUntil: startTime + 200  // Brief glow
+            glowUntil: startTime + glowMs
         });
         
         // Keep up to 400 events
@@ -1345,6 +1374,12 @@
         const note = noteNames[midi % 12];
         return note + octave;
     }
+    
+    // Expose for renderer to use for note labels
+    window._midiToNoteName = midiToNoteName;
+    
+    // Expose music state for renderer (playhead color based on regime)
+    window._musicState = musicState;
 
     /**
      * Emit a note event for visual feedback - Creates persistent trail
@@ -1463,21 +1498,22 @@
     function setupSlider(slider, labelEl, suffix, stateKey, transform) {
         if (!slider || !labelEl) return;
 
-        const updateLabel = () => {
+        const updateLabel = (shouldSave = false) => {
             const val = parseFloat(slider.value);
             const displayVal = transform ? transform(val) : val;
             labelEl.textContent = displayVal + suffix;
             audioState[stateKey] = val;
+            if (shouldSave) saveSettings();
         };
 
-        slider.addEventListener('input', updateLabel);
-        updateLabel();
+        slider.addEventListener('input', () => updateLabel(true));
+        updateLabel(false);
     }
 
     function setupVolumeSlider(slider, labelEl, wickType) {
         if (!slider || !labelEl) return;
 
-        const updateLabel = () => {
+        const updateLabel = (shouldSave = false) => {
             const val = parseInt(slider.value, 10);
             labelEl.textContent = Math.abs(val) + ' DB';
             audioState[wickType + 'Wick'].volume = val;
@@ -1490,17 +1526,158 @@
                     audioState._bassSampler.volume.value = val;
                 }
             }
+            if (shouldSave) saveSettings();
         };
 
-        slider.addEventListener('input', updateLabel);
-        updateLabel();
+        slider.addEventListener('input', () => updateLabel(true));
+        updateLabel(false);
     }
 
     function updateStatus(text) {
         if (ui.statusLabel) {
             ui.statusLabel.textContent = text;
-            ui.statusLabel.style.color = audioState.playing ? '#2ecc71' : '';
+            // Color based on regime: green for MAJOR (uptrend), red for MINOR (downtrend)
+            if (audioState.playing) {
+                ui.statusLabel.style.color = (musicState.regime === 'MINOR') 
+                    ? '#ff4444'   // Red for MINOR/downtrend
+                    : '#2ecc71';  // Green for MAJOR/uptrend
+            } else {
+                ui.statusLabel.style.color = '';
+            }
         }
+    }
+
+    // ========================================================================
+    // SETTINGS PERSISTENCE (localStorage)
+    // ========================================================================
+    
+    const STORAGE_KEY = 'ntree_audio_visual_settings';
+    
+    /**
+     * Save current settings to localStorage
+     */
+    function saveSettings() {
+        try {
+            const settings = {
+                upperWick: {
+                    enabled: audioState.upperWick.enabled,
+                    volume: audioState.upperWick.volume,
+                    instrument: audioState.upperWick.instrument,
+                    rhythm: audioState.upperWick.rhythm
+                },
+                lowerWick: {
+                    enabled: audioState.lowerWick.enabled,
+                    volume: audioState.lowerWick.volume,
+                    instrument: audioState.lowerWick.instrument,
+                    rhythm: audioState.lowerWick.rhythm
+                },
+                chordProgression: audioState.chordProgression,
+                displayNotes: audioState.displayNotes,
+                sensitivity: audioState.sensitivity,
+                glowDuration: audioState.glowDuration,
+                speed: audioState._currentBpm || 60
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+            console.log('[Audio] Settings saved');
+        } catch (e) {
+            console.warn('[Audio] Failed to save settings:', e);
+        }
+    }
+    
+    /**
+     * Load settings from localStorage and apply to UI
+     */
+    function loadSettings() {
+        try {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (!stored) return false;
+            
+            const settings = JSON.parse(stored);
+            console.log('[Audio] Loading saved settings');
+            
+            // Apply to audioState
+            if (settings.upperWick) {
+                audioState.upperWick.enabled = settings.upperWick.enabled ?? true;
+                audioState.upperWick.volume = settings.upperWick.volume ?? -23;
+                audioState.upperWick.instrument = settings.upperWick.instrument || 'harpsichord';
+                audioState.upperWick.rhythm = settings.upperWick.rhythm || '4';
+            }
+            if (settings.lowerWick) {
+                audioState.lowerWick.enabled = settings.lowerWick.enabled ?? true;
+                audioState.lowerWick.volume = settings.lowerWick.volume ?? -17;
+                audioState.lowerWick.instrument = settings.lowerWick.instrument || 'acoustic_bass';
+                audioState.lowerWick.rhythm = settings.lowerWick.rhythm || '2';
+            }
+            audioState.chordProgression = settings.chordProgression || 'canon';
+            audioState.displayNotes = settings.displayNotes ?? true;
+            audioState.sensitivity = settings.sensitivity ?? 0.7;
+            audioState.glowDuration = settings.glowDuration ?? 3;
+            audioState._savedSpeed = settings.speed ?? 60;
+            
+            return true;
+        } catch (e) {
+            console.warn('[Audio] Failed to load settings:', e);
+            return false;
+        }
+    }
+    
+    /**
+     * Apply loaded settings to UI elements
+     */
+    function applySettingsToUI() {
+        // Upper wick
+        if (ui.upperWickChk) ui.upperWickChk.checked = audioState.upperWick.enabled;
+        if (ui.upperVolume) {
+            ui.upperVolume.value = audioState.upperWick.volume;
+            if (ui.upperVolumeLabel) ui.upperVolumeLabel.textContent = audioState.upperWick.volume + ' DB';
+        }
+        applyDropdownSelection(ui.upperInstrumentMenu, ui.upperInstrumentLabel, audioState.upperWick.instrument);
+        applyDropdownSelection(ui.upperRhythmMenu, ui.upperRhythmLabel, audioState.upperWick.rhythm);
+        
+        // Lower wick
+        if (ui.lowerWickChk) ui.lowerWickChk.checked = audioState.lowerWick.enabled;
+        if (ui.lowerVolume) {
+            ui.lowerVolume.value = audioState.lowerWick.volume;
+            if (ui.lowerVolumeLabel) ui.lowerVolumeLabel.textContent = audioState.lowerWick.volume + ' DB';
+        }
+        applyDropdownSelection(ui.lowerInstrumentMenu, ui.lowerInstrumentLabel, audioState.lowerWick.instrument);
+        applyDropdownSelection(ui.lowerRhythmMenu, ui.lowerRhythmLabel, audioState.lowerWick.rhythm);
+        
+        // Chord progression
+        applyDropdownSelection(ui.chordProgressionMenu, ui.chordProgressionLabel, audioState.chordProgression);
+        
+        // Display notes checkbox
+        if (ui.displayNotesChk) ui.displayNotesChk.checked = audioState.displayNotes;
+        
+        // Sliders
+        if (ui.sensitivity) {
+            ui.sensitivity.value = audioState.sensitivity;
+            if (ui.sensitivityLabel) ui.sensitivityLabel.textContent = audioState.sensitivity.toFixed(1) + 'X';
+        }
+        if (ui.glowDuration) {
+            ui.glowDuration.value = audioState.glowDuration;
+            if (ui.glowDurationLabel) ui.glowDurationLabel.textContent = Math.round(audioState.glowDuration) + ' UNITS';
+        }
+        if (ui.speed && audioState._savedSpeed) {
+            ui.speed.value = audioState._savedSpeed;
+            if (ui.speedLabel) ui.speedLabel.textContent = audioState._savedSpeed;
+        }
+    }
+    
+    /**
+     * Helper to apply selection to a dropdown menu
+     */
+    function applyDropdownSelection(menu, label, value) {
+        if (!menu) return;
+        const items = menu.querySelectorAll('.ddItem');
+        items.forEach(item => {
+            if (item.getAttribute('data-value') === value) {
+                item.classList.add('sel');
+                if (label) label.textContent = item.textContent;
+            } else {
+                item.classList.remove('sel');
+            }
+        });
     }
 
     // ========================================================================
@@ -1508,19 +1685,26 @@
     // ========================================================================
 
     function init() {
+        // Load saved settings first
+        const hasSettings = loadSettings();
+        if (hasSettings) {
+            applySettingsToUI();
+        }
         // Upper Wick controls
         if (ui.upperWickChk) {
-            // Sync initial state from checkbox
-            audioState.upperWick.enabled = ui.upperWickChk.checked;
+            // Sync initial state from checkbox (only if no saved settings)
+            if (!hasSettings) audioState.upperWick.enabled = ui.upperWickChk.checked;
             ui.upperWickChk.addEventListener('change', () => {
                 audioState.upperWick.enabled = ui.upperWickChk.checked;
                 console.log('[Audio] Upper wick enabled:', audioState.upperWick.enabled);
+                saveSettings();
             });
         }
         setupVolumeSlider(ui.upperVolume, ui.upperVolumeLabel, 'upper');
         setupDropdown(ui.upperInstrumentDD, ui.upperInstrumentBtn, ui.upperInstrumentMenu, ui.upperInstrumentLabel,
             (val) => { 
                 audioState.upperWick.instrument = val;
+                saveSettings();
                 // Reload sampler if playing
                 if (audioState.playing && audioState._initialized) {
                     reloadSampler('soprano', val);
@@ -1530,21 +1714,24 @@
             (val) => { 
                 audioState.upperWick.rhythm = val;
                 console.log('[Audio] Upper rhythm changed to:', val);
+                saveSettings();
             });
 
         // Lower Wick controls
         if (ui.lowerWickChk) {
-            // Sync initial state from checkbox
-            audioState.lowerWick.enabled = ui.lowerWickChk.checked;
+            // Sync initial state from checkbox (only if no saved settings)
+            if (!hasSettings) audioState.lowerWick.enabled = ui.lowerWickChk.checked;
             ui.lowerWickChk.addEventListener('change', () => {
                 audioState.lowerWick.enabled = ui.lowerWickChk.checked;
                 console.log('[Audio] Lower wick enabled:', audioState.lowerWick.enabled);
+                saveSettings();
             });
         }
         setupVolumeSlider(ui.lowerVolume, ui.lowerVolumeLabel, 'lower');
         setupDropdown(ui.lowerInstrumentDD, ui.lowerInstrumentBtn, ui.lowerInstrumentMenu, ui.lowerInstrumentLabel,
             (val) => { 
                 audioState.lowerWick.instrument = val;
+                saveSettings();
                 // Reload sampler if playing
                 if (audioState.playing && audioState._initialized) {
                     reloadSampler('bass', val);
@@ -1554,24 +1741,28 @@
             (val) => { 
                 audioState.lowerWick.rhythm = val;
                 console.log('[Audio] Lower rhythm changed to:', val);
+                saveSettings();
             });
 
         // Chord Progression
         setupDropdown(ui.chordProgressionDD, ui.chordProgressionBtn, ui.chordProgressionMenu, ui.chordProgressionLabel,
-            (val) => { audioState.chordProgression = val; });
+            (val) => { 
+                audioState.chordProgression = val; 
+                saveSettings();
+            });
 
         if (ui.displayNotesChk) {
+            // Sync initial state (only if no saved settings)
+            if (!hasSettings) audioState.displayNotes = ui.displayNotesChk.checked;
             ui.displayNotesChk.addEventListener('change', () => {
                 audioState.displayNotes = ui.displayNotesChk.checked;
+                saveSettings();
             });
         }
 
-        // Sync Tuning sliders
+        // Tuning sliders
         setupSlider(ui.sensitivity, ui.sensitivityLabel, 'X', 'sensitivity', v => v.toFixed(1));
-        setupSlider(ui.priceNoise, ui.priceNoiseLabel, 'X', 'priceNoise', v => v.toFixed(1));
-        setupSlider(ui.syncOffset, ui.syncOffsetLabel, 'MS', 'syncOffset', v => Math.round(v));
         setupSlider(ui.glowDuration, ui.glowDurationLabel, ' UNITS', 'glowDuration', v => Math.round(v));
-        setupSlider(ui.futureNotes, ui.futureNotesLabel, 'MS', 'futureNotes', v => Math.round(v));
 
         // Speed slider - directly controls animation/audio tempo
         if (ui.speed) {
@@ -1588,6 +1779,7 @@
                 audioState._barsPerMs = bpm / 60000;
                 audioState._currentBpm = bpm;
                 console.log('[Audio] Speed updated to', bpm, 'BPM, barsPerMs:', audioState._barsPerMs.toFixed(6));
+                saveSettings();
             });
         }
 
@@ -1627,6 +1819,28 @@
                 }
             });
         }
+
+        // Spacebar to toggle audio playback
+        document.addEventListener('keydown', async (e) => {
+            // Only respond to spacebar, ignore if user is typing in an input
+            if (e.code !== 'Space' && e.key !== ' ') return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            // Prevent page scroll
+            e.preventDefault();
+            
+            if (audioState.playing) {
+                // Stop playback
+                if (ui.stopBtn && !ui.stopBtn.disabled) {
+                    ui.stopBtn.click();
+                }
+            } else {
+                // Start playback
+                if (ui.startBtn && !ui.startBtn.disabled) {
+                    ui.startBtn.click();
+                }
+            }
+        });
 
         // Close dropdowns when clicking outside
         document.addEventListener('click', () => {
