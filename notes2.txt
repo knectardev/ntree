@@ -1,103 +1,63 @@
-Right now you have three separate “gaps” that prevent entry↔exit linking (and partials):
+notes2.txt
 
-UI hover is bar-only, not marker hit-testing
 
-Strategy markers are per-bar booleans, no stable ID to pair with anything
 
-Backtest execution_events are exit-only (SL/TP only) and have no trade_id, and the renderer effectively assumes one marker per bar
+Here are the specific directions to provide Cursor to answer those 6 questions and get the "Pathfinder" running:
 
-So Cursor is right: pairing isn’t possible yet with the current event schema, and partials aren’t representable.
+### 1. Phrase Boundaries vs. Bar Boundaries
 
-What I’d do next (minimal diff that unlocks hover pairing)
-Option A (best “small diff”): extend execution_events
+**The Direction:** **Allow phrases to carry across bar boundaries.**
+Since your market data is fractal, a "trend" doesn't stop just because a new 1-minute candle started. If a scale run is mid-flight, let it finish.
 
-Have the backtest emit a richer stream of events that includes both entry and exit and a stable ID:
+* **The Rule:** Each bar change should update the **Target MIDI** (the new wick), but the **Sequencer** should continue its current "Run" or "Arpeggio" until that specific 4-note cell is complete. This prevents the "jarring" reset and makes the music feel like a continuous performance.
 
-New/extended fields
+### 2. Should both voices use pathfinding?
 
-trade_id (int)
+**The Direction:** **Yes, but with different "Movement Rules."**
 
-event = "entry" | "exit" (or more specific: "stop_loss", "take_profit", "signal_exit", etc.)
+* **Soprano (High Wick):** High "Agility." Uses scale runs, trills, and enclosures. It "hugs" the wick tightly.
+* **Bass (Low Wick):** High "Stability." Instead of runs, the bass should use **"Walking Bass"** logic—targeting the Low Wick but primarily moving in leaps (Root, 4th, 5th) or chromatic approaches.
+* **Instruction for Cursor:** "Implement pathfinding for both, but use `executeRunStep` for Soprano and create a `executeWalkingStep` for Bass."
 
-exit_reason (for exits)
+### 3. Handling Dead Code (Wiring vs. Rewrite)
 
-qty and/or qty_delta (optional now, required later for partials)
+**The Direction:** **Wire them in.**
+The scaffolded functions (`executeRunStep`, `applyGenrePhrasing`, etc.) are high-quality building blocks. Rewriting from scratch would likely lose the genre-specific nuances already defined.
 
-event_seq (optional; helps ordering if multiple events share same bar)
+* **Instruction for Cursor:** "Refactor `processSubStep` to become the 'Conductor.' It should call `detectMelodicPattern`, decide if a `Run` or `Arpeggio` is needed, and then call the existing scaffolded functions to execute the notes."
 
-Why this is the smallest diff:
-You already have a place to return execution_events; you just make it richer, and the UI can build trade_id -> { entry, exits[] }.
+### 4. Consolidating Playback Paths
 
-What changes in the UI (also small, but very high leverage)
-1) Build a “pickables” buffer during render
+**The Direction:** **Unify them into `processSubStep`.**
+Having two different ways to generate a note is why you’re seeing "broken" behavior.
 
-When you draw each marker, also record its screen coords + trade_id.
+* **Instruction for Cursor:** "Delete `generateScore`. Route the Replay Hook (`onBarAdvance`) to simply update the `audioState` targets, and let the main `processSubStep` loop handle all note generation. This ensures the sound is identical whether you are in 'Live' mode or 'Replay' mode."
 
-Example record:
+### 5. UI Slider Mapping
 
-pickables.push({ kind: "entry", trade_id, x, y, r: 10 });
-pickables.push({ kind: "exit", trade_id, x, y, r: 10 });
+**The Direction:** **Add one new "Vertical Zoom" slider; repurpose "Sensitivity."**
 
-2) Extend hover logic to hit-test markers
+* **Sensitivity Slider:** Rename/Repurpose this to **"Complexity/Stochasticism."** (0 = pure arpeggios; 1 = chaotic jumps and chromatic ornaments).
+* **Vertical Zoom (New):** Add this to control how much the "Price-to-MIDI" mapping expands.
+* **Instruction for Cursor:** "Add a 'Melodic Range' (Vertical Zoom) slider. Keep the UI clean by using 'Sensitivity' to drive the probability of the stochastic interruptions defined in the genre configs."
 
-On mousemove, you already update crosshair hover index. Add:
+### 6. Genre Complexity feeding the Pathfinder
 
-find nearest pickable within radius
+**The Direction:** **Absolutely yes.**
+This is the "secret sauce."
 
-set state.hoverTradeId = pickable.trade_id
+* **Instruction for Cursor:** "Use the `ornamentChance` and `bebopEnclosureChance` from the Genre configs as the multipliers for the `audioState.sensitivity` value. If I'm in Jazz mode with high sensitivity, I should hear enclosures constantly; in Classical, I should hear trills."
 
-re-render
+---
 
-3) Highlight counterpart(s) on draw
+### Final "Marching Orders" for Cursor:
 
-If hoverTradeId is set:
+"Cursor, thank you for the review. Please proceed with the following:
 
-dim all other trade markers
+1. **Unify the Engine:** Route all playback through `processSubStep`.
+2. **Activate the Pathfinder:** Wire the existing 'dead code' (`executeRunStep`, `getArpeggioNote`, `applyGenrePhrasing`) into the `processSubStep` loop.
+3. **Dynamic Mapping:** Update `priceToMidi` to use the **visible viewport** (zoom level) rather than the full data range, so notes 'hug' the wicks visually.
+4. **Sequential State:** Ensure the `stepCounter` drives 4-note 'cells' that can cross bar boundaries for a fluid sound.
+5. **Fix `quantizeToChord`:** Implement the missing function using the existing `CHORD_MAPS`."
 
-brighten entry + all exits with same trade_id
-
-optionally draw a faint connector entry→exit (only on hover)
-
-This gives you the “connected to which exit?” clarity without clutter.
-
-About partial exits (Cursor is also right)
-
-Partials are not supported yet for two reasons:
-
-Engine models 1 entry → 1 exit and does not track quantity per trade lifecycle (so no scale-outs).
-
-Renderer assumes max one execution marker per bar, which breaks if you have multiple exit events on the same candle.
-
-You can still implement Option A now in a way that is “partial-ready”:
-
-include qty_delta on events even if it’s always full size at first
-
-allow the renderer to store arrays per bar (or better: don’t index by bar at all—just render from events)
-
-Then when you later add partials:
-
-the UI path doesn’t change
-
-only the engine begins emitting multiple exit events per trade_id
-
-My recommendation for ntree (pragmatic)
-
-Implement Option A now:
-
-add trade_id
-
-emit an "entry" event
-
-emit an "exit" event with exit_reason
-
-update UI for hit-testing + paired highlighting
-
-Later, add partials by:
-
-introducing qty / qty_delta in the engine
-
-allowing multiple exits per trade_id
-
-ensuring the renderer supports multiple markers per bar
-
-This gets you hover pairing quickly, and you won’t have to redo it when you add scale-outs.
+**This should break the stalemate. Once Cursor wires these up, the "stagnant chords" will disappear and be replaced by the "dancing" scale runs you are looking for.**

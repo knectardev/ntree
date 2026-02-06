@@ -233,13 +233,19 @@
           <div class="subCard" aria-label="Audio visual sync tuning" style="margin-top:10px;">
             <div class="subCardTitle">Audio Visual Sync Tuning</div>
             <div class="sideList">
-              <!-- Price Sensitivity -->
+              <!-- Complexity (was Price Sensitivity) -->
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-                <span class="hint" style="min-width:130px;">Price Sensitivity:</span>
-                <input id="audioSensitivity" type="range" min="0.1" max="5" step="0.1" value="0.7" style="flex:1;accent-color:#ff69b4;" />
-                <span class="hint mono" id="audioSensitivityLabel" style="min-width:36px;text-align:right;">0.7X</span>
+                <span class="hint" style="min-width:130px;">Complexity:</span>
+                <input id="audioSensitivity" type="range" min="0" max="1" step="0.05" value="0.5" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioSensitivityLabel" style="min-width:36px;text-align:right;">0.5</span>
               </div>
               
+              <!-- Melodic Range (Vertical Zoom) - NEW -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                <span class="hint" style="min-width:130px;">Melodic Range:</span>
+                <input id="audioMelodicRange" type="range" min="0.3" max="3.0" step="0.1" value="1.0" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioMelodicRangeLabel" style="min-width:36px;text-align:right;">1.0X</span>
+              </div>
               
               <!-- Glow Duration -->
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">

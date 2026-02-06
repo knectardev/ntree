@@ -324,22 +324,39 @@ Notes:
 
 The chart page includes an **Audio Visual Settings** sidebar panel and a **Tone.js**-based audio engine that maps replay/practice bars to musical playback. Implemented in `static/demo_static/js/13_audio_controls.js`; layout integration in `static/demo_static/js/07_render_and_interactions.js`.
 
-**Architecture**
-- Each replay bar acts as a “musical measure”; **high wick** → soprano voice (upper pitch rail), **low wick** → bass voice (lower pitch rail); **volume** → gain envelope; **Speed** slider → Tone.Transport BPM.
+**Architecture -- Pathfinding Sequencer**
+- Each replay bar acts as a "musical measure" with **16 sub-steps**; **high wick** -> soprano voice (upper pitch rail), **low wick** -> bass voice (lower pitch rail); **volume** -> gain envelope; **Speed** slider -> BPM.
+- **Unified playback**: All note generation routes through `processSubStep()` (the "Conductor"). Both the independent animation loop and the Replay/Practice hook use the same code path, ensuring identical sound in all modes.
+- **Pathfinding melody engine**: Instead of statically snapping to the nearest scale note, the engine uses **4-note cells** (runs, arpeggios, orbits) that "walk" toward the wick target through scale degrees. Cells can **cross bar boundaries** for fluid sound; a new bar updates the target but does not reset a mid-flight cell.
+- **Per-voice pathfinding**:
+  - **Soprano** (high wick): High agility -- scale runs (1-3 degrees per step), arpeggios, orbits. Uses `executeSopranoRunStep()`.
+  - **Bass** (low wick): High stability -- walking bass patterns (root/4th/5th leaps), chromatic approaches, chord-tone arpeggios. Uses `executeWalkingStep()`.
+- **Genre-aware stochastic interruptions**: Each genre defines complexity probabilities (ornament, trill, chromatic passing, enclosure, blue note, etc.) that are multiplied by the **Complexity** slider. At Complexity=0: pure runs/arpeggios. At Complexity=1: maximum genre-specific ornamentation.
+- **Dynamic price mapping**: `priceToMidi()` uses the **visible viewport** (respecting zoom/scroll) rather than the full data range, so notes tightly "hug" the wicks regardless of absolute price levels. The **Melodic Range** slider expands or compresses this mapping.
 - **Tone.js** is loaded from CDN (unpkg, fallback cdnjs) before other chart scripts; `13_audio_controls.js` is loaded last so it can hook into replay/UI state.
 
 **UI (sidebar, collapsible)**
 - **Channel instruments**: Upper wick and lower wick each have enable checkbox, volume (dB), instrument dropdown, and rhythm dropdown (e.g. quarter, eighth, sixteenth for upper; half, quarter, whole for lower).
 - **Instruments**: MIDI soundfonts (FluidR3_GM via gleitz.github.io): harpsichord, synth lead, pipe organ, strings, flute (upper); acoustic bass, electric bass, synth pad, pipe organ (lower).
-- **Music and genre**: Chord progression (classical, pop, blues, jazz, canon, fifties), optional note labels on chart.
-- **Audio visual sync tuning**: Price sensitivity (0.1×–5×), glow duration (1–8 units).
-- **Speed**: 30–240 (controls BPM for playback).
-- **Start Audio** / **Stop** buttons; status line shows play state.
+- **Music and genre**: Genre selection (Classical/Baroque, Indian Raags, Jazz Bebop, Rock/Bluegrass, Techno/Experimental), chord progression (classical, pop, blues, jazz, canon, fifties), optional note labels on chart.
+- **Audio visual sync tuning**:
+  - **Complexity** (0-1): Controls stochastic interruption probability, scaled by genre-specific ornament chances. 0 = pure melodic cells; 1 = maximum genre ornamentation.
+  - **Melodic Range** (0.3x-3.0x): Vertical zoom -- expands or compresses the price-to-MIDI mapping. Low = compressed (tighter movements); High = expanded (wider, dramatic leaps).
+  - **Glow Duration** (1-8 units): Controls visual glow persistence of note events on chart.
+- **Speed**: 30-240 (controls BPM for playback).
+- **Start Audio** / **Stop** buttons; status line shows play state + current regime + active cell type.
 
 **Music theory (client-side)**
-- **Regime**: MAJOR/MINOR derived from price trend (consecutive up/down bars with configurable threshold).
-- **Chord progressions**: 16-step patterns per genre (scale degrees); chord maps for major/minor (I, ii, iii, IV, V, vi, vii° etc.).
-- **Note range**: Bass C2–C4, soprano C4–C6 (MIDI 36–84); scale quantization and chord-tone targeting for smoother voice leading.
+- **Regime**: UPTREND/DOWNTREND derived from price trend (consecutive up/down bars with configurable threshold). Maps to genre-specific ascending/descending scales.
+- **Genres**: Each genre defines two scales (uptrend/downtrend) and a complexity config with ornament probabilities:
+  - Classical/Baroque: Major (Ionian) / Natural Minor; passing tones, neighbor tones, trills
+  - Indian Raags: Yaman (Lydian) / Bhairavi (Phrygian); gamaka oscillation, meend slides
+  - Jazz Bebop: Dorian / Altered (Super Locrian); chromatic approaches, bebop enclosures, tritone subs
+  - Rock/Bluegrass: Mixolydian / Major Pentatonic; blue notes, bends, slides
+  - Techno/Experimental: Phrygian / Chromatic; random jumps, clusters
+- **Chord progressions**: 16-step patterns per genre (scale degrees); chord maps for major/minor (I, ii, iii, IV, V, vi, vii deg etc.).
+- **Chord quantization**: `quantizeToChord()` maps raw MIDI to the nearest chord tone with voice-leading preference (weighted blend of proximity to target and smooth motion from previous note).
+- **Note range**: Bass C1-F#3 (MIDI 24-54), Soprano F#3-C6 (MIDI 54-84); scale quantization and chord-tone targeting for smoother voice leading.
 
 **Rendering**
 - When audio is **playing**, the main canvas in `07_render_and_interactions.js` reserves a **note axis** (40px) on the **left** of the plot for piano-keyboard-style note labels; `noteAxisW = audioActive ? 40 : 0` so plot width and layout adjust automatically.
@@ -1001,7 +1018,7 @@ The following reflects the latest series of changes to the chart and replay expe
 
 - **chart.html**: Added app nav (Dashboard, Backtest Config), status chip (“Last update”), and **Session History** modal with Cards / Ledger / Matrix views for replay session history (orders, positions); Refresh and Close actions; Escape to close.
 - **07_render_and_interactions.js**: When Audio Visual playback is active, the canvas reserves a **note axis** (40px) on the left of the plot for piano-style note labels; plot width and layout adjust via `noteAxisW` so the chart and sonification stay aligned.
-- **13_audio_controls.js**: New **Audio Visual Settings** panel and Tone.js-based audio engine — replay bars as measures, high/low wicks mapped to soprano/bass, chord progressions and regime (MAJOR/MINOR from price trend), configurable instruments and rhythm, speed (BPM), sensitivity, and glow duration. Script loaded last; Tone.js from CDN (unpkg/cdnjs).
+- **13_audio_controls.js**: Major refactor to **Pathfinding Sequencer** architecture. Unified all playback through `processSubStep()` (the "Conductor"). Replaced static snap-to-nearest-note with **4-note melodic cells** (scale runs, arpeggios, orbits) that walk toward wick targets through scale degrees and cross bar boundaries. Added per-voice pathfinding: soprano uses `executeSopranoRunStep()` (high agility), bass uses `executeWalkingStep()` (root/4th/5th walking bass). Implemented `quantizeToChord()` for voice-leading-aware chord quantization. Updated `priceToMidi()` to use visible viewport for tight wick-hugging. Added **Melodic Range** slider (vertical zoom). Repurposed Sensitivity slider as **Complexity** (0-1, multiplies genre-specific ornament probabilities). Genre complexity configs now drive stochastic interruptions (Jazz enclosures, Classical trills, Raag gamaka, etc.).
 - **stock_data.db**: Modified by normal ingestion/backfill or replay event persistence (no schema change implied by the above).
 
 ---

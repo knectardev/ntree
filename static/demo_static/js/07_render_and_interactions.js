@@ -1233,8 +1233,21 @@
     // Audio note visualization - HORIZONTAL BARS that scroll with chart (like Market Inventions)
     (function drawAudioNotes(){
       try{
-        if(!window._audioNoteEvents || !window._audioNoteEvents.length) return;
+        if(!window._audioNoteEvents || !window._audioNoteEvents.length) {
+          // Debug: log if no events
+          if(window.audioState && window.audioState.playing && !window._debugNoEventsLogged) {
+            console.log('[Render] No audio events to draw, events array:', window._audioNoteEvents);
+            window._debugNoEventsLogged = true;
+          }
+          return;
+        }
         if(!window.audioState || !window.audioState.playing) return;
+        
+        // Debug: log first draw
+        if(!window._debugFirstDraw) {
+          console.log('[Render] Drawing audio notes, count:', window._audioNoteEvents.length);
+          window._debugFirstDraw = true;
+        }
         
         var now = performance.now();
         var barWidth = plot.w / barsVisible;
@@ -1269,14 +1282,14 @@
           var noteWidth = durationBars * barWidth;
           noteWidth = Math.max(4, Math.min(noteWidth, barWidth * 4));
           
-          // Map note to Y coordinate using PURE MIDI mapping (same as left axis)
-          // Same MIDI note = ALWAYS same Y position, aligned with left axis
+          // Map note to Y coordinate using PURE MIDI mapping (aligned with left axis)
+          // Same MIDI note = ALWAYS same Y position
           var noteY;
           
           if (noteEv.midi !== undefined && noteEv.midi !== null) {
             // Use EXACT same formula as the left note axis
             // Map MIDI to FIXED price within full data range
-            var midiMin = 24;   // C1 (extended lower for bass)
+            var midiMin = 24;   // C1
             var midiMax = 84;   // C6
             var midiNorm = (noteEv.midi - midiMin) / (midiMax - midiMin);
             midiNorm = Math.max(0, Math.min(1, midiNorm));
