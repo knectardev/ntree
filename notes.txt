@@ -1,221 +1,65 @@
-cursor And I are really struggling to get this to work very well 
-Musically speaking this sounds like a bunch of repeating areggiated chords, There is not even a hint of scale scale runs or even very much variation at all in the melody generation compared to earlier versions. 
+here is state of app - but I'd like to introduce some kind of controls that allow me to build up the musical structures more systematically. e.g. if we introduce a new scale type (e.g. Raag), I'd like to be able to hear it cleanly with no modifications, e.g. minimal ascending descending scales instead of any "creative" modulation of the melodically. And, simple arpeggiation. And for the bass line, an option to simply play the root notes for each chord in the progression. And then from there, more systematically introduce variances, starting with simple patterns, and then increasing the complexity of the patterns while maintaining the "scale type" constraints.
 
-Can you take a look the code, UI settings, and resulting output. 
+I am describing a **"Hierarchical Composition Layer."** Instead of the AI trying to be "creative" all at once, you are building a ladder of complexity where each rung is a more advanced version of the previous one.
 
-Ideally the melodies that are generated meet the following criteria: 
-
-1. utilize the selected genre / scale type (not sure if this is happening because there are no scale runs). 
-
-2. Once the genre scale type has been selected the melody should be primarily made up patterns, runs and interval work (where intervals are connected with the underlying chord in the progression) with some stochastic randomness added and controlled by a parameterized slider. 
-
-3. the melody lines should "dance around" or "hug" the upper and lower wick price levels (this may be Happening but it's hard to tell for the same reason and also notice how far away notes are from the Wicks - The position needs to be much closer or scaled down to close to those levels to ensure correspondence. It may be necessary to introduce some kind of scaling factor to the price in order to map things nicely to the notes. This itself might be a good thing to parameterize and expose as a slider for the user to tune). 
- 
-In order to address these please consider the following 
-
-The reason you and Cursor are hitting a wall is that the current logic is **"State-Blind."** It looks at a single price point, finds a note, and then tries to fix the resulting boredom with a "nudging" patch.
-
-To get those fluid **scale runs** and **wick-hugging** melodies, the engine needs a **"Pathfinder"** logic. It needs to know where it is, where the wick is, and how many musical "steps" it has to get there.
+By starting with a "Pure" or "Naked" mode, you can verify that your scale intervals (like the specific flats/sharps of a Raag) are mathematically correct before adding the "dancing" behavior.
 
 ---
 
-### 1. The Core Issue: Static Quantization vs. Melodic Pathing
+## The "Composition Building Blocks" Framework
 
-Currently, your code asks: *"What note is closest to this price right now?"* It should be asking: *"I have 16 sub-steps in this bar. How do I 'dance' from my current note to the High Wick target using the intervals of a Dorian scale?"*
+I recommend framing this to Cursor as a **"Complexity Tier" system**. This replaces the current messy "randomness" with a structured hierarchy.
 
-### 2. Technical Recommendation: The "Wick-Orbit" Sequencer
+### Tier 0: The "Naked" Mode (Ground Truth)
 
-I suggest refactoring the `generateSopranoNote` logic to move away from direct price-to-pitch mapping and toward a **Target-Seeking Vector**.
+* **Melody:** Pure ascending/descending runs between the Low and High target. No skips.
+* **Bass:** Steady root-notes of the current chord progression.
+* **Purpose:** To hear the "Scale/Raag" cleanly and verify "Wick-Hugging."
 
-#### **A. Dynamic Scaling Factor (The "Hugging" Fix)**
+### Tier 1: Patterned Stability
 
-The notes feel far from the wicks because the MIDI range is fixed (e.g., 60-84). If the stock price only moves 0.5%, the MIDI value doesn't change enough to cross a scale degree.
+* **Melody:** Introduction of simple 4-note "cells" (e.g., 1-2-3-1 or 1-3-2-4).
+* **Bass:** Simple Root-to-Fifth pulses.
 
-* **The Fix:** Implement a **Normalization Buffer**. Calculate the `min` and `max` price of the *currently visible* chart. Map that specific price window to the 2-octave MIDI range. This ensures that a $1 move looks and sounds as dramatic as a $100 move.
+### Tier 2: Stochastic Modulation
 
-#### **B. The "Pattern & Run" Heuristic**
-
-To stop the repeating chords, replace the anti-repetition block with a **Sequence Mode** toggle:
-
-* **Mode 1: The Run.** If the price is more than  distance from the current note, the next 4 sub-steps are forced to be a "Scale Run" (consecutive intervals) toward that target.
-* **Mode 2: The Orbit.** If the price is stable, the next 4 sub-steps perform a "Pattern" (e.g., 1st -> 3rd -> 2nd -> 4th) around the wick level.
-
----
-
-### 3. Cursor Implementation Prompt
-
-Copy and paste this specific instruction into Cursor to overhaul the `13_audio_controls.js` logic:
-
-> **"Refactor `generateSopranoNote` to implement a 'Pathfinding' melody engine:**
-> **1. Dynamic Price Mapping:** Create a function `mapPriceToMidi(price)` that dynamically scales the *visible* chart price range to a 24-semitone MIDI window. This will make the notes 'hug' the wicks regardless of absolute price.
-> **2. Sub-Step Sequencer:** Use a `stepCounter % 16` logic.
-> * **On Step 0:** Identify the 'Target MIDI' based on the High Wick.
-> * **Steps 1-15:** Instead of jumping to the price, calculate a path. If the target is higher, move up the `currentScale` by 1 or 2 degrees each step until you 'orbit' the target.
-> 
-> 
-> **3. Genre-Specific Intervals:** >    - If **Jazz**, allow 'Chromatic Enclosures' (play a half-step above then a half-step below the target note).
-> * If **Indian Raag**, use `Tone.Frequency.rampTo` for 'Meend' slides when moving between large intervals.
-> 
-> 
-> **4. Complexity Slider:** Use the 'Stochastic' slider to determine the chance (0-100%) that a 'Run' is interrupted by a random interval from the underlying chord progression.
-> **5. Remove Proximity Nudging:** Delete the code that simply adds +1 or -1 to a repeating note. Replace it with a rule that says: 'If price is stagnant, perform a 4-note Arpeggio of the current chord.' "
-
-### 4. Visual Comparison of the Logic
-
-| Current "Boring" Logic | New "Melodic" Logic |
-| --- | --- |
-| **Snap-to-Grid:** Pitch is a slave to the current pixel. | **Elastic Path:** Pitch is a dancer moving toward a price target. |
-| **Reactive:** Nudges notes only if they repeat. | **Proactive:** Plans 4-note "cells" (runs/patterns). |
-| **Static Range:** MIDI 60-84 regardless of price. | **Relative Range:** MIDI range stretches/shrinks to fit the wicks. |
-
-
-
-The reason the melody sounds like "repeating arpeggiated chords" is that the engine is currently **stateless**. It’s just snapping to the closest chord tone every 16th note. To get **scale runs** and **wick-hugging**, we need to implement a **Pathfinding Sequencer**.
-
-Here is the precise architectural blueprint and code logic to give to Cursor.
+* **Melody:** Adds the "Creative" layer—ornaments, enclosures, and "Meend" (slides).
+* **Bass:** Walking bass lines with chromatic approach notes.
 
 ---
 
-### 1. The "Wick-Hugging" Math (Dynamic Scaling)
+## Technical Instructions for Cursor
 
-The notes aren't hugging the wicks because the MIDI range is fixed. If the price moves 10 cents, the MIDI value doesn't change.
+You can provide this summary to Cursor to begin the refactor. It targets the "Conductor" logic you need.
 
-**The Solution:** You must map the **Visible Price Y-Axis** to the **MIDI Y-Axis**.
-
-> **Cursor Instruction:** "Create a function `getPriceMidi(price)` that takes the `chart.yScale.domain()` (the min/max price currently visible on screen) and maps it to a 24-semitone MIDI range (e.g., 60 to 84). This ensures that if a wick is at the top of the screen, the note is at the top of the melody range, regardless of the absolute dollar value."
-
-### 2. The "Melodic Pathing" Engine (No more repeating chords)
-
-Instead of just picking the "nearest" note, we will use a **Target-Seeking Vector**.
-
-**Cursor Instruction:** "Refactor `generateSopranoNote` to use a 16-step internal counter (`audioState.stepIndex`).
-
-* **Step 0:** Identify the 'Gravity Target' (the MIDI value of the High Wick).
-* **Steps 1-15:** Instead of jumping to the target, the engine must 'walk' toward it.
-* **The Rule:** If the current note is below the target, the next note must be the `nextScaleDegreeUp`. If it's at the target, it should 'orbit' by playing a 4-note pattern (e.g., Target -> +2 degrees -> -1 degree -> Target). This creates the 'dance' you described."
-
-### 3. Implementation Prompt for Cursor
-
-Copy and paste this into Cursor to replace the existing logic in `13_audio_controls.js`:
-
-```javascript
-/* TECHNICAL OVERHAUL: PATHFINDING MELODY ENGINE
-1. Replace 'nearestScaleNote' with 'getNextPathNote'.
-2. If price is trending (distance to wick > 4 semitones), force a SCALE RUN.
-3. If price is flat (distance < 4 semitones), force an ARPEGGIO PATTERN.
-4. Use the 'Stochastic' slider to add a 0-30% chance of a 'leaping' interval.
-*/
-
-// Add this to your Soprano generation logic:
-const gravityTarget = getPriceMidi(currentBar.high);
-const distance = Math.abs(gravityTarget - lastNote);
-
-if (distance > 4) {
-    // DIRECTIONAL RUN: Move 1-2 scale degrees toward target
-    return moveTowardTarget(lastNote, gravityTarget, currentScale);
-} else {
-    // ORBIT PATTERN: Play a sequence around the target
-    return playGenrePattern(gravityTarget, audioState.stepIndex, currentGenre);
-}
-
-```
+> **Task: Implement a "Hierarchical Composition Layer"**
+> **1. The Complexity Toggle (UI):**
+> Add a new dropdown or slider labeled **"Melodic Tier"** with three settings:
+> * **Naked (Tier 0):** Pure scale runs and root-note bass.
+> * **Structured (Tier 1):** Patterned cells and arpeggiation.
+> * **Dynamic (Tier 2):** Full stochastic modulation (the current complex behavior).
+> 
+> 
+> **2. The "Naked" Sequencer:**
+> Inside `processSubStep`, if Tier 0 is active:
+> * **Melody:** Calculate the shortest scale path between `lastNote` and `wickTarget`. Move exactly 1 scale degree per step. No skips, no chromaticism.
+> * **Bass:** Query `CHORD_MAPS` for the current `subStepCounter`. Trigger only the Root note on the downbeat (step 0, 4, 8, 12).
+> 
+> 
+> **3. Systematic Variance:**
+> Create a function `applyVariance(baseNote, tierLevel)`.
+> * If **Tier 1**, allow the `baseNote` to be replaced by a 4-note arpeggio cell.
+> * If **Tier 2**, apply the "Genre Complexity" logic (Jazz enclosures, Raag slides).
+> 
+> 
+> **4. Constraint Enforcement:**
+> Ensure that regardless of the Tier, every note is passed through a strict `validateScaleDegree()` function that forces the note into the current **Genre Scale** (e.g., Yaman, Dorian). No "free" notes allowed unless the Tier is set to 'Experimental/Chromatic'.
 
 ---
 
-### 4. Why this fixes your 3 criteria:
+## Why this approach is superior:
 
-1. **Scale Runs:** Because the engine now "walks" toward the price target one degree at a time, you will finally hear the **Dorian** or **Yaman** scale sequences.
-2. **Interval Work:** By using a `stepIndex % 4` logic, we can ensure that every "downbeat" (steps 0, 4, 8, 12) hits a chord-tone interval, while the "upbeats" handle the melodic runs.
-3. **Hugging:** Because the `getPriceMidi` function is now tied to the **visual chart scale**, the notes will finally "stick" to the wicks like glue.
+1. **Debugging:** If the "Yaman Raag" sounds "off," you switch to Tier 0. If it still sounds off, you know your scale interval array is wrong.
+2. **User Experience:** Beginners can start with a "Naked" view to understand the data-to-audio link, while advanced users can dial up the "Jazz" complexity.
+3. **The "Sitar" effect:** For Indian Raags, the Tier 0 "Naked" mode will sound like a formal *Arohana/Avarohana* (scale exercise), which is a legitimate musical tradition in itself.
 
-### Recommended UI Change
-
-I suggest adding a **"Scale Factor" slider** to the UI as you mentioned. Label it **"Vertical Zoom"**.
-
-* **Low:** The melody is compressed (smaller movements).
-* **High:** The melody is expanded (wide, dramatic leaps that track every cent of the wick).
-
-
-To solve the stagnation and lack of "wick-hugging," you need two specific mathematical functions to guide Cursor.
-
-The first function, **`mapPriceToMidi`**, ensures the notes visually and aurally "stick" to the wicks by recalibrating the pitch range to the chart's visible boundaries. The second, **`getNextPathNote`**, implements the "Pathfinding" logic that forces scale runs and arpeggios.
-
-### 1. The "Hugging" Logic: `mapPriceToMidi`
-
-This function must be called every time a bar is processed. It converts the raw price into a MIDI value that is relative to the chart's current zoom level.
-
-```javascript
-/**
- * Scales a price point to a MIDI value relative to the visible chart.
- * @param {number} price - The current High or Low wick price.
- * @returns {number} - A MIDI value between 60 and 84.
- */
-function mapPriceToMidi(price) {
-    // 1. Get the current visible price bounds from your chart engine
-    // (Assuming chart.yScale.domain() provides [minPrice, maxPrice])
-    const [minPrice, maxPrice] = window.priceChart.yScale.domain();
-    
-    // 2. Define our target melodic range (2 Octaves)
-    const midiMin = 60; // C4
-    const midiMax = 84; // C6
-    
-    // 3. Linear interpolation: Map price to MIDI
-    const ratio = (price - minPrice) / (maxPrice - minPrice);
-    let targetMidi = midiMin + (ratio * (midiMax - midiMin));
-    
-    // 4. Bound the result
-    return Math.max(midiMin, Math.min(midiMax, targetMidi));
-}
-
-```
-
-### 2. The "Pathfinder" Logic: `getNextPathNote`
-
-This function replaces the "nearest note" snap. It looks at where the note is now and decides how to "walk" toward the target over the 16 sub-steps.
-
-```javascript
-/**
- * Calculates the next note in a melodic sequence toward a target.
- * @param {number} currentNote - The last played MIDI note.
- * @param {number} targetMidi - The mapped price target from mapPriceToMidi.
- * @param {Array} scale - The current scale intervals.
- * @param {number} step - The 0-15 sub-step index.
- */
-function getNextPathNote(currentNote, targetMidi, scale, step) {
-    const sensitivity = audioState.sensitivity; // 0.0 to 1.0
-    const diff = targetMidi - currentNote;
-    
-    // If we are at low sensitivity or the price is flat, trigger an arpeggio pattern
-    if (Math.abs(diff) < 2 || sensitivity < 0.3) {
-        const chordDegrees = [0, 2, 4, 7]; // Root, 3rd, 5th, Octave
-        const patternIndex = step % chordDegrees.length;
-        return quantizeToScale(targetMidi + chordDegrees[patternIndex], scale);
-    }
-    
-    // If sensitivity is high and we are far from target, perform a SCALE RUN
-    // We move 1 or 2 scale degrees per step toward the target
-    const direction = diff > 0 ? 1 : -1;
-    const moveAmount = sensitivity > 0.7 ? 2 : 1;
-    
-    return findNthScaleDegree(currentNote, direction * moveAmount, scale);
-}
-
-```
-
-### 3. Final Instruction for Cursor
-
-Show Cursor these two functions and give it this prompt:
-
-> "I want to replace the current reactive 'snap' logic with a **Pathfinding Sequencer**.
-> 1. Use the `mapPriceToMidi` function to ensure the notes track the visual Y-axis of the chart (the 'Hugging' effect).
-> 2. Inside the 16-step sub-division loop, use the `getNextPathNote` logic.
-> 3. Instead of the melody being a slave to the price, it should now 'walk' toward the price using scale degrees.
-> 4. Ensure that the **Genre** (Yaman, Dorian, etc.) is used as the `scale` input for `findNthScaleDegree` so we finally hear the specific interval character of the selected style."
-> 
-> 
-
-### Why this should fix the issues:
-
-* **The Repeats Stop:** Because the `step % chordDegrees.length` forces an arpeggio when price is flat, the music will always be moving.
-* **The Runs Start:** Because the engine "walks" toward the target price, you will hear the distinctive ascending/descending runs of the selected genre.
-* **The Hugging is Visual:** Since `mapPriceToMidi` uses the chart's actual price domain, the dots on the screen will perfectly align with the wicks.

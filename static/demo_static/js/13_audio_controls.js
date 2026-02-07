@@ -18,26 +18,124 @@
     
     // Instrument URLs from midi-js-soundfonts (CDN hosted)
     const INSTRUMENT_MAP = {
+        // --- Keyboards ---
         harpsichord: {
             label: "Harpsichord",
             baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/harpsichord-mp3/"
         },
-        synth_lead: {
-            label: "Synth Lead",
-            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/lead_1_square-mp3/"
+        acoustic_grand_piano: {
+            label: "Piano",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_grand_piano-mp3/"
+        },
+        electric_piano: {
+            label: "Electric Piano",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/electric_piano_1-mp3/"
+        },
+        music_box: {
+            label: "Music Box",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/music_box-mp3/"
         },
         pipe_organ: {
             label: "Pipe Organ",
             baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/church_organ-mp3/"
         },
+        accordion: {
+            label: "Accordion",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/accordion-mp3/"
+        },
+        harmonica: {
+            label: "Harmonica",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/harmonica-mp3/"
+        },
+        // --- Strings ---
         strings: {
             label: "Strings",
             baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/string_ensemble_1-mp3/"
         },
+        violin: {
+            label: "Violin",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/violin-mp3/"
+        },
+        cello: {
+            label: "Cello",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/cello-mp3/"
+        },
+        contrabass: {
+            label: "Contrabass",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/contrabass-mp3/"
+        },
+        acoustic_guitar_nylon: {
+            label: "Nylon Guitar",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_guitar_nylon-mp3/"
+        },
+        acoustic_guitar_steel: {
+            label: "Steel Guitar",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_guitar_steel-mp3/"
+        },
+        sitar: {
+            label: "Sitar",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/sitar-mp3/"
+        },
+        banjo: {
+            label: "Banjo",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/banjo-mp3/"
+        },
+        // --- Woodwinds ---
         flute: {
             label: "Flute",
             baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/flute-mp3/"
         },
+        clarinet: {
+            label: "Clarinet",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/clarinet-mp3/"
+        },
+        oboe: {
+            label: "Oboe",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/oboe-mp3/"
+        },
+        bassoon: {
+            label: "Bassoon",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/bassoon-mp3/"
+        },
+        alto_sax: {
+            label: "Alto Sax",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/alto_sax-mp3/"
+        },
+        baritone_sax: {
+            label: "Baritone Sax",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/baritone_sax-mp3/"
+        },
+        // --- Brass ---
+        trumpet: {
+            label: "Trumpet",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/trumpet-mp3/"
+        },
+        trombone: {
+            label: "Trombone",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/trombone-mp3/"
+        },
+        tuba: {
+            label: "Tuba",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/tuba-mp3/"
+        },
+        // --- Percussion / Mallet ---
+        vibraphone: {
+            label: "Vibraphone",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/vibraphone-mp3/"
+        },
+        marimba: {
+            label: "Marimba",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/marimba-mp3/"
+        },
+        steel_drums: {
+            label: "Steel Drums",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/steel_drums-mp3/"
+        },
+        timpani: {
+            label: "Timpani",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/timpani-mp3/"
+        },
+        // --- Bass ---
         acoustic_bass: {
             label: "Acoustic Bass",
             baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_bass-mp3/"
@@ -46,9 +144,30 @@
             label: "Electric Bass",
             baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/electric_bass_finger-mp3/"
         },
+        fretless_bass: {
+            label: "Fretless Bass",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/fretless_bass-mp3/"
+        },
+        slap_bass: {
+            label: "Slap Bass",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/slap_bass_1-mp3/"
+        },
+        synth_bass: {
+            label: "Synth Bass",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/synth_bass_1-mp3/"
+        },
+        // --- Synths ---
+        synth_lead: {
+            label: "Synth Lead",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/lead_1_square-mp3/"
+        },
         synth_pad: {
             label: "Synth Pad",
             baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/pad_2_warm-mp3/"
+        },
+        synth_brass: {
+            label: "Synth Brass",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/synthbrass_1-mp3/"
         }
     };
 
