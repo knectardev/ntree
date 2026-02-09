@@ -1,0 +1,881 @@
+/**
+ * audio/conductor.js — Animation Loop & The Conductor (processSubStep)
+ * Part of the Audio Visual Settings module (refactored from 13_audio_controls.js)
+ *
+ * Contains: Smooth animation loop (RAF-based), processSubStep (the central
+ * orchestrator), sub-step note emission, chart scroll sync, playback
+ * integration (onBarAdvance), and replay system hook.
+ */
+(function() {
+    'use strict';
+    const _am = window._audioModule;
+
+    // Dependencies
+    const musicState = _am.musicState;
+    const audioState = _am.audioState;
+    const ui = _am.ui;
+    const updateStatus = _am.updateStatus;
+    const midiToNoteName = _am.midiToNoteName;
+    const rhythmToDuration = _am.rhythmToDuration;
+    const rhythmToDurationMs = _am.rhythmToDurationMs;
+    const updateRegimeFromPrice = _am.updateRegimeFromPrice;
+    const advanceProgression = _am.advanceProgression;
+    const updateVisiblePriceRange = _am.updateVisiblePriceRange;
+    const getDynamicMidiRange = _am.getDynamicMidiRange;
+    const getScaleNotes = _am.getScaleNotes;
+    const getChordTonesInRange = _am.getChordTonesInRange;
+    const nearestScaleNote = _am.nearestScaleNote;
+    const detectMelodicPattern = _am.detectMelodicPattern;
+    const ensureVoiceSeparation = _am.ensureVoiceSeparation;
+    const priceToMidi = _am.priceToMidi;
+    const updatePriceRange = _am.updatePriceRange;
+    const startVoiceCell = _am.startVoiceCell;
+    const executeSopranoRunStep = _am.executeSopranoRunStep;
+    const executeWalkingStep = _am.executeWalkingStep;
+    const applyGenreComplexity = _am.applyGenreComplexity;
+    const applyWickGravity = _am.applyWickGravity;
+    const updateSopranoHistory = _am.updateSopranoHistory;
+    const updateBassHistory = _am.updateBassHistory;
+
+    // ========================================================================
+    // CONSTANTS
+    // ========================================================================
+
+    // Playhead position as fraction of chart width (0.5 = center of screen)
+    const PLAYHEAD_POSITION = 0.5;
+    
+    // Sub-step configuration (matching Market Inventions) 
+    const SUB_STEP_COUNT = 16;
+    const SUB_STEP_SECONDS = 1 / SUB_STEP_COUNT;  // 62.5ms per sub-step
+    
+    // Expose for renderer
+    window._audioSubStepSeconds = SUB_STEP_SECONDS;
+    
+    // Track current held notes for extension (module scope)
+    let currentSopranoNote = null;
+    let currentBassNote = null;
+
+    // ========================================================================
+    // ANIMATION LOOP
+    // ========================================================================
+
+    /**
+     * Start the audio playback animation loop
+     * This creates its own animation that advances through chart data
+     * Uses SMOOTH continuous scrolling (time-based, like Market Inventions demo)
+     */
+    function startAudioAnimation() {
+        if (audioState._animationRunning) return;
+        
+        // Get current chart data
+        if (typeof state === 'undefined' || !state.data || state.data.length < 2) {
+            console.warn('[Audio] No chart data available for animation');
+            updateStatus('Load chart data first');
+            return;
+        }
+
+        audioState._animationRunning = true;
+        
+        // Store original scroll state to restore later
+        audioState._originalFollowLatest = state.followLatest;
+        audioState._originalXOffset = state.xOffset;
+        
+        // Disable auto-follow so we can control scrolling
+        state.followLatest = false;
+        
+        // Calculate bars per millisecond based on speed slider
+        // Speed value IS the BPM (bars per minute)
+        const speedValue = ui.speed ? parseInt(ui.speed.value, 10) : 60;
+        const bpm = speedValue;
+        audioState._barsPerMs = bpm / 60000;  // Convert BPM to bars per millisecond
+        audioState._currentBpm = bpm;  // Store for reference
+        
+        // Calculate how many bars are visible so we can position correctly
+        const n = state.data.length;
+        const vb = typeof computeVisibleBars === 'function' ? computeVisibleBars(n, state.xZoom) : { barsVisibleData: 50 };
+        const barsVisible = vb.barsVisibleData;
+        
+        // For the playhead to show the CURRENT bar at CENTER from the very start,
+        // and for the chart to scroll immediately, we must start smoothPosition
+        // at a value where xOffset = 0, which is: smoothPosition = PLAYHEAD_POSITION * barsVisible
+        // This means audio starts from bar ~(barsVisible/2), not bar 0
+        const startBarIndex = Math.floor(PLAYHEAD_POSITION * barsVisible);
+        audioState._smoothPosition = startBarIndex;
+        audioState._subStepPosition = startBarIndex * SUB_STEP_COUNT;  // Track sub-steps
+        audioState._lastSubStep = (startBarIndex * SUB_STEP_COUNT) - 1;
+        audioState._animStartTime = performance.now();
+        audioState._lastFrameTime = audioState._animStartTime;
+        
+        // Reset held note tracking
+        currentSopranoNote = null;
+        currentBassNote = null;
+        
+        // Reset reference prices for fresh MIDI mapping
+        audioState._referencePrice = null;
+        audioState._sopranoRef = null;
+        audioState._bassRef = null;
+        musicState._prevSopranoPrice = null;
+        musicState._prevBassPrice = null;
+        musicState.progressionStep = 0;
+        musicState.prevBarClose = null;
+        musicState.consecutiveDownBars = 0;
+        musicState.consecutiveUpBars = 0;
+        musicState.regime = 'UPTREND';
+        musicState.subStepCounter = 0;  // Reset sub-step counter
+        
+        // Reset melodic state (per-voice pathfinder cells)
+        musicState.sopranoHistory = [];
+        musicState.bassHistory = [];
+        musicState.soprano.runMode = null;
+        musicState.soprano.runStepsRemaining = 0;
+        musicState.soprano.runTargetNote = null;
+        musicState.soprano.arpeggioIndex = 0;
+        musicState.soprano.lastCellType = null;
+        musicState.soprano.sequenceBase = 0;
+        musicState.soprano.enclosurePhase = 0;
+        musicState.soprano.direction = 1;
+        musicState.bass.runMode = null;
+        musicState.bass.runStepsRemaining = 0;
+        musicState.bass.runTargetNote = null;
+        musicState.bass.arpeggioIndex = 0;
+        musicState.bass.walkDegreeIndex = 0;
+        musicState.bass.lastCellType = null;
+        musicState.bass.direction = 1;
+        // Legacy aliases
+        musicState.runMode = null;
+        musicState.runStepsRemaining = 0;
+        musicState.arpeggioIndex = 0;
+        
+        // Update visible price range from chart data
+        updateVisiblePriceRange();
+        
+        // Set initial reference prices from starting bar
+        const startBar = state.data[startBarIndex];
+        if (startBar) {
+            audioState._sopranoRef = startBar.h;
+            audioState._bassRef = startBar.l;
+            console.log('[Audio] Initial refs - soprano:', startBar.h.toFixed(2), 'bass:', startBar.l.toFixed(2));
+        }
+        
+        // Initial scroll position: xOffset = startBarIndex - PLAYHEAD_POSITION * barsVisible ≈ 0
+        state.xOffset = 0;
+        
+        console.log('[Audio] Starting from bar', startBarIndex, 'of', n, '(chart scrolls immediately, playhead at center)');
+        
+        console.log('[Audio] Starting SMOOTH animation, bars:', n, 'barsVisible:', barsVisible, 'barsPerMs:', audioState._barsPerMs.toFixed(6));
+        updateStatus('Playing...');
+        
+        // Resume audio context (required by browsers after user interaction)
+        if (Tone.context.state !== 'running') {
+            Tone.context.resume().then(() => {
+                console.log('[Audio] Context resumed');
+            });
+        }
+        
+        // Initial draw to show playhead immediately
+        if (typeof draw === 'function') {
+            draw();
+        }
+        
+        // Start the animation loop
+        audioState._animationFrame = requestAnimationFrame(smoothAnimationLoop);
+    }
+
+    /**
+     * Stop the audio animation loop (full stop — resets position)
+     */
+    function stopAudioAnimation() {
+        audioState._animationRunning = false;
+        if (audioState._animationFrame) {
+            cancelAnimationFrame(audioState._animationFrame);
+            audioState._animationFrame = null;
+        }
+        
+        // Restore original view settings
+        if (typeof audioState._originalFollowLatest !== 'undefined') {
+            state.followLatest = audioState._originalFollowLatest;
+        }
+        
+        // Clear playhead
+        window._audioPlayheadIndex = -1;
+        audioState._smoothPosition = 0;
+        if (typeof window.requestDraw === 'function') {
+            window.requestDraw('audio_stop');
+        }
+    }
+
+    /**
+     * Pause the audio animation — stops the loop and silences audio but
+     * preserves all position state so playback can be resumed from the same spot.
+     */
+    function pauseAudioAnimation() {
+        audioState._animationRunning = false;
+        if (audioState._animationFrame) {
+            cancelAnimationFrame(audioState._animationFrame);
+            audioState._animationFrame = null;
+        }
+        // Silence any currently ringing notes
+        if (audioState._sopranoSampler) audioState._sopranoSampler.releaseAll();
+        if (audioState._bassSampler) audioState._bassSampler.releaseAll();
+        // Pause Tone.Transport so scheduled events don't fire
+        if (Tone.Transport.state === 'started') {
+            Tone.Transport.pause();
+        }
+        console.log('[Audio] Paused at position', audioState._smoothPosition.toFixed(2));
+    }
+
+    /**
+     * Resume the audio animation from the paused position.
+     * Re-enters the RAF loop from where it left off.
+     */
+    function resumeAudioAnimation() {
+        if (audioState._animationRunning) return;  // Already running
+        
+        audioState._animationRunning = true;
+        // Reset the frame timer so the first frame doesn't produce a huge dt
+        audioState._lastFrameTime = performance.now();
+        
+        // Resume Tone.Transport
+        if (Tone.Transport.state === 'paused') {
+            Tone.Transport.start();
+        } else if (Tone.context.state !== 'running') {
+            Tone.context.resume();
+        }
+        
+        console.log('[Audio] Resumed from position', audioState._smoothPosition.toFixed(2));
+        audioState._animationFrame = requestAnimationFrame(smoothAnimationLoop);
+    }
+
+    /**
+     * SMOOTH animation loop - runs every frame for continuous scrolling
+     * Now with 16 sub-steps per bar like Market Inventions
+     */
+    function smoothAnimationLoop(timestamp) {
+        if (!audioState._animationRunning || !audioState.playing) {
+            console.warn('[Audio] Animation stopped - running:', audioState._animationRunning, 'playing:', audioState.playing);
+            stopAudioAnimation();
+            return;
+        }
+        
+        if (!audioState._initialized) {
+            console.warn('[Audio] Animation running but not initialized');
+            stopAudioAnimation();
+            return;
+        }
+
+        // Calculate time delta since last frame
+        const deltaMs = timestamp - audioState._lastFrameTime;
+        audioState._lastFrameTime = timestamp;
+        
+        // Clamp delta to avoid huge jumps if tab was backgrounded
+        const clampedDelta = Math.min(deltaMs, 100);
+        
+        // Calculate sub-steps per millisecond based on BPM
+        // At 60 BPM: 1 bar/sec, 16 sub-steps/bar → 16 sub-steps/sec → 0.016 sub-steps/ms
+        const bpm = audioState._currentBpm || 60;
+        const subStepsPerMs = (bpm / 60) * SUB_STEP_COUNT / 1000;
+        
+        // Track old sub-step position
+        const oldSubStepPos = audioState._subStepPosition || 0;
+        
+        // Advance sub-step position
+        audioState._subStepPosition = (audioState._subStepPosition || 0) + clampedDelta * subStepsPerMs;
+        
+        // Calculate bar position from sub-steps
+        audioState._smoothPosition = audioState._subStepPosition / SUB_STEP_COUNT;
+        
+        // Check if we've reached the end
+        const maxPosition = state.data.length - 1;
+        if (audioState._smoothPosition >= maxPosition) {
+            // Loop back to start
+            audioState._smoothPosition = 0;
+            audioState._subStepPosition = 0;
+            audioState._lastSubStep = -1;
+            // Reset music state for fresh start
+            musicState.progressionStep = 0;
+            musicState.prevBarClose = null;
+            currentSopranoNote = null;
+            currentBassNote = null;
+        }
+        
+        // Get current sub-step (global across all bars)
+        const currentSubStep = Math.floor(audioState._subStepPosition);
+        const lastSubStep = audioState._lastSubStep ?? -1;
+        
+        // Process each sub-step we've crossed
+        if (currentSubStep > lastSubStep) {
+            for (let subStep = lastSubStep + 1; subStep <= currentSubStep; subStep++) {
+                const barIndex = Math.floor(subStep / SUB_STEP_COUNT);
+                const subStepInBar = subStep % SUB_STEP_COUNT;
+                
+                if (barIndex < state.data.length) {
+                    try {
+                        processSubStep(barIndex, subStepInBar, subStep);
+                    } catch (e) {
+                        console.error('[Audio] Error in processSubStep:', e);
+                    }
+                }
+            }
+            audioState._lastSubStep = currentSubStep;
+        }
+        
+        // Update the chart scroll position EVERY FRAME for smooth animation
+        try {
+            updateSmoothScroll(audioState._smoothPosition);
+        } catch (e) {
+            console.error('[Audio] Error in updateSmoothScroll:', e);
+        }
+        
+        // Debug: log every ~2 seconds (120 frames at 60fps)
+        if (!audioState._frameCount) audioState._frameCount = 0;
+        audioState._frameCount++;
+        if (audioState._frameCount % 120 === 0) {
+            console.log('[Audio] Frame', audioState._frameCount, 'bar:', Math.floor(audioState._smoothPosition), 'subStep:', currentSubStep);
+        }
+        
+        // Continue the loop
+        audioState._animationFrame = requestAnimationFrame(smoothAnimationLoop);
+    }
+
+    // ========================================================================
+    // THE CONDUCTOR (processSubStep)
+    // ========================================================================
+
+    /**
+     * Process a single sub-step (1/16th of a bar)
+     * 
+     * THE CONDUCTOR: Orchestrates the Pathfinding Sequencer
+     * 
+     * Flow:
+     * 1. On bar boundaries: update regime, advance progression, update viewport range
+     * 2. On soprano rhythm boundaries: run soprano pathfinder (scale runs, arpeggios, orbits)
+     * 3. On bass rhythm boundaries: run bass pathfinder (walking bass, chord leaps)
+     * 4. Apply genre-specific complexity (stochastic interruptions scaled by Complexity slider)
+     * 5. Trigger audio and emit visual events
+     * 
+     * 4-note cells (runs/arpeggios) cross bar boundaries for fluid sound.
+     * New bar only updates the TARGET — the current cell completes before a new one starts.
+     */
+    function processSubStep(barIndex, subStepInBar, globalSubStep) {
+        if (!audioState.playing || !audioState._initialized) {
+            return;
+        }
+        
+        const barData = state.data[barIndex];
+        if (!barData) {
+            return;
+        }
+        
+        const now = Tone.now();
+        const perfNow = performance.now();
+        const regime = musicState.regime;
+        const complexity = audioState.sensitivity || 0.5;  // Complexity slider (0=pure, 1=chaotic)
+        
+        // ── BAR BOUNDARY: Update targets, regime, progression ──
+        if (subStepInBar === 0) {
+            updateRegimeFromPrice(barData.c);
+            advanceProgression();
+            
+            // Refresh viewport price range every bar for tight wick-hugging
+            updateVisiblePriceRange();
+            
+            // Kick drum on downbeat
+            if (audioState._kickSynth) {
+                audioState._kickSynth.triggerAttackRelease('C1', '8n', now, 0.4);
+            }
+            
+            // Update targets for both voices (but DON'T reset current cells)
+            const rawSopranoTarget = priceToMidi(barData.h, 'soprano');
+            const rawBassTarget = priceToMidi(barData.l, 'bass');
+            if (rawSopranoTarget !== null) musicState.soprano.runTargetNote = rawSopranoTarget;
+            if (rawBassTarget !== null) musicState.bass.runTargetNote = rawBassTarget;
+            
+            if (barIndex % 10 === 0) {
+                console.log('[Audio] Bar', barIndex, 'regime:', regime, 
+                    'soprano cell:', musicState.soprano.runMode, '(' + musicState.soprano.runStepsRemaining + ')',
+                    'bass cell:', musicState.bass.runMode, '(' + musicState.bass.runStepsRemaining + ')');
+            }
+        }
+        
+        // Calculate precise bar position for visual events
+        const preciseBarIndex = barIndex + (subStepInBar / SUB_STEP_COUNT);
+        
+        // Build scale and chord pools (shared by both voices)
+        const sopranoRange = getDynamicMidiRange('soprano');
+        const bassRange = getDynamicMidiRange('bass');
+        const sopranoScalePool = getScaleNotes(regime, musicState.rootMidi, sopranoRange.min, sopranoRange.max);
+        const bassScalePool = getScaleNotes(regime, musicState.rootMidi, bassRange.min, bassRange.max);
+        const sopranoChordPool = getChordTonesInRange(sopranoRange.min, sopranoRange.max);
+        const bassChordPool = getChordTonesInRange(bassRange.min, bassRange.max);
+        
+        // ── SOPRANO PATHFINDER (High Agility: runs, arpeggios, orbits) ──
+        const sopranoRhythm = parseInt(audioState.upperWick.rhythm) || 4;
+        const sopranoInterval = SUB_STEP_COUNT / sopranoRhythm;
+        const shouldPlaySoprano = (subStepInBar % sopranoInterval === 0);
+        
+        let sopranoMidi = musicState.prevSoprano || 72;
+        
+        if (audioState.upperWick.enabled && shouldPlaySoprano) {
+            const vs = musicState.soprano;
+            const rawTarget = priceToMidi(barData.h, 'soprano');
+            const targetMidi = rawTarget !== null 
+                ? nearestScaleNote(rawTarget, sopranoScalePool, 24)
+                : musicState.prevSoprano || 72;
+            
+            // Update target (allows mid-cell target drift)
+            vs.runTargetNote = targetMidi;
+            
+            if (vs.runStepsRemaining > 0) {
+                // ── CONTINUE CURRENT CELL (no interference — let the cell breathe) ──
+                sopranoMidi = executeSopranoRunStep(sopranoScalePool, sopranoChordPool);
+                vs.runStepsRemaining--;
+                // Only abort mid-cell for EXTREME drift (more than double the normal threshold)
+                // This lets scale runs develop their full melodic phrase
+                const extremeDrift = Math.abs(sopranoMidi - targetMidi) > 18;
+                if (extremeDrift) {
+                    vs.runStepsRemaining = 0;
+                }
+            } else {
+                // ══════════════════════════════════════════════════════════════
+                // PATHFINDER CELL SELECTION — the core algorithm from the notes:
+                //   Distance > 4 semitones from wick → SCALE RUN (walk toward target)
+                //   Distance ≤ 4 semitones from wick → ORBIT (dance around target)
+                //   Complexity slider controls chance of INTERRUPTION (genre ornaments)
+                // ══════════════════════════════════════════════════════════════
+                const pattern = detectMelodicPattern(musicState.sopranoHistory);
+                const prev = musicState.prevSoprano || 72;
+                const distance = Math.abs(targetMidi - prev);
+                const direction = targetMidi >= prev ? 1 : -1;
+                
+                let cellType;
+                
+                // PRIORITY 1: Break out of stuck/trill patterns
+                if (pattern === 'stuck') {
+                    cellType = 'leap_fill';
+                } else if (pattern === 'trill') {
+                    cellType = 'sequence';
+                }
+                // PRIORITY 2: Distance-based pathfinding (the core "Pathfinder" logic)
+                // Far from wick (> 4 semitones): MUST travel there via scale run
+                // This is what creates the audible scale passages in the selected genre
+                else if (distance > 4) {
+                    // Scale run is the PRIMARY tool for traveling to the wick
+                    // Complexity adds a chance of interruption with other cell types
+                    const interruptChance = complexity * 0.3; // 0% at complexity=0, 30% at complexity=1
+                    if (Math.random() < interruptChance) {
+                        // Stochastic interruption: use a "traveling" cell type instead
+                        const roll = Math.random();
+                        if (roll < 0.4)       cellType = 'leap_fill';     // Leap toward + fill
+                        else if (roll < 0.7)  cellType = 'sequence';      // Undulating approach
+                        else                  cellType = 'chord_skip';    // Harmonic leap + step
+                    } else {
+                        cellType = 'scale_run';  // DEFAULT: walk toward wick via scale degrees
+                    }
+                }
+                // PRIORITY 3: Near the wick (≤ 4 semitones): ORBIT/dance around it
+                // This is the "wick-hugging" behavior — melody dances around the price level
+                else {
+                    // Complexity controls the palette of orbit-like patterns
+                    const interruptChance = complexity * 0.4; // More interruption variety near target
+                    if (Math.random() < interruptChance) {
+                        // Stochastic interruption with genre-flavored patterns
+                        const roll = Math.random();
+                        if (roll < 0.3)       cellType = 'arpeggio';     // Chord tone cycle
+                        else if (roll < 0.55) cellType = 'enclosure';    // Above-below-target
+                        else if (roll < 0.75) cellType = 'sequence';     // Overlapping groups
+                        else                  cellType = 'chord_skip';   // Leap + connect
+                    } else {
+                        cellType = 'orbit';  // DEFAULT: dance around the wick target
+                    }
+                }
+                
+                // Prevent same cell type twice in a row (diversity guarantee)
+                if (cellType === vs.lastCellType && complexity > 0.15) {
+                    // Pick appropriate alternative based on distance
+                    const nearAlts = ['orbit', 'arpeggio', 'enclosure', 'sequence'];
+                    const farAlts = ['scale_run', 'leap_fill', 'sequence', 'chord_skip'];
+                    const alternatives = distance > 4 ? farAlts : nearAlts;
+                    const filtered = alternatives.filter(t => t !== cellType);
+                    cellType = filtered[Math.floor(Math.random() * filtered.length)];
+                }
+                
+                vs.lastCellType = cellType;
+                vs.direction = direction;
+                vs.enclosurePhase = 0;
+                
+                // Set sequence base index relative to current position in pool
+                if (cellType === 'sequence') {
+                    const sortedPool = [...sopranoScalePool].sort((a, b) => a - b);
+                    const curIdx = sortedPool.findIndex(n => Math.abs(n - prev) <= 2);
+                    vs.sequenceBase = curIdx !== -1 ? curIdx : Math.floor(sortedPool.length / 2);
+                }
+                
+                startVoiceCell('soprano', cellType, targetMidi, sopranoScalePool, sopranoChordPool);
+                sopranoMidi = executeSopranoRunStep(sopranoScalePool, sopranoChordPool);
+                vs.runStepsRemaining--;
+            }
+            
+            // Genre-specific complexity: BEAT-GATED interruptions only
+            // Only apply on specific beat positions (weak beats) and ONLY when between cells
+            // or at cell boundaries — NOT during the middle of a scale run (which would break it)
+            const isMidCell = vs.runStepsRemaining > 0 && vs.runStepsRemaining < (vs.cellSize - 1);
+            const isRunOrOrbit = (vs.runMode === 'scale_run' || vs.runMode === 'orbit');
+            if (!isMidCell || !isRunOrOrbit) {
+                // Safe to apply genre ornaments — we're at a cell boundary or in a non-directional cell
+                sopranoMidi = applyGenreComplexity(sopranoMidi, sopranoScalePool, sopranoChordPool, subStepInBar, 'soprano');
+            }
+            
+            // Wick gravity: SAFETY NET only (not a constant pull)
+            // Only activate for extreme drift — the cell system handles normal wick-tracking
+            const sopranoDrift = Math.abs(sopranoMidi - targetMidi);
+            if (sopranoDrift > 14) {
+                sopranoMidi = applyWickGravity(sopranoMidi, targetMidi, sopranoScalePool, 'soprano');
+            }
+            
+            // Clamp to range
+            sopranoMidi = Math.max(sopranoRange.min, Math.min(sopranoRange.max, sopranoMidi));
+            
+            // Update history
+            updateSopranoHistory(sopranoMidi);
+            
+            // Calculate note duration
+            const sopranoDurationMs = sopranoInterval * SUB_STEP_SECONDS * 1000;
+            
+            // Trigger audio
+            if (audioState._sopranoSampler) {
+                const noteFreq = Tone.Frequency(sopranoMidi, 'midi').toNote();
+                const toneDuration = rhythmToDuration(audioState.upperWick.rhythm);
+                try {
+                    audioState._sopranoSampler.triggerAttackRelease(noteFreq, toneDuration, now, 0.7);
+                } catch (e) {}
+            }
+            
+            // Emit visual event
+            emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow);
+            musicState.prevSoprano = sopranoMidi;
+        }
+        
+        // ── BASS PATHFINDER (High Stability: walking bass, root/4th/5th leaps) ──
+        const bassRhythm = parseInt(audioState.lowerWick.rhythm) || 2;
+        const bassInterval = SUB_STEP_COUNT / bassRhythm;
+        const shouldPlayBass = (subStepInBar % bassInterval === 0);
+        
+        let bassMidi = musicState.prevBass || 48;
+        
+        if (audioState.lowerWick.enabled && shouldPlayBass) {
+            const vb = musicState.bass;
+            const rawTarget = priceToMidi(barData.l, 'bass');
+            const targetMidi = rawTarget !== null
+                ? nearestScaleNote(rawTarget, bassScalePool, 24)
+                : musicState.prevBass || 48;
+            
+            // Update target
+            vb.runTargetNote = targetMidi;
+            
+            if (vb.runStepsRemaining > 0) {
+                // ── CONTINUE CURRENT CELL (let walking bass pattern complete) ──
+                bassMidi = executeWalkingStep(bassScalePool, bassChordPool);
+                vb.runStepsRemaining--;
+                // Only abort for extreme drift (bass is more stable, wider threshold)
+                const extremeDrift = Math.abs(bassMidi - targetMidi) > 20;
+                if (extremeDrift) {
+                    vb.runStepsRemaining = 0;
+                }
+            } else {
+                // ══════════════════════════════════════════════════════════════
+                // BASS PATHFINDER — same distance-based logic as soprano:
+                //   Distance > 5 semitones → WALK toward target (root/4th/5th pattern)
+                //   Distance ≤ 5 semitones → ARPEGGIO around target (chord-tone stability)
+                //   Complexity adds chromatic approaches and pattern variety
+                // ══════════════════════════════════════════════════════════════
+                const pattern = detectMelodicPattern(musicState.bassHistory);
+                const prev = musicState.prevBass || 48;
+                const distance = Math.abs(targetMidi - prev);
+                const direction = targetMidi >= prev ? 1 : -1;
+                
+                let cellType;
+                
+                // PRIORITY 1: Break stuck patterns
+                if (pattern === 'stuck') {
+                    cellType = 'chromatic_approach';
+                } else if (pattern === 'trill') {
+                    cellType = 'arpeggio';
+                }
+                // PRIORITY 2: Distance-based pathfinding
+                // Far from wick (> 5 semitones): walk toward it
+                else if (distance > 5) {
+                    const interruptChance = complexity * 0.25;
+                    if (Math.random() < interruptChance) {
+                        cellType = 'chromatic_approach';  // Chromatic walk adds flavor
+                    } else {
+                        cellType = direction > 0 ? 'walk_up' : 'walk_down';
+                    }
+                }
+                // Near the wick (≤ 5 semitones): arpeggio/chord-tone stability
+                else {
+                    const interruptChance = complexity * 0.3;
+                    if (Math.random() < interruptChance) {
+                        const roll = Math.random();
+                        if (roll < 0.5) cellType = 'chromatic_approach';
+                        else            cellType = direction > 0 ? 'walk_up' : 'walk_down';
+                    } else {
+                        cellType = 'arpeggio';  // DEFAULT: chord-tone stability near wick
+                    }
+                }
+                
+                // Prevent same bass cell type twice in a row
+                if (cellType === vb.lastCellType && complexity > 0.15) {
+                    const bassAlts = ['arpeggio', 'walk_up', 'walk_down', 'chromatic_approach'];
+                    const filtered = bassAlts.filter(t => t !== cellType);
+                    cellType = filtered[Math.floor(Math.random() * filtered.length)];
+                }
+                
+                vb.lastCellType = cellType;
+                vb.direction = direction;
+                
+                startVoiceCell('bass', cellType, targetMidi, bassScalePool, bassChordPool);
+                bassMidi = executeWalkingStep(bassScalePool, bassChordPool);
+                vb.runStepsRemaining--;
+            }
+            
+            // Genre complexity for bass: beat-gated, don't interrupt mid-walking-pattern
+            const bassMidCell = vb.runStepsRemaining > 0 && vb.runStepsRemaining < (vb.cellSize - 1);
+            const bassIsWalking = (vb.runMode === 'walk_up' || vb.runMode === 'walk_down');
+            if (!bassMidCell || !bassIsWalking) {
+                bassMidi = applyGenreComplexity(bassMidi, bassScalePool, bassChordPool, subStepInBar, 'bass');
+            }
+            
+            // Wick gravity: SAFETY NET only for extreme drift
+            const bassDrift = Math.abs(bassMidi - targetMidi);
+            if (bassDrift > 16) {
+                bassMidi = applyWickGravity(bassMidi, targetMidi, bassScalePool, 'bass');
+            }
+            
+            // Clamp to range
+            bassMidi = Math.max(bassRange.min, Math.min(bassRange.max, bassMidi));
+            
+            // Update history
+            updateBassHistory(bassMidi);
+            
+            // Calculate note duration
+            const bassDurationMs = bassInterval * SUB_STEP_SECONDS * 1000;
+            
+            // Trigger audio
+            if (audioState._bassSampler) {
+                const noteFreq = Tone.Frequency(bassMidi, 'midi').toNote();
+                const toneDuration = rhythmToDuration(audioState.lowerWick.rhythm);
+                try {
+                    audioState._bassSampler.triggerAttackRelease(noteFreq, toneDuration, now, 0.7);
+                } catch (e) {}
+            }
+            
+            // Emit visual event
+            emitSubStepNote('bass', bassMidi, barData.l, preciseBarIndex, bassDurationMs, perfNow);
+            musicState.prevBass = bassMidi;
+        }
+        
+        // ── VOICE SEPARATION CHECK ──
+        if (audioState.upperWick.enabled && audioState.lowerWick.enabled) {
+            const adjustedSoprano = ensureVoiceSeparation(sopranoMidi, bassMidi);
+            if (adjustedSoprano !== sopranoMidi) {
+                musicState.prevSoprano = adjustedSoprano;
+            }
+        }
+        
+        // ── STATUS UPDATE (throttled to bar boundaries) ──
+        if (subStepInBar === 0) {
+            const sopranoName = musicState.prevSoprano ? midiToNoteName(musicState.prevSoprano) : '--';
+            const bassName = musicState.prevBass ? midiToNoteName(musicState.prevBass) : '--';
+            const cellInfo = musicState.soprano.runMode ? ` [${musicState.soprano.runMode}]` : '';
+            updateStatus(`${regime}${cellInfo} | ${sopranoName} / ${bassName}`);
+        }
+    }
+
+    // ========================================================================
+    // VISUAL EVENT EMISSION
+    // ========================================================================
+
+    /**
+     * Emit a note event at a specific sub-step position
+     */
+    function emitSubStepNote(voice, midi, price, barIndex, durationMs, startTime) {
+        if (!window._audioNoteEvents) window._audioNoteEvents = [];
+        
+        // Debug: log first few notes to verify they're being created
+        if (window._audioNoteEvents.length < 5) {
+            console.log('[Audio] Emitting note:', voice, 'MIDI:', midi, 'price:', price?.toFixed(2), 'bar:', barIndex?.toFixed(2));
+        }
+        
+        // Glow duration from slider (units * 200ms base)
+        const glowMs = (audioState.glowDuration || 3) * 200;
+        
+        // Store rhythm for circle display mode
+        const rhythm = voice === 'soprano' ? audioState.upperWick.rhythm : audioState.lowerWick.rhythm;
+        
+        window._audioNoteEvents.push({
+            voice: voice,
+            midi: midi,
+            price: price,
+            barIndex: barIndex,
+            rhythm: rhythm,     // '1'=whole, '2'=half, '4'=quarter, '8'=eighth, '16'=sixteenth
+            time: startTime,
+            endTime: startTime + durationMs,
+            durationMs: durationMs,
+            glowUntil: startTime + glowMs
+        });
+        
+        // Keep up to 400 events
+        while (window._audioNoteEvents.length > 400) {
+            window._audioNoteEvents.shift();
+        }
+    }
+
+    /**
+     * Emit a note event for visual feedback - Creates persistent trail
+     * Like Market Inventions: notes are horizontal bars that scroll with the chart
+     */
+    function emitNoteEvent(voice, midi, price, barIndex) {
+        // Store note events for the renderer to pick up
+        if (!window._audioNoteEvents) window._audioNoteEvents = [];
+        
+        // Get rhythm-based duration in ms
+        const rhythm = voice === 'soprano' ? audioState.upperWick.rhythm : audioState.lowerWick.rhythm;
+        const durationMs = rhythmToDurationMs(rhythm);
+        
+        const now = performance.now();
+        window._audioNoteEvents.push({
+            voice: voice,
+            midi: midi,
+            price: price,
+            barIndex: barIndex,
+            rhythm: rhythm,     // '1'=whole, '2'=half, '4'=quarter, '8'=eighth, '16'=sixteenth
+            time: now,
+            endTime: now + durationMs,
+            durationMs: durationMs,
+            glowUntil: now + (audioState.glowDuration * 200)  // Active glow period
+        });
+        
+        // Keep up to 300 events for trail
+        while (window._audioNoteEvents.length > 300) {
+            window._audioNoteEvents.shift();
+        }
+    }
+
+    // ========================================================================
+    // CHART SCROLL SYNC
+    // ========================================================================
+
+    /**
+     * Update chart scroll position smoothly
+     * Uses floating-point position for continuous motion
+     * The CURRENT AUDIO BAR is positioned at the PLAYHEAD (center of screen)
+     */
+    function updateSmoothScroll(smoothPosition) {
+        // Store playhead position for the renderer
+        window._audioPlayheadIndex = smoothPosition;
+        
+        // Calculate visible bars
+        if (typeof computeVisibleBars !== 'function') {
+            return;
+        }
+        
+        const n = state.data.length;
+        const vb = computeVisibleBars(n, state.xZoom);
+        const barsVisible = vb.barsVisibleData;
+        
+        // Position so smoothPosition (current audio bar) is at the playhead (center)
+        // xOffset + PLAYHEAD_POSITION * barsVisible = smoothPosition
+        // xOffset = smoothPosition - PLAYHEAD_POSITION * barsVisible
+        const newOffset = smoothPosition - (PLAYHEAD_POSITION * barsVisible);
+        
+        // Clamp to valid range (negative offset not allowed)
+        // This means for the first part of playback, the chart stays still
+        // and the current bar appears LEFT of the playhead
+        const maxOff = Math.max(0, n - barsVisible);
+        const clampedOffset = Math.max(0, Math.min(newOffset, maxOff));
+        
+        // IMPORTANT: Keep followLatest disabled during audio playback
+        state.followLatest = false;
+        
+        // Set the new offset (floating point for smooth scroll)
+        state.xOffset = clampedOffset;
+        
+        // Redraw EVERY frame for smooth animation
+        if (typeof draw === 'function') {
+            draw();
+        }
+    }
+
+    // ========================================================================
+    // PLAYBACK INTEGRATION
+    // ========================================================================
+
+    /**
+     * Called when a new bar is consumed during Replay/Practice mode
+     * UNIFIED: Only updates targets — all note generation goes through processSubStep
+     * This ensures identical sound whether in Live animation or Replay mode
+     */
+    function onBarAdvance(barData, barIndex) {
+        if (!audioState.playing || !audioState._initialized) {
+            return;
+        }
+        if (!barData) {
+            return;
+        }
+
+        // Update bar tracking and price range
+        audioState._lastBarIndex = barIndex;
+        updatePriceRange();
+        updateVisiblePriceRange();
+        
+        // Update targets for the pathfinder (actual note gen happens in processSubStep)
+        const rawSoprano = priceToMidi(barData.h, 'soprano');
+        const rawBass = priceToMidi(barData.l, 'bass');
+        if (rawSoprano !== null) musicState.soprano.runTargetNote = rawSoprano;
+        if (rawBass !== null) musicState.bass.runTargetNote = rawBass;
+    }
+
+    /**
+     * Register the global callback that the replay system calls on each bar advance
+     * This allows audio to also play when Practice mode is used
+     */
+    function hookIntoReplaySystem() {
+        window.onReplayBarAdvance = function(barData, barIndex, lastState) {
+            // Only trigger if audio is active but our own animation isn't running
+            // (to avoid double-triggering when using Practice mode with audio)
+            if (!audioState.playing || !audioState._initialized) return;
+            if (audioState._animationRunning) return;  // Our animation handles it
+            
+            try {
+                // UNIFIED: Update targets via onBarAdvance, then run a full
+                // bar of sub-steps through processSubStep for note generation
+                onBarAdvance(barData, barIndex);
+                for (let sub = 0; sub < SUB_STEP_COUNT; sub++) {
+                    processSubStep(barIndex, sub, barIndex * SUB_STEP_COUNT + sub);
+                }
+            } catch (e) {
+                console.warn('[Audio] Error in replay hook:', e);
+            }
+        };
+        
+        console.log('[Audio] Registered replay hook callback');
+        return true;
+    }
+
+    // ========================================================================
+    // EXPORTS
+    // ========================================================================
+
+    _am.PLAYHEAD_POSITION = PLAYHEAD_POSITION;
+    _am.SUB_STEP_COUNT = SUB_STEP_COUNT;
+    _am.SUB_STEP_SECONDS = SUB_STEP_SECONDS;
+    _am.startAudioAnimation = startAudioAnimation;
+    _am.stopAudioAnimation = stopAudioAnimation;
+    _am.pauseAudioAnimation = pauseAudioAnimation;
+    _am.resumeAudioAnimation = resumeAudioAnimation;
+    _am.processSubStep = processSubStep;
+    _am.emitSubStepNote = emitSubStepNote;
+    _am.emitNoteEvent = emitNoteEvent;
+    _am.onBarAdvance = onBarAdvance;
+    _am.hookIntoReplaySystem = hookIntoReplaySystem;
+})();

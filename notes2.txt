@@ -1,7 +1,6 @@
 notes2.txt
 
 
-
 Here are the specific directions to provide Cursor to answer those 6 questions and get the "Pathfinder" running:
 
 ### 1. Phrase Boundaries vs. Bar Boundaries
