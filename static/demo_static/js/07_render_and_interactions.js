@@ -1230,7 +1230,8 @@
       } catch(_ePlayhead){}
     })();
 
-    // Audio note visualization - HORIZONTAL BARS that scroll with chart (like Market Inventions)
+    // Audio note visualization - scrolls with chart
+    // Supports two display modes: "bars" (horizontal bars) and "circles" (radius = note duration)
     (function drawAudioNotes(){
       try{
         if(!window._audioNoteEvents || !window._audioNoteEvents.length) {
@@ -1252,20 +1253,23 @@
         var now = performance.now();
         var barWidth = plot.w / barsVisible;
         
-        // Calculate BPM-aware note width
+        // Calculate BPM-aware note width (used by bars mode)
         var bpm = (window.audioState && window.audioState._currentBpm) ? window.audioState._currentBpm : 60;
         var msPerBar = 60000 / bpm;
         
-        // MIDI range for Y mapping (soprano: 60-84, bass: 36-60)
-        var midiMin = 36;  // C2
-        var midiMax = 84;  // C6
+        // Display mode: 'bars' or 'circles'
+        var displayMode = (window.audioState.displayMode === 'circles') ? 'circles' : 'bars';
+        
+        // Circle radius lookup: whole=20, half=15, quarter=10, eighth=7, sixteenth=4
+        // Proportional scaling down from 20px for a whole note
+        var circleRadiusMap = { '1': 20, '2': 15, '4': 10, '8': 7, '16': 4 };
         
         // Should we show note name labels? (controlled by "Display musical notes" checkbox)
         var showNoteLabels = window.audioState.displayNotes;
         
         ctx.save();
         
-        // Draw each note as a horizontal bar
+        // Draw each note
         for(var ni = 0; ni < window._audioNoteEvents.length; ni++){
           var noteEv = window._audioNoteEvents[ni];
           if(!noteEv || noteEv.barIndex === undefined) continue;
@@ -1277,7 +1281,7 @@
           var noteX = xForIndex(noteEv.barIndex, plot, barsVisible);
           if(!Number.isFinite(noteX)) continue;
           
-          // Calculate note width: duration in ms → bars → pixels
+          // Calculate note width: duration in ms → bars → pixels (bars mode)
           var durationBars = noteEv.durationMs / msPerBar;
           var noteWidth = durationBars * barWidth;
           noteWidth = Math.max(4, Math.min(noteWidth, barWidth * 4));
@@ -1310,7 +1314,6 @@
           
           // Determine if note is "active" (glowing)
           var isActive = now < noteEv.glowUntil;
-          var noteHeight = isActive ? 10 : 6;
           
           // Colors: soprano = green, bass = blue
           var baseColor = (noteEv.voice === 'soprano') ? '#7cffc2' : '#7aa7ff';
@@ -1328,8 +1331,35 @@
             ctx.fillStyle = rgbaBase + alpha + ')';
           }
           
-          // Draw the horizontal bar
-          ctx.fillRect(noteX, noteY - (noteHeight / 2), noteWidth, noteHeight);
+          // ── BARS mode: horizontal rectangle ──
+          if (displayMode === 'bars') {
+            var noteHeight = isActive ? 10 : 6;
+            ctx.fillRect(noteX, noteY - (noteHeight / 2), noteWidth, noteHeight);
+          }
+          // ── CIRCLES mode: radius proportional to note duration ──
+          else {
+            var rhythm = noteEv.rhythm || '4';  // Default to quarter note
+            var baseRadius = circleRadiusMap[rhythm] || 10;
+            // Active notes get a slight size boost
+            var radius = isActive ? baseRadius * 1.15 : baseRadius * 0.85;
+            // Fade radius for old notes
+            if (!isActive) {
+              var age = now - noteEv.time;
+              var maxAge = 10000;
+              var fadeFactor = Math.max(0.5, 1 - (age / maxAge) * 0.5);
+              radius *= fadeFactor;
+            }
+            ctx.beginPath();
+            // Center the circle at the note position (offset by half noteWidth for visual centering)
+            ctx.arc(noteX + noteWidth / 2, noteY, radius, 0, Math.PI * 2);
+            ctx.fill();
+            // Add a subtle stroke ring for active notes
+            if (isActive) {
+              ctx.strokeStyle = baseColor;
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+            }
+          }
           ctx.shadowBlur = 0;
           
           // Draw note name label if enabled (e.g., "C4", "G#5")
@@ -1341,8 +1371,11 @@
             ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            // Position label below the note bar
-            ctx.fillText(noteName, noteX + noteWidth / 2, noteY + (noteHeight / 2) + 2);
+            // Position label below the note shape
+            var labelOffsetY = (displayMode === 'circles')
+              ? (circleRadiusMap[noteEv.rhythm || '4'] || 10) + 2
+              : (isActive ? 5 : 3) + 2;
+            ctx.fillText(noteName, noteX + noteWidth / 2, noteY + labelOffsetY);
           }
         }
         

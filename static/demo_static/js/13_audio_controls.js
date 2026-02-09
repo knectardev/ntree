@@ -2,12 +2,25 @@
  * 13_audio_controls.js — Audio Visual Settings panel + Tone.js Audio Engine
  * Integrates musical playback with the Practice/Replay system
  * 
- * Architecture:
- * - Each replay bar becomes a "musical measure"
- * - High wick → Soprano voice (upper pitch rail)
- * - Low wick → Bass voice (lower pitch rail)
+ * Architecture — Pathfinding Sequencer:
+ * - Each replay bar becomes a "musical measure" with 16 sub-steps
+ * - High wick → Soprano voice (upper pitch rail, scale runs + orbits)
+ * - Low wick → Bass voice (lower pitch rail, walking bass + arpeggios)
  * - Volume → Gain envelope
  * - Speed slider → Tone.Transport BPM
+ * 
+ * Core Melody Algorithm (processSubStep → "The Conductor"):
+ *   1. Price-to-MIDI mapping uses VISIBLE VIEWPORT for tight wick correspondence
+ *   2. Distance-based cell selection:
+ *      - Far from wick (>4 semitones): SCALE RUN — walk 1 degree per step toward target
+ *        (creates audible scale passages in the selected genre's mode)
+ *      - Near wick (≤4 semitones): ORBIT — dance around the wick target
+ *        (Target → +2 → -1 → Target → +1 → -2 pattern)
+ *   3. Complexity slider (0-1): controls probability of stochastic interruptions
+ *      (genre ornaments replace pure runs/orbits at higher complexity)
+ *   4. Dynamic cell sizing: longer cells when far (4-8 steps), shorter near target
+ *   5. Genre-specific ornaments are BEAT-GATED (not applied mid-scale-run)
+ *   6. Wick gravity is a SAFETY NET only (extreme drift), not a constant pull
  */
 (function() {
     'use strict';
@@ -307,6 +320,12 @@
         MINOR: [0, 2, 3, 5, 7, 8, 10]
     };
 
+    // Root key name → MIDI offset from C (used to compute rootMidi = 60 + offset)
+    const ROOT_KEY_OFFSETS = {
+        'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5,
+        'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11
+    };
+
     // Music theory state
     const musicState = {
         regime: 'UPTREND',  // Now uses UPTREND/DOWNTREND to match genre scales
@@ -330,7 +349,7 @@
         // Per-voice pathfinder cell state
         // Soprano: scale runs, arpeggios, orbits, enclosures, sequences (high agility)
         soprano: {
-            runMode: null,        // null, 'scale_run', 'arpeggio', 'enclosure', 'sequence', 'chord_skip', 'leap_fill'
+            runMode: null,        // null, 'scale_run', 'orbit', 'arpeggio', 'enclosure', 'sequence', 'chord_skip', 'leap_fill'
             runStepsRemaining: 0,
             runTargetNote: null,
             arpeggioIndex: 0,
@@ -900,39 +919,38 @@
         const melodicRange = audioState.melodicRange || 1.0;
         const dynamicRange = getDynamicMidiRange(voice);
         
-        // Maximum drift from wick target (in semitones)
-        // At melodicRange 0.3: tight leash (4 semitones)
-        // At melodicRange 1.0: moderate leash (8 semitones) 
-        // At melodicRange 3.0: loose leash (14 semitones)
-        const maxDrift = Math.round(4 + melodicRange * 3.5);
-        const softDrift = Math.round(maxDrift * 0.6);  // Start pulling at 60% of max
+        // Maximum drift from wick target (in semitones) — WIDER than before
+        // The cell pathfinding system now handles normal wick-tracking; gravity is
+        // only a safety net for extreme drift. Scale runs need room to develop.
+        // At melodicRange 0.3: 8 semitones  (was 5)
+        // At melodicRange 1.0: 15 semitones (was 7.5)
+        // At melodicRange 3.0: 22 semitones (was 14.5)
+        const maxDrift = Math.round(8 + melodicRange * 5);
+        const softDrift = Math.round(maxDrift * 0.7);  // Start pulling at 70% of max
         
         const drift = note - target;
         const absDrift = Math.abs(drift);
         
         if (absDrift <= softDrift) {
-            // Within soft zone — no correction needed
             return note;
         }
         
         let corrected;
         
         if (absDrift > maxDrift) {
-            // HARD CLAMP: beyond max drift, snap to the maxDrift boundary
+            // HARD CLAMP: beyond max drift
             const clampedMidi = target + (drift > 0 ? maxDrift : -maxDrift);
             corrected = nearestScaleNote(clampedMidi, scalePool, 4);
         } else {
-            // SOFT PULL: between softDrift and maxDrift, blend toward target
-            // Pull strength increases as you approach maxDrift
+            // SOFT PULL: gentle blend back toward target
             const pullZone = maxDrift - softDrift;
-            const pullAmount = (absDrift - softDrift) / pullZone;  // 0 at softDrift, 1 at maxDrift
-            const pullStrength = pullAmount * 0.5;  // Pull up to 50% back toward target
+            const pullAmount = (absDrift - softDrift) / pullZone;
+            const pullStrength = pullAmount * 0.3;  // Gentler: 30% max (was 50%)
             
             const blended = note - (drift * pullStrength);
             corrected = nearestScaleNote(Math.round(blended), scalePool, 4);
         }
         
-        // Clamp to voice range
         return Math.max(dynamicRange.min, Math.min(dynamicRange.max, corrected));
     }
 
@@ -940,34 +958,64 @@
      * Check if the current note position has drifted too far from the wick target.
      * Used by the conductor to FORCE a scale_run back to target when needed.
      * Returns true if the melody needs to come home.
+     * 
+     * NOTE: This is now LESS sensitive — the pathfinding cell system handles normal
+     * wick-tracking via its distance-based cell selection. This only fires for
+     * truly extreme drift situations.
      */
     function needsWickReturn(prevNote, target) {
         if (!Number.isFinite(prevNote) || !Number.isFinite(target)) return false;
         const melodicRange = audioState.melodicRange || 1.0;
-        // Return threshold: 70% of max drift — don't wait until the hard clamp
-        const returnThreshold = Math.round((4 + melodicRange * 3.5) * 0.7);
+        // Wider threshold: 80% of the (now wider) max drift
+        const returnThreshold = Math.round((8 + melodicRange * 5) * 0.8);
         return Math.abs(prevNote - target) > returnThreshold;
     }
 
     /**
      * Start a melodic cell for a specific voice (soprano or bass)
-     * Soprano: scale runs and arpeggios (high agility)
-     * Bass: walking bass patterns (root/4th/5th stability)
+     * 
+     * DYNAMIC CELL SIZING: Cell length depends on distance to target and cell type:
+     * - scale_run: 4 + floor(distance/3), capped at 8 (longer runs when far = real scale passages)
+     * - orbit: 6-8 steps (full orbit pattern around wick)
+     * - arpeggio: 4 (standard chord cycle)
+     * - enclosure: 4 (fixed: above-below-target-neighbor)
+     * - walk_up/walk_down: 4 + floor(distance/4), capped at 6
+     * - other: 4 (default)
      */
     function startVoiceCell(voice, runType, targetMidi, scalePool, chordPool) {
         const vs = voice === 'soprano' ? musicState.soprano : musicState.bass;
+        const prev = voice === 'soprano' ? (musicState.prevSoprano || 72) : (musicState.prevBass || 48);
+        const distance = Math.abs(targetMidi - prev);
+        
         vs.runMode = runType;
-        vs.runStepsRemaining = vs.cellSize;  // 4-note cells
         vs.runTargetNote = nearestScaleNote(targetMidi, scalePool, 24);
         vs.arpeggioIndex = 0;
         vs.walkDegreeIndex = 0;
         vs.enclosurePhase = 0;
+        
+        // Dynamic cell sizing based on cell type and distance to target
+        if (runType === 'scale_run') {
+            // Longer runs when further away = audible scale passages
+            vs.cellSize = Math.min(8, 4 + Math.floor(distance / 3));
+        } else if (runType === 'orbit') {
+            // Orbit cycles are 6-8 steps to complete the dance pattern
+            vs.cellSize = distance < 3 ? 8 : 6;
+        } else if (runType === 'enclosure') {
+            vs.cellSize = 4;  // Fixed: above-below-target-neighbor
+        } else if (runType === 'walk_up' || runType === 'walk_down') {
+            vs.cellSize = Math.min(6, 4 + Math.floor(distance / 4));
+        } else {
+            vs.cellSize = 4;  // Default for arpeggio, chord_skip, etc.
+        }
+        
+        vs.runStepsRemaining = vs.cellSize;
     }
     
     /**
      * Execute one step of a soprano melodic cell
-     * TARGET-AWARE: scale runs stop when they reach the target instead of blindly continuing
-     * Supports diverse cell types: scale_run, arpeggio, enclosure, sequence, chord_skip, leap_fill
+     * TARGET-AWARE: scale runs walk CONSISTENTLY toward the target using scale degrees.
+     * When near the target, transitions to orbit patterns that "dance around" the wick.
+     * Supports cell types: scale_run, orbit, arpeggio, enclosure, sequence, chord_skip, leap_fill
      */
     function executeSopranoRunStep(scalePool, chordPool) {
         const vs = musicState.soprano;
@@ -979,36 +1027,70 @@
         
         const clamp = (n) => Math.max(dynamicRange.min, Math.min(dynamicRange.max, n));
         
-        // ── SCALE RUN (target-aware: stop when close, don't overshoot) ──
+        // ── SCALE RUN (the core pathfinding move: walk 1 degree per step toward target) ──
+        // This is the PRIMARY melodic engine. Steps are ALWAYS exactly 1 scale degree
+        // for clear, audible scale passages in the selected genre's mode.
+        // When the run reaches within 2 degrees of the target, it lands ON the target
+        // and transitions to orbit (no early termination that kills momentum).
         if (vs.runMode === 'scale_run') {
             const distToTarget = target - prev;
-            // If we've reached the target (within 3 semitones), end the run early
+            // If within 2 scale degrees: land on the target note
             if (Math.abs(distToTarget) <= 3) {
-                vs.runStepsRemaining = 0;  // End cell
-                return clamp(nearestScaleNote(target, sortedPool, 6));
+                // Don't end the cell — let remaining steps become a mini-orbit
+                // This avoids the "snap and stop" that sounds like a chord hit
+                if (vs.runStepsRemaining <= 1) {
+                    return clamp(nearestScaleNote(target, sortedPool, 6));
+                }
+                // Transition to mini-orbit: alternate around target
+                const stepInRun = vs.cellSize - vs.runStepsRemaining;
+                const orbitOffsets = [0, 1, -1, 2, 0, -2, 1, 0]; // Dance around target
+                const offset = orbitOffsets[stepInRun % orbitOffsets.length];
+                return clamp(offsetScaleDegree(nearestScaleNote(target, sortedPool, 6), scalePool, offset));
             }
-            // Move 1-2 degrees toward target
+            // Walk EXACTLY 1 scale degree toward target (clear scale passage)
+            // Occasionally step 2 degrees for variety (20% chance with high complexity)
             const dir = distToTarget > 0 ? 1 : -1;
-            const stepSize = 1 + (Math.random() < 0.4 ? 1 : 0);  // Mostly 1, sometimes 2
-            const nextIndex = Math.max(0, Math.min(sortedPool.length - 1, 
-                (prevIndex !== -1 ? prevIndex : Math.floor(sortedPool.length / 2)) + dir * stepSize));
+            const complexity = audioState.sensitivity || 0.5;
+            const stepSize = (complexity > 0.6 && Math.random() < 0.2) ? 2 : 1;
+            const baseIndex = prevIndex !== -1 ? prevIndex : Math.floor(sortedPool.length / 2);
+            const nextIndex = Math.max(0, Math.min(sortedPool.length - 1, baseIndex + dir * stepSize));
             return clamp(sortedPool[nextIndex]);
         }
         
-        // ── ARPEGGIO (cycle chord tones near target) ──
+        // ── ORBIT (the "wick-hugging dance": Target → +2 → -1 → Target → +1 → -2 → Target → +3) ──
+        // This is the second key pattern from the notes: when price is stable or near target,
+        // the melody "dances around" the wick level using scale degrees above and below.
+        // Creates the musical "orbit" effect described in the Pathfinder architecture.
+        if (vs.runMode === 'orbit') {
+            const targetNote = nearestScaleNote(target, sortedPool, 6);
+            const stepInCell = vs.cellSize - vs.runStepsRemaining;
+            // Orbit pattern: alternates above and below target with increasing reach
+            // This creates a natural melodic "breathing" around the wick
+            const orbitPattern = [0, 2, -1, 0, 1, -2, 0, 3];
+            const offset = orbitPattern[stepInCell % orbitPattern.length];
+            const orbitNote = offsetScaleDegree(targetNote, scalePool, offset);
+            return clamp(orbitNote);
+        }
+        
+        // ── ARPEGGIO (cycle chord tones near target — interval work) ──
+        // Chord-connected intervals as described in the notes: uses the underlying
+        // chord progression to create harmonic interest while staying near the wick.
         if (vs.runMode === 'arpeggio') {
             if (chordPool.length > 0) {
                 const sortedChord = [...chordPool].sort((a, b) => a - b);
-                // Tight orbit: chord tones within 7 semitones of target
+                // Chord tones within 7 semitones of target for tight orbit
                 const nearChord = sortedChord.filter(n => Math.abs(n - target) <= 7);
                 const pool = nearChord.length >= 2 ? nearChord : sortedChord.filter(n => Math.abs(n - target) <= 12);
-                vs.arpeggioIndex = (vs.arpeggioIndex + 1) % pool.length;
-                return clamp(pool[vs.arpeggioIndex]);
+                if (pool.length > 0) {
+                    vs.arpeggioIndex = (vs.arpeggioIndex + 1) % pool.length;
+                    return clamp(pool[vs.arpeggioIndex]);
+                }
             }
             return clamp(offsetScaleDegree(prev, scalePool, vs.direction * 2));
         }
         
         // ── ENCLOSURE (above → below → target → chord tone) ──
+        // Jazz-inspired: approach the target from above, then below, then land.
         if (vs.runMode === 'enclosure') {
             const targetNote = nearestScaleNote(target, sortedPool, 6);
             const phase = vs.enclosurePhase;
@@ -1027,13 +1109,11 @@
         
         // ── SEQUENCE (ascending/descending overlapping groups toward target) ──
         if (vs.runMode === 'sequence') {
-            const step = vs.cellSize - vs.runStepsRemaining;  // 0, 1, 2, 3
-            // Direction biased toward target
+            const step = vs.cellSize - vs.runStepsRemaining;
             const toTarget = target - prev;
             const seqDir = toTarget >= 0 ? 1 : -1;
-            // Sequence: overlapping groups moving toward target
-            // Step pattern: +1, -1, +2, +1 (creates undulating movement toward target)
-            const seqPattern = [1, -1, 2, 1];
+            // Overlapping groups: +1, +2, +1, +3 (net progress toward target)
+            const seqPattern = [1, 2, -1, 3, 1, 2, 0, 1];
             const movement = seqDir * seqPattern[step % seqPattern.length];
             return clamp(offsetScaleDegree(prev, scalePool, movement));
         }
@@ -1042,25 +1122,19 @@
         if (vs.runMode === 'chord_skip') {
             const step = vs.cellSize - vs.runStepsRemaining;
             if (step % 2 === 0) {
-                // Even steps: leap to a chord tone near the TARGET (not anywhere)
                 if (chordPool.length > 0) {
                     const sortedChord = [...chordPool].sort((a, b) => a - b);
-                    // Tight radius around target (7 semitones max)
                     const nearTarget = sortedChord.filter(n => Math.abs(n - target) <= 7);
                     const pool = nearTarget.length >= 2 ? nearTarget : sortedChord.filter(n => Math.abs(n - target) <= 12);
                     if (pool.length > 0) {
-                        // Pick a chord tone different from prev, closest to target
                         const candidates = pool.filter(n => Math.abs(n - prev) >= 2);
                         const selection = candidates.length > 0 ? candidates : pool;
-                        // Prefer notes closer to target
                         selection.sort((a, b) => Math.abs(a - target) - Math.abs(b - target));
-                        // Pick from top 3 closest (with some randomness)
                         const topN = selection.slice(0, Math.min(3, selection.length));
                         return clamp(topN[Math.floor(Math.random() * topN.length)]);
                     }
                 }
             }
-            // Odd steps: scale step connecting the leap, biased toward target
             const toTarget = target - prev;
             const stepDir = toTarget >= 0 ? 1 : -1;
             return clamp(offsetScaleDegree(prev, scalePool, stepDir));
@@ -1069,20 +1143,17 @@
         // ── LEAP + FILL (leap TOWARD target, then stepwise fill back) ──
         if (vs.runMode === 'leap_fill') {
             const step = vs.cellSize - vs.runStepsRemaining;
-            // Direction of leap is always TOWARD the target, not arbitrary
             const toTarget = target - prev;
             const leapDir = toTarget >= 0 ? 1 : -1;
             
             if (step === 0) {
-                // First step: leap 3-5 degrees toward target (capped at target)
                 const leapSize = 3 + Math.floor(Math.random() * 3);
                 const leaped = offsetScaleDegree(prev, scalePool, leapDir * leapSize);
-                // Don't overshoot the target
                 if (leapDir > 0 && leaped > target + 4) return clamp(nearestScaleNote(target + 2, sortedPool, 4));
                 if (leapDir < 0 && leaped < target - 4) return clamp(nearestScaleNote(target - 2, sortedPool, 4));
                 return clamp(leaped);
             }
-            // Remaining steps: fill back stepwise (away from target, creating an orbit)
+            // Fill back stepwise (away from target, creating approach-and-retreat orbit)
             return clamp(offsetScaleDegree(prev, scalePool, -leapDir));
         }
         
@@ -1487,12 +1558,21 @@
             rhythm: '2'  // Half notes
         },
         genre: 'classical',
+        rootKey: 'C',           // Root key for scales and chord progressions (C, C#, D, ... B)
         chordProgression: 'canon',
         displayNotes: true,
         sensitivity: 0.5,       // Repurposed: Complexity/Stochasticism (0=pure, 1=chaotic)
         melodicRange: 1.0,     // Vertical Zoom: expands/compresses price-to-MIDI mapping
         glowDuration: 3,
+        displayMode: 'bars',    // 'bars' (horizontal bars) or 'circles' (radius = note duration)
+        panels: {               // Sub-panel open/closed state
+            channels: true,
+            genre: true,
+            tuning: true,
+            playback: true
+        },
         playing: false,
+        paused: false,          // True when playback is paused (engine stays initialized)
         
         // Internal Tone.js state
         _initialized: false,
@@ -1549,6 +1629,12 @@
         genreBtn: document.getElementById('audioGenreBtn'),
         genreMenu: document.getElementById('audioGenreMenu'),
         genreLabel: document.getElementById('audioGenreLabel'),
+
+        // Root key
+        rootKeyDD: document.getElementById('audioRootKeyDD'),
+        rootKeyBtn: document.getElementById('audioRootKeyBtn'),
+        rootKeyMenu: document.getElementById('audioRootKeyMenu'),
+        rootKeyLabel: document.getElementById('audioRootKeyLabel'),
         
         // Chord progression
         chordProgressionDD: document.getElementById('audioChordProgressionDD'),
@@ -1564,6 +1650,18 @@
         melodicRangeLabel: document.getElementById('audioMelodicRangeLabel'),
         glowDuration: document.getElementById('audioGlowDuration'),
         glowDurationLabel: document.getElementById('audioGlowDurationLabel'),
+
+        // Display mode dropdown
+        displayModeDD: document.getElementById('audioDisplayModeDD'),
+        displayModeBtn: document.getElementById('audioDisplayModeBtn'),
+        displayModeMenu: document.getElementById('audioDisplayModeMenu'),
+        displayModeLabel: document.getElementById('audioDisplayModeLabel'),
+
+        // Collapsible sub-panels
+        panelChannels: document.getElementById('audioPanelChannels'),
+        panelGenre: document.getElementById('audioPanelGenre'),
+        panelTuning: document.getElementById('audioPanelTuning'),
+        panelPlayback: document.getElementById('audioPanelPlayback'),
         
         // Speed control
         speed: document.getElementById('audioSpeed'),
@@ -2102,7 +2200,7 @@
     }
 
     /**
-     * Stop the audio animation loop
+     * Stop the audio animation loop (full stop — resets position)
      */
     function stopAudioAnimation() {
         audioState._animationRunning = false;
@@ -2122,6 +2220,48 @@
         if (typeof window.requestDraw === 'function') {
             window.requestDraw('audio_stop');
         }
+    }
+
+    /**
+     * Pause the audio animation — stops the loop and silences audio but
+     * preserves all position state so playback can be resumed from the same spot.
+     */
+    function pauseAudioAnimation() {
+        audioState._animationRunning = false;
+        if (audioState._animationFrame) {
+            cancelAnimationFrame(audioState._animationFrame);
+            audioState._animationFrame = null;
+        }
+        // Silence any currently ringing notes
+        if (audioState._sopranoSampler) audioState._sopranoSampler.releaseAll();
+        if (audioState._bassSampler) audioState._bassSampler.releaseAll();
+        // Pause Tone.Transport so scheduled events don't fire
+        if (Tone.Transport.state === 'started') {
+            Tone.Transport.pause();
+        }
+        console.log('[Audio] Paused at position', audioState._smoothPosition.toFixed(2));
+    }
+
+    /**
+     * Resume the audio animation from the paused position.
+     * Re-enters the RAF loop from where it left off.
+     */
+    function resumeAudioAnimation() {
+        if (audioState._animationRunning) return;  // Already running
+        
+        audioState._animationRunning = true;
+        // Reset the frame timer so the first frame doesn't produce a huge dt
+        audioState._lastFrameTime = performance.now();
+        
+        // Resume Tone.Transport
+        if (Tone.Transport.state === 'paused') {
+            Tone.Transport.start();
+        } else if (Tone.context.state !== 'running') {
+            Tone.context.resume();
+        }
+        
+        console.log('[Audio] Resumed from position', audioState._smoothPosition.toFixed(2));
+        audioState._animationFrame = requestAnimationFrame(smoothAnimationLoop);
     }
 
     /**
@@ -2300,84 +2440,77 @@
             vs.runTargetNote = targetMidi;
             
             if (vs.runStepsRemaining > 0) {
-                // ── CONTINUE CURRENT CELL ──
+                // ── CONTINUE CURRENT CELL (no interference — let the cell breathe) ──
                 sopranoMidi = executeSopranoRunStep(sopranoScalePool, sopranoChordPool);
                 vs.runStepsRemaining--;
-                // Mid-cell gravity: if this step pushed us too far, abort the cell
-                if (needsWickReturn(sopranoMidi, targetMidi)) {
-                    vs.runStepsRemaining = 0;  // Force new cell selection next step
+                // Only abort mid-cell for EXTREME drift (more than double the normal threshold)
+                // This lets scale runs develop their full melodic phrase
+                const extremeDrift = Math.abs(sopranoMidi - targetMidi) > 18;
+                if (extremeDrift) {
+                    vs.runStepsRemaining = 0;
                 }
             } else {
-                // ── CHOOSE NEXT CELL (complexity-driven diversity) ──
+                // ══════════════════════════════════════════════════════════════
+                // PATHFINDER CELL SELECTION — the core algorithm from the notes:
+                //   Distance > 4 semitones from wick → SCALE RUN (walk toward target)
+                //   Distance ≤ 4 semitones from wick → ORBIT (dance around target)
+                //   Complexity slider controls chance of INTERRUPTION (genre ornaments)
+                // ══════════════════════════════════════════════════════════════
                 const pattern = detectMelodicPattern(musicState.sopranoHistory);
                 const prev = musicState.prevSoprano || 72;
                 const distance = Math.abs(targetMidi - prev);
                 const direction = targetMidi >= prev ? 1 : -1;
                 
-                // GRAVITY CHECK: if drifted too far from wick, FORCE return
-                // The wick is always the attractor — override cell diversity
-                if (needsWickReturn(prev, targetMidi)) {
-                    startVoiceCell('soprano', 'scale_run', targetMidi, sopranoScalePool, sopranoChordPool);
-                    vs.lastCellType = 'scale_run';
-                    vs.direction = direction;
-                    sopranoMidi = executeSopranoRunStep(sopranoScalePool, sopranoChordPool);
-                    vs.runStepsRemaining--;
-                    // Skip to gravity application below
-                } else {
-                
-                // Cell type selection: complexity controls the palette
-                // Low complexity (0-0.3): mostly scale_run and arpeggio
-                // Mid complexity (0.3-0.7): add enclosure, sequence
-                // High complexity (0.7-1.0): full palette including chord_skip, leap_fill
                 let cellType;
                 
+                // PRIORITY 1: Break out of stuck/trill patterns
                 if (pattern === 'stuck') {
-                    // Genuinely stuck: force a leap_fill to break out
                     cellType = 'leap_fill';
                 } else if (pattern === 'trill') {
-                    // Ping-ponging: break with a sequence or enclosure
-                    cellType = Math.random() < 0.5 ? 'sequence' : 'enclosure';
-                } else if (distance > 8) {
-                    // Far from target: need to travel — scale_run or leap_fill
-                    cellType = Math.random() < 0.6 ? 'scale_run' : 'leap_fill';
-                } else {
-                    // Normal: choose from palette based on complexity
-                    const roll = Math.random();
-                    
-                    if (complexity < 0.3) {
-                        // Low complexity: mostly scale runs and arpeggios
-                        if (distance > 3) {
-                            cellType = 'scale_run';
-                        } else {
-                            cellType = roll < 0.5 ? 'arpeggio' : 'scale_run';
-                        }
-                    } else if (complexity < 0.7) {
-                        // Mid complexity: add enclosures and sequences
-                        if (roll < 0.25)      cellType = 'scale_run';
-                        else if (roll < 0.45) cellType = 'arpeggio';
-                        else if (roll < 0.65) cellType = 'enclosure';
-                        else if (roll < 0.85) cellType = 'sequence';
-                        else                  cellType = 'chord_skip';
+                    cellType = 'sequence';
+                }
+                // PRIORITY 2: Distance-based pathfinding (the core "Pathfinder" logic)
+                // Far from wick (> 4 semitones): MUST travel there via scale run
+                // This is what creates the audible scale passages in the selected genre
+                else if (distance > 4) {
+                    // Scale run is the PRIMARY tool for traveling to the wick
+                    // Complexity adds a chance of interruption with other cell types
+                    const interruptChance = complexity * 0.3; // 0% at complexity=0, 30% at complexity=1
+                    if (Math.random() < interruptChance) {
+                        // Stochastic interruption: use a "traveling" cell type instead
+                        const roll = Math.random();
+                        if (roll < 0.4)       cellType = 'leap_fill';     // Leap toward + fill
+                        else if (roll < 0.7)  cellType = 'sequence';      // Undulating approach
+                        else                  cellType = 'chord_skip';    // Harmonic leap + step
                     } else {
-                        // High complexity: full diverse palette
-                        if (roll < 0.15)      cellType = 'scale_run';
-                        else if (roll < 0.28) cellType = 'arpeggio';
-                        else if (roll < 0.43) cellType = 'enclosure';
-                        else if (roll < 0.58) cellType = 'sequence';
-                        else if (roll < 0.75) cellType = 'chord_skip';
-                        else                  cellType = 'leap_fill';
+                        cellType = 'scale_run';  // DEFAULT: walk toward wick via scale degrees
+                    }
+                }
+                // PRIORITY 3: Near the wick (≤ 4 semitones): ORBIT/dance around it
+                // This is the "wick-hugging" behavior — melody dances around the price level
+                else {
+                    // Complexity controls the palette of orbit-like patterns
+                    const interruptChance = complexity * 0.4; // More interruption variety near target
+                    if (Math.random() < interruptChance) {
+                        // Stochastic interruption with genre-flavored patterns
+                        const roll = Math.random();
+                        if (roll < 0.3)       cellType = 'arpeggio';     // Chord tone cycle
+                        else if (roll < 0.55) cellType = 'enclosure';    // Above-below-target
+                        else if (roll < 0.75) cellType = 'sequence';     // Overlapping groups
+                        else                  cellType = 'chord_skip';   // Leap + connect
+                    } else {
+                        cellType = 'orbit';  // DEFAULT: dance around the wick target
                     }
                 }
                 
                 // Prevent same cell type twice in a row (diversity guarantee)
-                if (cellType === vs.lastCellType && complexity > 0.2) {
-                    const alternatives = ['scale_run', 'arpeggio', 'enclosure', 'sequence', 'chord_skip', 'leap_fill'];
+                if (cellType === vs.lastCellType && complexity > 0.15) {
+                    // Pick appropriate alternative based on distance
+                    const nearAlts = ['orbit', 'arpeggio', 'enclosure', 'sequence'];
+                    const farAlts = ['scale_run', 'leap_fill', 'sequence', 'chord_skip'];
+                    const alternatives = distance > 4 ? farAlts : nearAlts;
                     const filtered = alternatives.filter(t => t !== cellType);
-                    // Pick from alternatives that are appropriate for current complexity
-                    const available = complexity < 0.5 
-                        ? filtered.filter(t => ['scale_run', 'arpeggio', 'enclosure'].includes(t))
-                        : filtered;
-                    cellType = available[Math.floor(Math.random() * available.length)];
+                    cellType = filtered[Math.floor(Math.random() * filtered.length)];
                 }
                 
                 vs.lastCellType = cellType;
@@ -2394,21 +2527,24 @@
                 startVoiceCell('soprano', cellType, targetMidi, sopranoScalePool, sopranoChordPool);
                 sopranoMidi = executeSopranoRunStep(sopranoScalePool, sopranoChordPool);
                 vs.runStepsRemaining--;
-                
-                } // end of gravity else (normal cell selection)
             }
             
-            // Apply genre-specific complexity (stochastic interruptions)
-            sopranoMidi = applyGenreComplexity(sopranoMidi, sopranoScalePool, sopranoChordPool, subStepInBar, 'soprano');
+            // Genre-specific complexity: BEAT-GATED interruptions only
+            // Only apply on specific beat positions (weak beats) and ONLY when between cells
+            // or at cell boundaries — NOT during the middle of a scale run (which would break it)
+            const isMidCell = vs.runStepsRemaining > 0 && vs.runStepsRemaining < (vs.cellSize - 1);
+            const isRunOrOrbit = (vs.runMode === 'scale_run' || vs.runMode === 'orbit');
+            if (!isMidCell || !isRunOrOrbit) {
+                // Safe to apply genre ornaments — we're at a cell boundary or in a non-directional cell
+                sopranoMidi = applyGenreComplexity(sopranoMidi, sopranoScalePool, sopranoChordPool, subStepInBar, 'soprano');
+            }
             
-            // Apply genre phrasing on top
-            const priceDir = musicState._sopranoDirection || 0;
-            sopranoMidi = applyGenrePhrasing(sopranoMidi, sopranoScalePool, sopranoChordPool, subStepInBar, priceDir);
-            
-            // ── WICK GRAVITY: final attractor pull ──
-            // No matter what the cell produced, the wick is the magnet.
-            // This is the LAST transform before audio trigger.
-            sopranoMidi = applyWickGravity(sopranoMidi, targetMidi, sopranoScalePool, 'soprano');
+            // Wick gravity: SAFETY NET only (not a constant pull)
+            // Only activate for extreme drift — the cell system handles normal wick-tracking
+            const sopranoDrift = Math.abs(sopranoMidi - targetMidi);
+            if (sopranoDrift > 14) {
+                sopranoMidi = applyWickGravity(sopranoMidi, targetMidi, sopranoScalePool, 'soprano');
+            }
             
             // Clamp to range
             sopranoMidi = Math.max(sopranoRange.min, Math.min(sopranoRange.max, sopranoMidi));
@@ -2451,51 +2587,58 @@
             vb.runTargetNote = targetMidi;
             
             if (vb.runStepsRemaining > 0) {
-                // ── CONTINUE CURRENT CELL ──
+                // ── CONTINUE CURRENT CELL (let walking bass pattern complete) ──
                 bassMidi = executeWalkingStep(bassScalePool, bassChordPool);
                 vb.runStepsRemaining--;
-                // Mid-cell gravity: abort cell if we've drifted too far
-                if (needsWickReturn(bassMidi, targetMidi)) {
+                // Only abort for extreme drift (bass is more stable, wider threshold)
+                const extremeDrift = Math.abs(bassMidi - targetMidi) > 20;
+                if (extremeDrift) {
                     vb.runStepsRemaining = 0;
                 }
             } else {
-                // ── CHOOSE NEXT BASS CELL (complexity-driven) ──
+                // ══════════════════════════════════════════════════════════════
+                // BASS PATHFINDER — same distance-based logic as soprano:
+                //   Distance > 5 semitones → WALK toward target (root/4th/5th pattern)
+                //   Distance ≤ 5 semitones → ARPEGGIO around target (chord-tone stability)
+                //   Complexity adds chromatic approaches and pattern variety
+                // ══════════════════════════════════════════════════════════════
                 const pattern = detectMelodicPattern(musicState.bassHistory);
                 const prev = musicState.prevBass || 48;
                 const distance = Math.abs(targetMidi - prev);
                 const direction = targetMidi >= prev ? 1 : -1;
                 
-                // GRAVITY CHECK: if drifted too far from wick, force walk back
-                if (needsWickReturn(prev, targetMidi)) {
-                    const walkDir = direction > 0 ? 'walk_up' : 'walk_down';
-                    startVoiceCell('bass', walkDir, targetMidi, bassScalePool, bassChordPool);
-                    vb.lastCellType = walkDir;
-                    vb.direction = direction;
-                    bassMidi = executeWalkingStep(bassScalePool, bassChordPool);
-                    vb.runStepsRemaining--;
-                } else {
-                
                 let cellType;
                 
+                // PRIORITY 1: Break stuck patterns
                 if (pattern === 'stuck') {
                     cellType = 'chromatic_approach';
-                } else if (distance > 7) {
-                    // Far from target: walk toward it
-                    cellType = direction > 0 ? 'walk_up' : 'walk_down';
-                } else {
-                    // Normal: mix walking bass patterns with arpeggios
-                    const roll = Math.random();
-                    if (complexity < 0.4) {
-                        cellType = roll < 0.5 ? 'arpeggio' : (direction > 0 ? 'walk_up' : 'walk_down');
+                } else if (pattern === 'trill') {
+                    cellType = 'arpeggio';
+                }
+                // PRIORITY 2: Distance-based pathfinding
+                // Far from wick (> 5 semitones): walk toward it
+                else if (distance > 5) {
+                    const interruptChance = complexity * 0.25;
+                    if (Math.random() < interruptChance) {
+                        cellType = 'chromatic_approach';  // Chromatic walk adds flavor
                     } else {
-                        if (roll < 0.35)      cellType = 'arpeggio';
-                        else if (roll < 0.55) cellType = direction > 0 ? 'walk_up' : 'walk_down';
-                        else                  cellType = 'chromatic_approach';
+                        cellType = direction > 0 ? 'walk_up' : 'walk_down';
+                    }
+                }
+                // Near the wick (≤ 5 semitones): arpeggio/chord-tone stability
+                else {
+                    const interruptChance = complexity * 0.3;
+                    if (Math.random() < interruptChance) {
+                        const roll = Math.random();
+                        if (roll < 0.5) cellType = 'chromatic_approach';
+                        else            cellType = direction > 0 ? 'walk_up' : 'walk_down';
+                    } else {
+                        cellType = 'arpeggio';  // DEFAULT: chord-tone stability near wick
                     }
                 }
                 
                 // Prevent same bass cell type twice in a row
-                if (cellType === vb.lastCellType && complexity > 0.2) {
+                if (cellType === vb.lastCellType && complexity > 0.15) {
                     const bassAlts = ['arpeggio', 'walk_up', 'walk_down', 'chromatic_approach'];
                     const filtered = bassAlts.filter(t => t !== cellType);
                     cellType = filtered[Math.floor(Math.random() * filtered.length)];
@@ -2507,15 +2650,20 @@
                 startVoiceCell('bass', cellType, targetMidi, bassScalePool, bassChordPool);
                 bassMidi = executeWalkingStep(bassScalePool, bassChordPool);
                 vb.runStepsRemaining--;
-                
-                } // end of gravity else (normal bass cell selection)
             }
             
-            // Apply genre complexity for bass (less aggressive than soprano)
-            bassMidi = applyGenreComplexity(bassMidi, bassScalePool, bassChordPool, subStepInBar, 'bass');
+            // Genre complexity for bass: beat-gated, don't interrupt mid-walking-pattern
+            const bassMidCell = vb.runStepsRemaining > 0 && vb.runStepsRemaining < (vb.cellSize - 1);
+            const bassIsWalking = (vb.runMode === 'walk_up' || vb.runMode === 'walk_down');
+            if (!bassMidCell || !bassIsWalking) {
+                bassMidi = applyGenreComplexity(bassMidi, bassScalePool, bassChordPool, subStepInBar, 'bass');
+            }
             
-            // ── WICK GRAVITY: final attractor pull for bass ──
-            bassMidi = applyWickGravity(bassMidi, targetMidi, bassScalePool, 'bass');
+            // Wick gravity: SAFETY NET only for extreme drift
+            const bassDrift = Math.abs(bassMidi - targetMidi);
+            if (bassDrift > 16) {
+                bassMidi = applyWickGravity(bassMidi, targetMidi, bassScalePool, 'bass');
+            }
             
             // Clamp to range
             bassMidi = Math.max(bassRange.min, Math.min(bassRange.max, bassMidi));
@@ -2571,11 +2719,15 @@
         // Glow duration from slider (units * 200ms base)
         const glowMs = (audioState.glowDuration || 3) * 200;
         
+        // Store rhythm for circle display mode
+        const rhythm = voice === 'soprano' ? audioState.upperWick.rhythm : audioState.lowerWick.rhythm;
+        
         window._audioNoteEvents.push({
             voice: voice,
             midi: midi,
             price: price,
             barIndex: barIndex,
+            rhythm: rhythm,     // '1'=whole, '2'=half, '4'=quarter, '8'=eighth, '16'=sixteenth
             time: startTime,
             endTime: startTime + durationMs,
             durationMs: durationMs,
@@ -2706,6 +2858,7 @@
             midi: midi,
             price: price,
             barIndex: barIndex,
+            rhythm: rhythm,     // '1'=whole, '2'=half, '4'=quarter, '8'=eighth, '16'=sixteenth
             time: now,
             endTime: now + durationMs,
             durationMs: durationMs,
@@ -2884,11 +3037,14 @@
                     rhythm: audioState.lowerWick.rhythm
                 },
                 genre: audioState.genre,
+                rootKey: audioState.rootKey,
                 chordProgression: audioState.chordProgression,
                 displayNotes: audioState.displayNotes,
                 sensitivity: audioState.sensitivity,
                 melodicRange: audioState.melodicRange,
                 glowDuration: audioState.glowDuration,
+                displayMode: audioState.displayMode,
+                panels: audioState.panels,
                 speed: audioState._currentBpm || 60
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
@@ -2924,11 +3080,20 @@
             }
             audioState.genre = settings.genre || 'classical';
             musicState.currentGenre = audioState.genre;  // Sync with musicState
+            audioState.rootKey = settings.rootKey || 'C';
+            musicState.rootMidi = 60 + (ROOT_KEY_OFFSETS[audioState.rootKey] || 0);  // Sync with musicState
             audioState.chordProgression = settings.chordProgression || 'canon';
             audioState.displayNotes = settings.displayNotes ?? true;
             audioState.sensitivity = settings.sensitivity ?? 0.5;
             audioState.melodicRange = settings.melodicRange ?? 1.0;
             audioState.glowDuration = settings.glowDuration ?? 3;
+            audioState.displayMode = settings.displayMode || 'bars';
+            if (settings.panels) {
+                audioState.panels.channels = settings.panels.channels ?? true;
+                audioState.panels.genre = settings.panels.genre ?? true;
+                audioState.panels.tuning = settings.panels.tuning ?? true;
+                audioState.panels.playback = settings.panels.playback ?? true;
+            }
             audioState._savedSpeed = settings.speed ?? 60;
             
             return true;
@@ -2963,11 +3128,23 @@
         // Genre
         applyDropdownSelection(ui.genreMenu, ui.genreLabel, audioState.genre);
         
+        // Root key
+        applyDropdownSelection(ui.rootKeyMenu, ui.rootKeyLabel, audioState.rootKey);
+        
         // Chord progression
         applyDropdownSelection(ui.chordProgressionMenu, ui.chordProgressionLabel, audioState.chordProgression);
         
+        // Display mode
+        applyDropdownSelection(ui.displayModeMenu, ui.displayModeLabel, audioState.displayMode);
+        
         // Display notes checkbox
         if (ui.displayNotesChk) ui.displayNotesChk.checked = audioState.displayNotes;
+        
+        // Sub-panel open/closed state
+        if (ui.panelChannels) ui.panelChannels.open = audioState.panels.channels;
+        if (ui.panelGenre) ui.panelGenre.open = audioState.panels.genre;
+        if (ui.panelTuning) ui.panelTuning.open = audioState.panels.tuning;
+        if (ui.panelPlayback) ui.panelPlayback.open = audioState.panels.playback;
         
         // Sliders
         if (ui.sensitivity) {
@@ -3078,6 +3255,15 @@
                 saveSettings();
             });
         
+        // Root Key
+        setupDropdown(ui.rootKeyDD, ui.rootKeyBtn, ui.rootKeyMenu, ui.rootKeyLabel,
+            (val) => {
+                audioState.rootKey = val;
+                musicState.rootMidi = 60 + (ROOT_KEY_OFFSETS[val] || 0);
+                console.log(`[Audio] Root key changed to: ${val} (MIDI root: ${musicState.rootMidi})`);
+                saveSettings();
+            });
+
         // Chord Progression
         setupDropdown(ui.chordProgressionDD, ui.chordProgressionBtn, ui.chordProgressionMenu, ui.chordProgressionLabel,
             (val) => { 
@@ -3094,10 +3280,33 @@
             });
         }
 
+        // Sub-panel toggle persistence
+        const panelMap = [
+            { el: ui.panelChannels, key: 'channels' },
+            { el: ui.panelGenre,    key: 'genre' },
+            { el: ui.panelTuning,   key: 'tuning' },
+            { el: ui.panelPlayback, key: 'playback' }
+        ];
+        panelMap.forEach(({ el, key }) => {
+            if (el) {
+                el.addEventListener('toggle', () => {
+                    audioState.panels[key] = el.open;
+                    saveSettings();
+                });
+            }
+        });
+
         // Tuning sliders
         setupSlider(ui.sensitivity, ui.sensitivityLabel, '', 'sensitivity', v => v.toFixed(2));
         setupSlider(ui.melodicRange, ui.melodicRangeLabel, 'X', 'melodicRange', v => v.toFixed(1));
         setupSlider(ui.glowDuration, ui.glowDurationLabel, ' UNITS', 'glowDuration', v => Math.round(v));
+
+        // Display Mode dropdown
+        setupDropdown(ui.displayModeDD, ui.displayModeBtn, ui.displayModeMenu, ui.displayModeLabel,
+            (val) => {
+                audioState.displayMode = val;
+                saveSettings();
+            });
 
         // Speed slider - directly controls animation/audio tempo
         if (ui.speed) {
@@ -3118,32 +3327,74 @@
             });
         }
 
-        // Playback controls
+        // ── Helper: update start button appearance for play state ──
+        function setStartBtnState(mode) {
+            if (!ui.startBtn) return;
+            if (mode === 'playing') {
+                // Currently playing → button offers "Pause"
+                ui.startBtn.textContent = 'Pause';
+                ui.startBtn.style.background = '#2ecc71';  // Green
+                ui.startBtn.disabled = false;
+            } else if (mode === 'paused') {
+                // Currently paused → button offers "Resume"
+                ui.startBtn.textContent = 'Resume';
+                ui.startBtn.style.background = '#ff69b4';  // Pink (same as start)
+                ui.startBtn.disabled = false;
+            } else {
+                // Idle → button offers "Start Audio"
+                ui.startBtn.textContent = 'Start Audio';
+                ui.startBtn.style.background = '#ff69b4';  // Pink
+                ui.startBtn.disabled = false;
+            }
+        }
+
+        // Playback controls — Start / Pause / Resume tri-state button
         if (ui.startBtn) {
             ui.startBtn.addEventListener('click', async () => {
-                if (audioState.playing) return;
+                // ── STATE 1: Currently playing → PAUSE ──
+                if (audioState.playing && !audioState.paused) {
+                    audioState.paused = true;
+                    pauseAudioAnimation();
+                    setStartBtnState('paused');
+                    updateStatus('Paused');
+                    return;
+                }
 
+                // ── STATE 2: Currently paused → RESUME ──
+                if (audioState.playing && audioState.paused) {
+                    audioState.paused = false;
+                    resumeAudioAnimation();
+                    setStartBtnState('playing');
+                    updateStatus('Playing...');
+                    return;
+                }
+
+                // ── STATE 3: Idle → START ──
                 ui.startBtn.disabled = true;
                 updateStatus('Initializing...');
 
                 const success = await initAudioEngine();
                 if (success) {
                     audioState.playing = true;
+                    audioState.paused = false;
                     ui.stopBtn.disabled = false;
                     
                     // Start the independent animation loop
                     startAudioAnimation();
+                    setStartBtnState('playing');
                 } else {
-                    ui.startBtn.disabled = false;
+                    setStartBtnState('idle');
                 }
             });
         }
 
+        // Reset button — full stop, dispose engine, return to idle
         if (ui.stopBtn) {
             ui.stopBtn.addEventListener('click', () => {
                 stopAudioAnimation();
                 stopAudioEngine();
-                ui.startBtn.disabled = false;
+                audioState.paused = false;
+                setStartBtnState('idle');
                 ui.stopBtn.disabled = true;
                 updateStatus('Audio stopped');
                 
@@ -3155,7 +3406,7 @@
             });
         }
 
-        // Spacebar to toggle audio playback
+        // Spacebar to toggle audio playback (Start / Pause / Resume)
         document.addEventListener('keydown', async (e) => {
             // Only respond to spacebar, ignore if user is typing in an input
             if (e.code !== 'Space' && e.key !== ' ') return;
@@ -3164,16 +3415,9 @@
             // Prevent page scroll
             e.preventDefault();
             
-            if (audioState.playing) {
-                // Stop playback
-                if (ui.stopBtn && !ui.stopBtn.disabled) {
-                    ui.stopBtn.click();
-                }
-            } else {
-                // Start playback
-                if (ui.startBtn && !ui.startBtn.disabled) {
-                    ui.startBtn.click();
-                }
+            // Spacebar toggles Start ↔ Pause (not Reset)
+            if (ui.startBtn && !ui.startBtn.disabled) {
+                ui.startBtn.click();
             }
         });
 

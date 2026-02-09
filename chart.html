@@ -98,8 +98,8 @@
         <div class="sideCardBody">
           
           <!-- Channel Instruments -->
-          <div class="subCard" aria-label="Channel instruments">
-            <div class="subCardTitle">Channel Instruments</div>
+          <details class="subCard subCard--collapsible" id="audioPanelChannels" aria-label="Channel instruments" open>
+            <summary class="subCardTitle">Channel Instruments</summary>
             <div class="sideList">
               <!-- Upper wick -->
               <label class="chkRow">
@@ -212,13 +212,13 @@
                 </div>
               </div>
             </div>
-          </div>
+          </details>
 
           <div class="sideDivider"></div>
 
           <!-- Music and Genre Settings -->
-          <div class="subCard" aria-label="Music and genre settings" style="margin-top:10px;">
-            <div class="subCardTitle">Music and Genre Settings</div>
+          <details class="subCard subCard--collapsible" id="audioPanelGenre" aria-label="Music and genre settings" style="margin-top:10px;" open>
+            <summary class="subCardTitle">Music and Genre Settings</summary>
             <div class="sideList">
               <!-- Genre Selection -->
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
@@ -234,6 +234,30 @@
                     <div class="ddItem" role="option" data-value="jazz">Jazz Bebop</div>
                     <div class="ddItem" role="option" data-value="rock_bluegrass">Rock / Bluegrass</div>
                     <div class="ddItem" role="option" data-value="techno_experimental">Techno / Experimental</div>
+                  </div>
+                </div>
+              </div>
+              <!-- Root Key Selection -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                <span class="hint" style="min-width:110px;">Root Key:</span>
+                <div class="dd" id="audioRootKeyDD" style="flex:1;">
+                  <button class="ddBtn" id="audioRootKeyBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioRootKeyLabel">C</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioRootKeyMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="C">C</div>
+                    <div class="ddItem" role="option" data-value="C#">C# / Db</div>
+                    <div class="ddItem" role="option" data-value="D">D</div>
+                    <div class="ddItem" role="option" data-value="D#">D# / Eb</div>
+                    <div class="ddItem" role="option" data-value="E">E</div>
+                    <div class="ddItem" role="option" data-value="F">F</div>
+                    <div class="ddItem" role="option" data-value="F#">F# / Gb</div>
+                    <div class="ddItem" role="option" data-value="G">G</div>
+                    <div class="ddItem" role="option" data-value="G#">G# / Ab</div>
+                    <div class="ddItem" role="option" data-value="A">A</div>
+                    <div class="ddItem" role="option" data-value="A#">A# / Bb</div>
+                    <div class="ddItem" role="option" data-value="B">B</div>
                   </div>
                 </div>
               </div>
@@ -261,13 +285,13 @@
                 </span>
               </label>
             </div>
-          </div>
+          </details>
 
           <div class="sideDivider"></div>
 
           <!-- Audio Visual Sync Tuning -->
-          <div class="subCard" aria-label="Audio visual sync tuning" style="margin-top:10px;">
-            <div class="subCardTitle">Audio Visual Sync Tuning</div>
+          <details class="subCard subCard--collapsible" id="audioPanelTuning" aria-label="Audio visual sync tuning" style="margin-top:10px;" open>
+            <summary class="subCardTitle">Audio Visual Sync Tuning</summary>
             <div class="sideList">
               <!-- Complexity (was Price Sensitivity) -->
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
@@ -289,14 +313,31 @@
                 <input id="audioGlowDuration" type="range" min="1" max="8" step="1" value="3" style="flex:1;accent-color:#ff69b4;" />
                 <span class="hint mono" id="audioGlowDurationLabel" style="min-width:50px;text-align:right;">3 UNITS</span>
               </div>
+
+              <!-- Display Mode -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                <span class="hint" style="min-width:130px;">Display Mode:</span>
+                <div class="dd" id="audioDisplayModeDD" style="flex:1;">
+                  <button class="ddBtn" id="audioDisplayModeBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioDisplayModeLabel">Bars</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioDisplayModeMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="bars">Bars</div>
+                    <div class="ddItem" role="option" data-value="circles">Circles</div>
+                  </div>
+                </div>
+              </div>
               
             </div>
-          </div>
+          </details>
 
           <div class="sideDivider"></div>
 
-          <!-- Speed Control -->
-          <div style="margin-bottom:12px;">
+          <!-- Speed & Playback Controls -->
+          <details class="subCard subCard--collapsible" id="audioPanelPlayback" aria-label="Speed and playback controls" style="margin-top:10px;" open>
+            <summary class="subCardTitle">Playback Controls</summary>
+          <div style="margin-bottom:12px;margin-top:6px;">
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
               <span class="hint" style="min-width:50px;">Speed</span>
               <input id="audioSpeed" type="range" min="30" max="240" step="10" value="60" style="flex:1;accent-color:#ff69b4;" />
@@ -308,16 +349,17 @@
             </div>
           </div>
 
-          <!-- Playback Controls -->
+          <!-- Playback Buttons -->
           <div style="display:flex;gap:10px;margin-top:10px;">
             <button class="btnPrimary" type="button" id="audioStartBtn" style="flex:1;background:#ff69b4;">
               Start Audio
             </button>
             <button class="btn" type="button" id="audioStopBtn" style="flex:1;" disabled>
-              Stop
+              Reset
             </button>
           </div>
           <div class="hint" id="audioStatus" style="margin-top:8px;text-align:center;">Audio stopped</div>
+          </details>
 
         </div>
       </details>
