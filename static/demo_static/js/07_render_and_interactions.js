@@ -567,6 +567,132 @@
       drawGrid(pricePlot, { yMin: yMin, yMax: yMax, plot: plot, start: start, end: end, barsVisible: barsVisible });
     }
 
+    // ── CHORD PROGRESSION OVERLAY ──
+    // Draws vertical separator lines and labels showing the active chord from
+    // the selected chord progression while audio is playing.
+    (function drawChordOverlay(){
+      try {
+        if (!audioActive) return;
+        if (window.audioState && window.audioState.chordOverlay === false) return;
+        var chordEvents = window._audioChordEvents;
+        if (!chordEvents || chordEvents.length === 0) return;
+
+        ctx.save();
+
+        // ── Style constants ──
+        var labelFont = '11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+        var lineColor = 'rgba(255, 255, 255, 0.12)';
+        var labelBg = 'rgba(15, 22, 32, 0.72)';
+        var labelTextColor = 'rgba(215, 224, 234, 0.88)';
+        var romanColor = 'rgba(255, 255, 255, 0.95)';
+        var noteColor = 'rgba(160, 180, 210, 0.75)';
+
+        // Position the label band near the bottom of the price pane
+        var labelBandH = 22;
+        var labelBandY = pricePlot.y + pricePlot.h - labelBandH - 2;
+
+        // Draw a subtle background strip for the chord labels
+        ctx.fillStyle = 'rgba(15, 22, 32, 0.35)';
+        ctx.fillRect(pricePlot.x, labelBandY, pricePlot.w, labelBandH);
+
+        for (var ci = 0; ci < chordEvents.length; ci++) {
+          var ce = chordEvents[ci];
+          // Compute pixel positions for start and end of this chord region
+          var x0 = xForIndex(ce.startBarIndex, plot, barsVisible);
+          var x1 = xForIndex(ce.endBarIndex + 1, plot, barsVisible);  // +1 to cover full last bar
+
+          // Skip if entirely off-screen
+          if (x1 < pricePlot.x - 10 || x0 > pricePlot.x + pricePlot.w + 10) continue;
+
+          // Clamp to plot bounds for fill/label
+          var cx0 = Math.max(pricePlot.x, x0);
+          var cx1 = Math.min(pricePlot.x + pricePlot.w, x1);
+          var regionW = cx1 - cx0;
+          if (regionW < 2) continue;
+
+          // ── Vertical separator line at chord boundary ──
+          if (x0 >= pricePlot.x && x0 <= pricePlot.x + pricePlot.w) {
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x0, pricePlot.y);
+            ctx.lineTo(x0, pricePlot.y + pricePlot.h);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+
+          // ── Chord label (centered in the region) ──
+          var labelCenterX = cx0 + regionW / 2;
+
+          // Background pill for the label
+          ctx.font = 'bold 11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+          var labelW = ctx.measureText(ce.label).width + 12;
+          var pillW = Math.min(labelW, regionW - 4);
+          if (pillW < 20) continue;  // Too narrow to show a label
+
+          var pillX = labelCenterX - pillW / 2;
+          var pillY = labelBandY + 2;
+          var pillH = labelBandH - 4;
+
+          ctx.fillStyle = labelBg;
+          // Rounded rectangle pill
+          var pillR = 4;
+          ctx.beginPath();
+          ctx.moveTo(pillX + pillR, pillY);
+          ctx.lineTo(pillX + pillW - pillR, pillY);
+          ctx.quadraticCurveTo(pillX + pillW, pillY, pillX + pillW, pillY + pillR);
+          ctx.lineTo(pillX + pillW, pillY + pillH - pillR);
+          ctx.quadraticCurveTo(pillX + pillW, pillY + pillH, pillX + pillW - pillR, pillY + pillH);
+          ctx.lineTo(pillX + pillR, pillY + pillH);
+          ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - pillR);
+          ctx.lineTo(pillX, pillY + pillR);
+          ctx.quadraticCurveTo(pillX, pillY, pillX + pillR, pillY);
+          ctx.closePath();
+          ctx.fill();
+
+          // Subtle border on pill
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // Two-part label: roman numeral (brighter), then note name (dimmer)
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          var labelMidY = pillY + pillH / 2;
+
+          // Measure parts for two-tone rendering
+          var romanPart = ce.roman;
+          var notePart = ' (' + ce.noteName + (ce.quality ? ' ' + ce.quality : '') + ')';
+          ctx.font = 'bold 11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+          var romanW = ctx.measureText(romanPart).width;
+          ctx.font = '10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+          var noteW = ctx.measureText(notePart).width;
+          var totalTextW = romanW + noteW;
+
+          // If there's room, draw two-tone; otherwise just roman numeral
+          if (totalTextW + 8 <= pillW) {
+            var textStartX = labelCenterX - totalTextW / 2;
+            ctx.font = 'bold 11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+            ctx.fillStyle = romanColor;
+            ctx.textAlign = 'left';
+            ctx.fillText(romanPart, textStartX, labelMidY);
+            ctx.font = '10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+            ctx.fillStyle = noteColor;
+            ctx.fillText(notePart, textStartX + romanW, labelMidY);
+          } else {
+            // Tight space — just roman numeral
+            ctx.font = 'bold 11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+            ctx.fillStyle = romanColor;
+            ctx.textAlign = 'center';
+            ctx.fillText(romanPart, labelCenterX, labelMidY);
+          }
+        }
+
+        ctx.restore();
+      } catch(_eChordOverlay) {}
+    })();
+
     var showBands = ui.showBands ? !!ui.showBands.checked : true;
     var showCandles = ui.showCandles ? !!ui.showCandles.checked : false;
 
@@ -1315,9 +1441,16 @@
           // Determine if note is "active" (glowing)
           var isActive = now < noteEv.glowUntil;
           
-          // Colors: soprano = green, bass = blue
-          var baseColor = (noteEv.voice === 'soprano') ? '#7cffc2' : '#7aa7ff';
-          var rgbaBase = (noteEv.voice === 'soprano') ? 'rgba(124, 255, 194,' : 'rgba(122, 167, 255,';
+          // Colors: soprano = green (major/uptrend) or red (minor/downtrend), bass = blue
+          var isMinor = (noteEv.regime === 'DOWNTREND' || noteEv.regime === 'MINOR');
+          var baseColor, rgbaBase;
+          if (noteEv.voice === 'soprano') {
+            baseColor = isMinor ? '#ff6b8a' : '#7cffc2';
+            rgbaBase  = isMinor ? 'rgba(255, 107, 138,' : 'rgba(124, 255, 194,';
+          } else {
+            baseColor = isMinor ? '#b07aff' : '#7aa7ff';
+            rgbaBase  = isMinor ? 'rgba(176, 122, 255,' : 'rgba(122, 167, 255,';
+          }
           
           if(isActive){
             ctx.shadowColor = baseColor;
@@ -1365,9 +1498,11 @@
           // Draw note name label if enabled (e.g., "C4", "G#5")
           if(showNoteLabels && noteEv.midi !== undefined && window._midiToNoteName){
             var noteName = window._midiToNoteName(noteEv.midi);
-            ctx.fillStyle = (noteEv.voice === 'soprano') 
-              ? 'rgba(124, 255, 194, 0.9)' 
-              : 'rgba(122, 167, 255, 0.9)';
+            if (noteEv.voice === 'soprano') {
+              ctx.fillStyle = isMinor ? 'rgba(255, 107, 138, 0.9)' : 'rgba(124, 255, 194, 0.9)';
+            } else {
+              ctx.fillStyle = isMinor ? 'rgba(176, 122, 255, 0.9)' : 'rgba(122, 167, 255, 0.9)';
+            }
             ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';

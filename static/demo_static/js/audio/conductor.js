@@ -29,6 +29,8 @@
     const ensureVoiceSeparation = _am.ensureVoiceSeparation;
     const priceToMidi = _am.priceToMidi;
     const updatePriceRange = _am.updatePriceRange;
+    const getChordLabel = _am.getChordLabel;
+    const getChordComponentPCs = _am.getChordComponentPCs;
     const startVoiceCell = _am.startVoiceCell;
     const executeSopranoRunStep = _am.executeSopranoRunStep;
     const executeWalkingStep = _am.executeWalkingStep;
@@ -54,6 +56,210 @@
     // Track current held notes for extension (module scope)
     let currentSopranoNote = null;
     let currentBassNote = null;
+
+    // ========================================================================
+    // PATTERN OVERRIDE STATE & GENERATOR
+    // ========================================================================
+
+    // Per-voice state for the simple pattern override mode.
+    // Reset in startAudioAnimation(), read by generatePatternNote().
+    const _overrideState = {
+        soprano: { idx: 0, dir: 1, lastProgStep: -1, altToggle: false, altCounter: 0, prevMidi: 72 },
+        bass:    { idx: 0, dir: 1, lastProgStep: -1, altToggle: false, altCounter: 0, prevMidi: 48 }
+    };
+
+    function resetOverrideState() {
+        _overrideState.soprano = { idx: 0, dir: 1, lastProgStep: -1, altToggle: false, altCounter: 0, prevMidi: 72 };
+        _overrideState.bass    = { idx: 0, dir: 1, lastProgStep: -1, altToggle: false, altCounter: 0, prevMidi: 48 };
+    }
+
+    /**
+     * Generate a MIDI note using a simple, deterministic pattern.
+     * These are diagnostic/test patterns that bypass the deep pathfinder.
+     *
+     * @param {'soprano'|'bass'} voice
+     * @param {string} pattern       - Pattern key from the dropdown
+     * @param {number[]} scalePool   - Sorted scale notes in voice range
+     * @param {number[]} chordPool   - Sorted chord tones in voice range
+     * @param {{root:number, third:number, fifth:number}} chordPCs - Pitch classes
+     * @param {boolean} restartOnChord - Reset index when chord changes
+     * @returns {number} MIDI note
+     */
+    function generatePatternNote(voice, pattern, scalePool, chordPool, chordPCs, restartOnChord) {
+        const os = _overrideState[voice];
+        const currentProgStep = musicState.progressionStep;
+        const chordChanged = (currentProgStep !== os.lastProgStep);
+        os.lastProgStep = currentProgStep;
+
+        // ── Determine the pool for this pattern ──
+        let pool;
+        let isChordPool = false;
+
+        switch (pattern) {
+            case 'scale_asc':
+            case 'scale_asc_desc':
+                pool = scalePool;  // already sorted ascending
+                break;
+            case 'arp_asc':
+            case 'arp_asc_desc':
+            case 'random_chord':
+                pool = chordPool;
+                isChordPool = true;
+                break;
+            case 'scale_arp_alt':
+            case 'scale_arp_alt_ad':
+                pool = os.altToggle ? chordPool : scalePool;
+                isChordPool = os.altToggle;
+                break;
+            case 'root_only': {
+                // Filter to root pitch class only
+                const roots = chordPool.filter(n => n % 12 === chordPCs.root);
+                pool = roots.length > 0 ? roots : chordPool;
+                isChordPool = true;
+                break;
+            }
+            case 'root_3rd_5th':
+                pool = chordPool;
+                isChordPool = true;
+                break;
+            default:
+                pool = scalePool;
+        }
+
+        if (!pool || pool.length === 0) return os.prevMidi;
+
+        // ── Handle chord change ──
+        if (chordChanged) {
+            if (restartOnChord) {
+                // Find the chord root in the current pool and reset index there
+                const rootIdx = pool.findIndex(n => n % 12 === chordPCs.root);
+                os.idx = rootIdx !== -1 ? rootIdx : 0;
+                os.dir = 1;
+                if (pattern === 'scale_arp_alt' || pattern === 'scale_arp_alt_ad') {
+                    os.altToggle = false;
+                    os.altCounter = 0;
+                    os.dir = 1;
+                }
+            } else if (isChordPool) {
+                // Pool changed (new chord tones) — snap index to nearest note
+                let bestIdx = 0;
+                let bestDist = Infinity;
+                for (let i = 0; i < pool.length; i++) {
+                    const d = Math.abs(pool[i] - os.prevMidi);
+                    if (d < bestDist) { bestDist = d; bestIdx = i; }
+                }
+                os.idx = bestIdx;
+            }
+        }
+
+        // ── Generate the note ──
+        let midi;
+
+        switch (pattern) {
+            case 'scale_asc':
+            case 'arp_asc':
+            case 'root_only':
+            case 'root_3rd_5th':
+                // Ascending only, wrap at end
+                os.idx = ((os.idx % pool.length) + pool.length) % pool.length;
+                midi = pool[os.idx];
+                os.idx++;
+                break;
+
+            case 'scale_asc_desc':
+            case 'arp_asc_desc':
+                // Ping-pong
+                if (pool.length <= 1) {
+                    midi = pool[0];
+                    break;
+                }
+                os.idx = Math.max(0, Math.min(os.idx, pool.length - 1));
+                midi = pool[os.idx];
+                os.idx += os.dir;
+                if (os.idx >= pool.length) {
+                    os.idx = pool.length - 2;
+                    os.dir = -1;
+                } else if (os.idx < 0) {
+                    os.idx = 1;
+                    os.dir = 1;
+                }
+                break;
+
+            case 'scale_arp_alt':
+                // Ascending in current pool; switch between scale & arpeggio every 4 notes
+                os.idx = ((os.idx % pool.length) + pool.length) % pool.length;
+                midi = pool[os.idx];
+                os.idx++;
+                os.altCounter++;
+                if (os.altCounter >= 4) {
+                    os.altToggle = !os.altToggle;
+                    os.altCounter = 0;
+                    // Snap index into the new pool
+                    const newPool = os.altToggle ? chordPool : scalePool;
+                    if (newPool && newPool.length > 0) {
+                        let bi = 0;
+                        let bd = Infinity;
+                        for (let i = 0; i < newPool.length; i++) {
+                            const d = Math.abs(newPool[i] - midi);
+                            if (d < bd) { bd = d; bi = i; }
+                        }
+                        os.idx = bi;
+                    }
+                }
+                break;
+
+            case 'scale_arp_alt_ad':
+                // Like scale_arp_alt but flips direction (asc↔desc) on each pool switch
+                // Cycle: scale ascending → arpeggio descending → scale ascending → ...
+                if (pool.length <= 1) {
+                    midi = pool[0] || os.prevMidi;
+                } else {
+                    os.idx = Math.max(0, Math.min(os.idx, pool.length - 1));
+                    midi = pool[os.idx];
+                    os.idx += os.dir;
+                    // Bounce at pool edges (prevents note repeats from clamping)
+                    if (os.idx >= pool.length) {
+                        os.idx = pool.length - 2;
+                        os.dir = -1;
+                    } else if (os.idx < 0) {
+                        os.idx = 1;
+                        os.dir = 1;
+                    }
+                }
+                os.altCounter++;
+                if (os.altCounter >= 4) {
+                    os.altToggle = !os.altToggle;
+                    os.dir = -os.dir;  // Flip primary direction on each pool switch
+                    os.altCounter = 0;
+                    const newPool2 = os.altToggle ? chordPool : scalePool;
+                    if (newPool2 && newPool2.length > 1) {
+                        // Snap to nearest note in new pool
+                        let bi2 = 0;
+                        let bd2 = Infinity;
+                        for (let i = 0; i < newPool2.length; i++) {
+                            const d = Math.abs(newPool2[i] - midi);
+                            if (d < bd2) { bd2 = d; bi2 = i; }
+                        }
+                        // Step past the snap point so the first note of the new phase
+                        // is different from the last note of the previous phase
+                        os.idx = bi2 + os.dir;
+                        if (os.idx >= newPool2.length) os.idx = newPool2.length - 2;
+                        if (os.idx < 0) os.idx = 1;
+                    }
+                }
+                break;
+
+            case 'random_chord':
+                midi = pool[Math.floor(Math.random() * pool.length)];
+                break;
+
+            default:
+                midi = pool[0];
+        }
+
+        os.prevMidi = midi;
+        return midi;
+    }
 
     // ========================================================================
     // ANIMATION LOOP
@@ -117,6 +323,8 @@
         musicState._prevSopranoPrice = null;
         musicState._prevBassPrice = null;
         musicState.progressionStep = 0;
+        window._audioChordEvents = [];  // Reset chord overlay events
+        resetOverrideState();           // Reset pattern override state
         musicState.prevBarClose = null;
         musicState.consecutiveDownBars = 0;
         musicState.consecutiveUpBars = 0;
@@ -196,8 +404,9 @@
             state.followLatest = audioState._originalFollowLatest;
         }
         
-        // Clear playhead
+        // Clear playhead and chord overlay
         window._audioPlayheadIndex = -1;
+        window._audioChordEvents = [];
         audioState._smoothPosition = 0;
         if (typeof window.requestDraw === 'function') {
             window.requestDraw('audio_stop');
@@ -375,6 +584,9 @@
         if (subStepInBar === 0) {
             updateRegimeFromPrice(barData.c);
             advanceProgression();
+
+            // Emit chord event for visual overlay
+            emitChordEvent(barIndex);
             
             // Refresh viewport price range every bar for tight wick-hugging
             updateVisiblePriceRange();
@@ -416,132 +628,114 @@
         let sopranoMidi = musicState.prevSoprano || 72;
         
         if (audioState.upperWick.enabled && shouldPlaySoprano) {
-            const vs = musicState.soprano;
-            const rawTarget = priceToMidi(barData.h, 'soprano');
-            const targetMidi = rawTarget !== null 
-                ? nearestScaleNote(rawTarget, sopranoScalePool, 24)
-                : musicState.prevSoprano || 72;
-            
-            // Update target (allows mid-cell target drift)
-            vs.runTargetNote = targetMidi;
-            
-            if (vs.runStepsRemaining > 0) {
-                // ── CONTINUE CURRENT CELL (no interference — let the cell breathe) ──
-                sopranoMidi = executeSopranoRunStep(sopranoScalePool, sopranoChordPool);
-                vs.runStepsRemaining--;
-                // Only abort mid-cell for EXTREME drift (more than double the normal threshold)
-                // This lets scale runs develop their full melodic phrase
-                const extremeDrift = Math.abs(sopranoMidi - targetMidi) > 18;
-                if (extremeDrift) {
-                    vs.runStepsRemaining = 0;
-                }
-            } else {
-                // ══════════════════════════════════════════════════════════════
-                // PATHFINDER CELL SELECTION — the core algorithm from the notes:
-                //   Distance > 4 semitones from wick → SCALE RUN (walk toward target)
-                //   Distance ≤ 4 semitones from wick → ORBIT (dance around target)
-                //   Complexity slider controls chance of INTERRUPTION (genre ornaments)
-                // ══════════════════════════════════════════════════════════════
-                const pattern = detectMelodicPattern(musicState.sopranoHistory);
-                const prev = musicState.prevSoprano || 72;
-                const distance = Math.abs(targetMidi - prev);
-                const direction = targetMidi >= prev ? 1 : -1;
+            // ── PATTERN OVERRIDE: deterministic test patterns bypass the pathfinder ──
+            if (audioState.upperWick.patternOverride) {
+                const chordPCs = getChordComponentPCs();
+                sopranoMidi = generatePatternNote('soprano', audioState.upperWick.pattern,
+                    sopranoScalePool, sopranoChordPool, chordPCs, audioState.upperWick.restartOnChord);
+            }
+            // ── DEEP PATHFINDER (Complexity / Melodic Range controlled) ──
+            else {
+                const vs = musicState.soprano;
+                const rawTarget = priceToMidi(barData.h, 'soprano');
+                const targetMidi = rawTarget !== null 
+                    ? nearestScaleNote(rawTarget, sopranoScalePool, 24)
+                    : musicState.prevSoprano || 72;
                 
-                let cellType;
+                // Update target (allows mid-cell target drift)
+                vs.runTargetNote = targetMidi;
                 
-                // PRIORITY 1: Break out of stuck/trill patterns
-                if (pattern === 'stuck') {
-                    cellType = 'leap_fill';
-                } else if (pattern === 'trill') {
-                    cellType = 'sequence';
-                }
-                // PRIORITY 2: Distance-based pathfinding (the core "Pathfinder" logic)
-                // Far from wick (> 4 semitones): MUST travel there via scale run
-                // This is what creates the audible scale passages in the selected genre
-                else if (distance > 4) {
-                    // Scale run is the PRIMARY tool for traveling to the wick
-                    // Complexity adds a chance of interruption with other cell types
-                    const interruptChance = complexity * 0.3; // 0% at complexity=0, 30% at complexity=1
-                    if (Math.random() < interruptChance) {
-                        // Stochastic interruption: use a "traveling" cell type instead
-                        const roll = Math.random();
-                        if (roll < 0.4)       cellType = 'leap_fill';     // Leap toward + fill
-                        else if (roll < 0.7)  cellType = 'sequence';      // Undulating approach
-                        else                  cellType = 'chord_skip';    // Harmonic leap + step
-                    } else {
-                        cellType = 'scale_run';  // DEFAULT: walk toward wick via scale degrees
+                if (vs.runStepsRemaining > 0) {
+                    // ── CONTINUE CURRENT CELL (no interference — let the cell breathe) ──
+                    sopranoMidi = executeSopranoRunStep(sopranoScalePool, sopranoChordPool);
+                    vs.runStepsRemaining--;
+                    const extremeDrift = Math.abs(sopranoMidi - targetMidi) > 18;
+                    if (extremeDrift) {
+                        vs.runStepsRemaining = 0;
                     }
-                }
-                // PRIORITY 3: Near the wick (≤ 4 semitones): ORBIT/dance around it
-                // This is the "wick-hugging" behavior — melody dances around the price level
-                else {
-                    // Complexity controls the palette of orbit-like patterns
-                    const interruptChance = complexity * 0.4; // More interruption variety near target
-                    if (Math.random() < interruptChance) {
-                        // Stochastic interruption with genre-flavored patterns
-                        const roll = Math.random();
-                        if (roll < 0.3)       cellType = 'arpeggio';     // Chord tone cycle
-                        else if (roll < 0.55) cellType = 'enclosure';    // Above-below-target
-                        else if (roll < 0.75) cellType = 'sequence';     // Overlapping groups
-                        else                  cellType = 'chord_skip';   // Leap + connect
+                } else {
+                    // ══════════════════════════════════════════════════════════════
+                    // PATHFINDER CELL SELECTION — the core algorithm:
+                    //   Distance > 4 semitones from wick → SCALE RUN
+                    //   Distance ≤ 4 semitones from wick → ORBIT
+                    //   Complexity slider controls chance of INTERRUPTION
+                    // ══════════════════════════════════════════════════════════════
+                    const pattern = detectMelodicPattern(musicState.sopranoHistory);
+                    const prev = musicState.prevSoprano || 72;
+                    const distance = Math.abs(targetMidi - prev);
+                    const direction = targetMidi >= prev ? 1 : -1;
+                    
+                    let cellType;
+                    
+                    if (pattern === 'stuck') {
+                        cellType = 'leap_fill';
+                    } else if (pattern === 'trill') {
+                        cellType = 'sequence';
+                    } else if (distance > 4) {
+                        const interruptChance = complexity * 0.3;
+                        if (Math.random() < interruptChance) {
+                            const roll = Math.random();
+                            if (roll < 0.4)       cellType = 'leap_fill';
+                            else if (roll < 0.7)  cellType = 'sequence';
+                            else                  cellType = 'chord_skip';
+                        } else {
+                            cellType = 'scale_run';
+                        }
                     } else {
-                        cellType = 'orbit';  // DEFAULT: dance around the wick target
+                        const interruptChance = complexity * 0.4;
+                        if (Math.random() < interruptChance) {
+                            const roll = Math.random();
+                            if (roll < 0.3)       cellType = 'arpeggio';
+                            else if (roll < 0.55) cellType = 'enclosure';
+                            else if (roll < 0.75) cellType = 'sequence';
+                            else                  cellType = 'chord_skip';
+                        } else {
+                            cellType = 'orbit';
+                        }
                     }
+                    
+                    if (cellType === vs.lastCellType && complexity > 0.15) {
+                        const nearAlts = ['orbit', 'arpeggio', 'enclosure', 'sequence'];
+                        const farAlts = ['scale_run', 'leap_fill', 'sequence', 'chord_skip'];
+                        const alternatives = distance > 4 ? farAlts : nearAlts;
+                        const filtered = alternatives.filter(t => t !== cellType);
+                        cellType = filtered[Math.floor(Math.random() * filtered.length)];
+                    }
+                    
+                    vs.lastCellType = cellType;
+                    vs.direction = direction;
+                    vs.enclosurePhase = 0;
+                    
+                    if (cellType === 'sequence') {
+                        const sortedPool = [...sopranoScalePool].sort((a, b) => a - b);
+                        const curIdx = sortedPool.findIndex(n => Math.abs(n - prev) <= 2);
+                        vs.sequenceBase = curIdx !== -1 ? curIdx : Math.floor(sortedPool.length / 2);
+                    }
+                    
+                    startVoiceCell('soprano', cellType, targetMidi, sopranoScalePool, sopranoChordPool);
+                    sopranoMidi = executeSopranoRunStep(sopranoScalePool, sopranoChordPool);
+                    vs.runStepsRemaining--;
                 }
                 
-                // Prevent same cell type twice in a row (diversity guarantee)
-                if (cellType === vs.lastCellType && complexity > 0.15) {
-                    // Pick appropriate alternative based on distance
-                    const nearAlts = ['orbit', 'arpeggio', 'enclosure', 'sequence'];
-                    const farAlts = ['scale_run', 'leap_fill', 'sequence', 'chord_skip'];
-                    const alternatives = distance > 4 ? farAlts : nearAlts;
-                    const filtered = alternatives.filter(t => t !== cellType);
-                    cellType = filtered[Math.floor(Math.random() * filtered.length)];
+                // Genre-specific complexity: BEAT-GATED interruptions only
+                const isMidCell = musicState.soprano.runStepsRemaining > 0 && musicState.soprano.runStepsRemaining < (musicState.soprano.cellSize - 1);
+                const isRunOrOrbit = (musicState.soprano.runMode === 'scale_run' || musicState.soprano.runMode === 'orbit');
+                if (!isMidCell || !isRunOrOrbit) {
+                    sopranoMidi = applyGenreComplexity(sopranoMidi, sopranoScalePool, sopranoChordPool, subStepInBar, 'soprano');
                 }
                 
-                vs.lastCellType = cellType;
-                vs.direction = direction;
-                vs.enclosurePhase = 0;
-                
-                // Set sequence base index relative to current position in pool
-                if (cellType === 'sequence') {
-                    const sortedPool = [...sopranoScalePool].sort((a, b) => a - b);
-                    const curIdx = sortedPool.findIndex(n => Math.abs(n - prev) <= 2);
-                    vs.sequenceBase = curIdx !== -1 ? curIdx : Math.floor(sortedPool.length / 2);
+                // Wick gravity: SAFETY NET only for extreme drift
+                const sopranoDrift = Math.abs(sopranoMidi - targetMidi);
+                if (sopranoDrift > 14) {
+                    sopranoMidi = applyWickGravity(sopranoMidi, targetMidi, sopranoScalePool, 'soprano');
                 }
-                
-                startVoiceCell('soprano', cellType, targetMidi, sopranoScalePool, sopranoChordPool);
-                sopranoMidi = executeSopranoRunStep(sopranoScalePool, sopranoChordPool);
-                vs.runStepsRemaining--;
             }
             
-            // Genre-specific complexity: BEAT-GATED interruptions only
-            // Only apply on specific beat positions (weak beats) and ONLY when between cells
-            // or at cell boundaries — NOT during the middle of a scale run (which would break it)
-            const isMidCell = vs.runStepsRemaining > 0 && vs.runStepsRemaining < (vs.cellSize - 1);
-            const isRunOrOrbit = (vs.runMode === 'scale_run' || vs.runMode === 'orbit');
-            if (!isMidCell || !isRunOrOrbit) {
-                // Safe to apply genre ornaments — we're at a cell boundary or in a non-directional cell
-                sopranoMidi = applyGenreComplexity(sopranoMidi, sopranoScalePool, sopranoChordPool, subStepInBar, 'soprano');
-            }
-            
-            // Wick gravity: SAFETY NET only (not a constant pull)
-            // Only activate for extreme drift — the cell system handles normal wick-tracking
-            const sopranoDrift = Math.abs(sopranoMidi - targetMidi);
-            if (sopranoDrift > 14) {
-                sopranoMidi = applyWickGravity(sopranoMidi, targetMidi, sopranoScalePool, 'soprano');
-            }
-            
-            // Clamp to range
+            // ── COMMON: clamp, history, trigger, emit ──
             sopranoMidi = Math.max(sopranoRange.min, Math.min(sopranoRange.max, sopranoMidi));
-            
-            // Update history
             updateSopranoHistory(sopranoMidi);
             
-            // Calculate note duration
             const sopranoDurationMs = sopranoInterval * SUB_STEP_SECONDS * 1000;
-            
-            // Trigger audio
             if (audioState._sopranoSampler) {
                 const noteFreq = Tone.Frequency(sopranoMidi, 'midi').toNote();
                 const toneDuration = rhythmToDuration(audioState.upperWick.rhythm);
@@ -549,8 +743,6 @@
                     audioState._sopranoSampler.triggerAttackRelease(noteFreq, toneDuration, now, 0.7);
                 } catch (e) {}
             }
-            
-            // Emit visual event
             emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow);
             musicState.prevSoprano = sopranoMidi;
         }
@@ -563,104 +755,98 @@
         let bassMidi = musicState.prevBass || 48;
         
         if (audioState.lowerWick.enabled && shouldPlayBass) {
-            const vb = musicState.bass;
-            const rawTarget = priceToMidi(barData.l, 'bass');
-            const targetMidi = rawTarget !== null
-                ? nearestScaleNote(rawTarget, bassScalePool, 24)
-                : musicState.prevBass || 48;
-            
-            // Update target
-            vb.runTargetNote = targetMidi;
-            
-            if (vb.runStepsRemaining > 0) {
-                // ── CONTINUE CURRENT CELL (let walking bass pattern complete) ──
-                bassMidi = executeWalkingStep(bassScalePool, bassChordPool);
-                vb.runStepsRemaining--;
-                // Only abort for extreme drift (bass is more stable, wider threshold)
-                const extremeDrift = Math.abs(bassMidi - targetMidi) > 20;
-                if (extremeDrift) {
-                    vb.runStepsRemaining = 0;
-                }
-            } else {
-                // ══════════════════════════════════════════════════════════════
-                // BASS PATHFINDER — same distance-based logic as soprano:
-                //   Distance > 5 semitones → WALK toward target (root/4th/5th pattern)
-                //   Distance ≤ 5 semitones → ARPEGGIO around target (chord-tone stability)
-                //   Complexity adds chromatic approaches and pattern variety
-                // ══════════════════════════════════════════════════════════════
-                const pattern = detectMelodicPattern(musicState.bassHistory);
-                const prev = musicState.prevBass || 48;
-                const distance = Math.abs(targetMidi - prev);
-                const direction = targetMidi >= prev ? 1 : -1;
+            // ── PATTERN OVERRIDE: deterministic test patterns bypass the pathfinder ──
+            if (audioState.lowerWick.patternOverride) {
+                const chordPCs = getChordComponentPCs();
+                bassMidi = generatePatternNote('bass', audioState.lowerWick.pattern,
+                    bassScalePool, bassChordPool, chordPCs, audioState.lowerWick.restartOnChord);
+            }
+            // ── DEEP PATHFINDER (Complexity / Melodic Range controlled) ──
+            else {
+                const vb = musicState.bass;
+                const rawTarget = priceToMidi(barData.l, 'bass');
+                const targetMidi = rawTarget !== null
+                    ? nearestScaleNote(rawTarget, bassScalePool, 24)
+                    : musicState.prevBass || 48;
                 
-                let cellType;
+                vb.runTargetNote = targetMidi;
                 
-                // PRIORITY 1: Break stuck patterns
-                if (pattern === 'stuck') {
-                    cellType = 'chromatic_approach';
-                } else if (pattern === 'trill') {
-                    cellType = 'arpeggio';
-                }
-                // PRIORITY 2: Distance-based pathfinding
-                // Far from wick (> 5 semitones): walk toward it
-                else if (distance > 5) {
-                    const interruptChance = complexity * 0.25;
-                    if (Math.random() < interruptChance) {
-                        cellType = 'chromatic_approach';  // Chromatic walk adds flavor
-                    } else {
-                        cellType = direction > 0 ? 'walk_up' : 'walk_down';
+                if (vb.runStepsRemaining > 0) {
+                    bassMidi = executeWalkingStep(bassScalePool, bassChordPool);
+                    vb.runStepsRemaining--;
+                    const extremeDrift = Math.abs(bassMidi - targetMidi) > 20;
+                    if (extremeDrift) {
+                        vb.runStepsRemaining = 0;
                     }
-                }
-                // Near the wick (≤ 5 semitones): arpeggio/chord-tone stability
-                else {
-                    const interruptChance = complexity * 0.3;
-                    if (Math.random() < interruptChance) {
-                        const roll = Math.random();
-                        if (roll < 0.5) cellType = 'chromatic_approach';
-                        else            cellType = direction > 0 ? 'walk_up' : 'walk_down';
+                } else {
+                    // ══════════════════════════════════════════════════════════════
+                    // BASS PATHFINDER — distance-based logic:
+                    //   Distance > 5 semitones → WALK toward target
+                    //   Distance ≤ 5 semitones → ARPEGGIO around target
+                    //   Complexity adds chromatic approaches and pattern variety
+                    // ══════════════════════════════════════════════════════════════
+                    const pattern = detectMelodicPattern(musicState.bassHistory);
+                    const prev = musicState.prevBass || 48;
+                    const distance = Math.abs(targetMidi - prev);
+                    const direction = targetMidi >= prev ? 1 : -1;
+                    
+                    let cellType;
+                    
+                    if (pattern === 'stuck') {
+                        cellType = 'chromatic_approach';
+                    } else if (pattern === 'trill') {
+                        cellType = 'arpeggio';
+                    } else if (distance > 5) {
+                        const interruptChance = complexity * 0.25;
+                        if (Math.random() < interruptChance) {
+                            cellType = 'chromatic_approach';
+                        } else {
+                            cellType = direction > 0 ? 'walk_up' : 'walk_down';
+                        }
                     } else {
-                        cellType = 'arpeggio';  // DEFAULT: chord-tone stability near wick
+                        const interruptChance = complexity * 0.3;
+                        if (Math.random() < interruptChance) {
+                            const roll = Math.random();
+                            if (roll < 0.5) cellType = 'chromatic_approach';
+                            else            cellType = direction > 0 ? 'walk_up' : 'walk_down';
+                        } else {
+                            cellType = 'arpeggio';
+                        }
                     }
+                    
+                    if (cellType === vb.lastCellType && complexity > 0.15) {
+                        const bassAlts = ['arpeggio', 'walk_up', 'walk_down', 'chromatic_approach'];
+                        const filtered = bassAlts.filter(t => t !== cellType);
+                        cellType = filtered[Math.floor(Math.random() * filtered.length)];
+                    }
+                    
+                    vb.lastCellType = cellType;
+                    vb.direction = direction;
+                    
+                    startVoiceCell('bass', cellType, targetMidi, bassScalePool, bassChordPool);
+                    bassMidi = executeWalkingStep(bassScalePool, bassChordPool);
+                    vb.runStepsRemaining--;
                 }
                 
-                // Prevent same bass cell type twice in a row
-                if (cellType === vb.lastCellType && complexity > 0.15) {
-                    const bassAlts = ['arpeggio', 'walk_up', 'walk_down', 'chromatic_approach'];
-                    const filtered = bassAlts.filter(t => t !== cellType);
-                    cellType = filtered[Math.floor(Math.random() * filtered.length)];
+                // Genre complexity for bass: beat-gated
+                const bassMidCell = musicState.bass.runStepsRemaining > 0 && musicState.bass.runStepsRemaining < (musicState.bass.cellSize - 1);
+                const bassIsWalking = (musicState.bass.runMode === 'walk_up' || musicState.bass.runMode === 'walk_down');
+                if (!bassMidCell || !bassIsWalking) {
+                    bassMidi = applyGenreComplexity(bassMidi, bassScalePool, bassChordPool, subStepInBar, 'bass');
                 }
                 
-                vb.lastCellType = cellType;
-                vb.direction = direction;
-                
-                startVoiceCell('bass', cellType, targetMidi, bassScalePool, bassChordPool);
-                bassMidi = executeWalkingStep(bassScalePool, bassChordPool);
-                vb.runStepsRemaining--;
+                // Wick gravity: SAFETY NET only for extreme drift
+                const bassDrift = Math.abs(bassMidi - targetMidi);
+                if (bassDrift > 16) {
+                    bassMidi = applyWickGravity(bassMidi, targetMidi, bassScalePool, 'bass');
+                }
             }
             
-            // Genre complexity for bass: beat-gated, don't interrupt mid-walking-pattern
-            const bassMidCell = vb.runStepsRemaining > 0 && vb.runStepsRemaining < (vb.cellSize - 1);
-            const bassIsWalking = (vb.runMode === 'walk_up' || vb.runMode === 'walk_down');
-            if (!bassMidCell || !bassIsWalking) {
-                bassMidi = applyGenreComplexity(bassMidi, bassScalePool, bassChordPool, subStepInBar, 'bass');
-            }
-            
-            // Wick gravity: SAFETY NET only for extreme drift
-            const bassDrift = Math.abs(bassMidi - targetMidi);
-            if (bassDrift > 16) {
-                bassMidi = applyWickGravity(bassMidi, targetMidi, bassScalePool, 'bass');
-            }
-            
-            // Clamp to range
+            // ── COMMON: clamp, history, trigger, emit ──
             bassMidi = Math.max(bassRange.min, Math.min(bassRange.max, bassMidi));
-            
-            // Update history
             updateBassHistory(bassMidi);
             
-            // Calculate note duration
             const bassDurationMs = bassInterval * SUB_STEP_SECONDS * 1000;
-            
-            // Trigger audio
             if (audioState._bassSampler) {
                 const noteFreq = Tone.Frequency(bassMidi, 'midi').toNote();
                 const toneDuration = rhythmToDuration(audioState.lowerWick.rhythm);
@@ -668,8 +854,6 @@
                     audioState._bassSampler.triggerAttackRelease(noteFreq, toneDuration, now, 0.7);
                 } catch (e) {}
             }
-            
-            // Emit visual event
             emitSubStepNote('bass', bassMidi, barData.l, preciseBarIndex, bassDurationMs, perfNow);
             musicState.prevBass = bassMidi;
         }
@@ -686,8 +870,11 @@
         if (subStepInBar === 0) {
             const sopranoName = musicState.prevSoprano ? midiToNoteName(musicState.prevSoprano) : '--';
             const bassName = musicState.prevBass ? midiToNoteName(musicState.prevBass) : '--';
-            const cellInfo = musicState.soprano.runMode ? ` [${musicState.soprano.runMode}]` : '';
-            updateStatus(`${regime}${cellInfo} | ${sopranoName} / ${bassName}`);
+            const sopInfo = audioState.upperWick.patternOverride
+                ? ` [OVR:${audioState.upperWick.pattern}]`
+                : (musicState.soprano.runMode ? ` [${musicState.soprano.runMode}]` : '');
+            const bassInfo = audioState.lowerWick.patternOverride ? ' OVR' : '';
+            updateStatus(`${regime}${sopInfo} | ${sopranoName} / ${bassName}${bassInfo}`);
         }
     }
 
@@ -717,6 +904,7 @@
             midi: midi,
             price: price,
             barIndex: barIndex,
+            regime: musicState.regime,  // UPTREND (major) or DOWNTREND (minor) at emission time
             rhythm: rhythm,     // '1'=whole, '2'=half, '4'=quarter, '8'=eighth, '16'=sixteenth
             time: startTime,
             endTime: startTime + durationMs,
@@ -748,6 +936,7 @@
             midi: midi,
             price: price,
             barIndex: barIndex,
+            regime: musicState.regime,  // UPTREND (major) or DOWNTREND (minor) at emission time
             rhythm: rhythm,     // '1'=whole, '2'=half, '4'=quarter, '8'=eighth, '16'=sixteenth
             time: now,
             endTime: now + durationMs,
@@ -758,6 +947,45 @@
         // Keep up to 300 events for trail
         while (window._audioNoteEvents.length > 300) {
             window._audioNoteEvents.shift();
+        }
+    }
+
+    // ========================================================================
+    // CHORD EVENT EMISSION (for visual chord overlay)
+    // ========================================================================
+
+    /**
+     * Emit a chord event at a bar boundary for the chord progression overlay.
+     * Only emits when the chord degree changes (to define chord regions).
+     * Stores events on window._audioChordEvents for the renderer to consume.
+     */
+    function emitChordEvent(barIndex) {
+        if (!window._audioChordEvents) window._audioChordEvents = [];
+
+        var info = getChordLabel(musicState.progressionStep);
+        var events = window._audioChordEvents;
+
+        // Only push a new entry when the chord actually changes (or first event)
+        var last = events.length > 0 ? events[events.length - 1] : null;
+        if (last && last.degree === info.degree) {
+            // Same chord — just extend the region's end bar
+            last.endBarIndex = barIndex;
+        } else {
+            events.push({
+                startBarIndex: barIndex,
+                endBarIndex: barIndex,
+                degree: info.degree,
+                roman: info.roman,
+                noteName: info.noteName,
+                quality: info.quality,
+                label: info.label,
+                progressionStep: musicState.progressionStep
+            });
+        }
+
+        // Cap to reasonable size (keep last ~200 chord regions)
+        while (events.length > 200) {
+            events.shift();
         }
     }
 

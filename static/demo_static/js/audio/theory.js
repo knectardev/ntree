@@ -447,10 +447,112 @@
     }
 
     /**
+     * Get the pitch classes (0-11) of the current chord's root, third, and fifth.
+     * Used by the pattern override generators to identify chord components.
+     * @returns {{root: number, third: number, fifth: number}}
+     */
+    function getChordComponentPCs() {
+        const progressionKey = audioState.chordProgression || 'canon';
+        const progression = CHORD_PROGRESSIONS[progressionKey] || CHORD_PROGRESSIONS.canon;
+        const chordRegime = (musicState.regime === 'DOWNTREND' || musicState.regime === 'MINOR') ? 'MINOR' : 'MAJOR';
+        const degree = progression[chordRegime][musicState.progressionStep % 16];
+        const chordMap = chordRegime === 'MAJOR' ? CHORD_MAP_MAJOR : CHORD_MAP_MINOR;
+        const intervals = chordMap[degree] || [0, 4, 7];
+        return {
+            root: (musicState.rootMidi + intervals[0]) % 12,
+            third: (musicState.rootMidi + intervals[1]) % 12,
+            fifth: (musicState.rootMidi + intervals[2]) % 12
+        };
+    }
+
+    /**
      * Advance the chord progression by one step
      */
     function advanceProgression() {
         musicState.progressionStep = (musicState.progressionStep + 1) % 16;
+    }
+
+    // ========================================================================
+    // CHORD LABEL HELPERS (for visual overlay)
+    // ========================================================================
+
+    // Roman numeral names per degree for major/minor keys
+    const DEGREE_NAMES_MAJOR = { 1: 'I', 2: 'ii', 3: 'iii', 4: 'IV', 5: 'V', 6: 'vi', 7: 'vii\u00B0' };
+    const DEGREE_NAMES_MINOR = { 1: 'i', 2: 'ii\u00B0', 3: 'III', 4: 'iv', 5: 'v', 6: 'VI', 7: 'VII' };
+
+    // Root interval (semitones from key root) for each scale degree
+    const ROOT_INTERVALS_MAJOR = { 1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11 };
+    const ROOT_INTERVALS_MINOR = { 1: 0, 2: 2, 3: 3, 4: 5, 5: 7, 6: 8, 7: 10 };
+
+    // Chord quality per degree (for display: '' = major, 'min' = minor, 'dim' = diminished)
+    const DEGREE_QUALITY_MAJOR = { 1: '', 2: 'min', 3: 'min', 4: '', 5: '', 6: 'min', 7: 'dim' };
+    const DEGREE_QUALITY_MINOR = { 1: 'min', 2: 'dim', 3: '', 4: 'min', 5: 'min', 6: '', 7: '' };
+
+    const NOTE_NAMES_SHARP = ['C', 'C\u266F', 'D', 'D\u266F', 'E', 'F', 'F\u266F', 'G', 'G\u266F', 'A', 'A\u266F', 'B'];
+
+    /**
+     * Get a human-readable chord label for a given progression step.
+     * Returns { roman, noteName, quality, label } e.g. { roman:'V', noteName:'G', quality:'', label:'V (G)' }
+     * @param {number} stepIndex - Progression step (0-15)
+     * @param {string} [progressionKey] - Progression name (defaults to audioState.chordProgression)
+     * @param {string} [regime] - 'UPTREND'/'DOWNTREND' (defaults to musicState.regime)
+     * @returns {object} Chord info object
+     */
+    function getChordLabel(stepIndex, progressionKey, regime) {
+        progressionKey = progressionKey || audioState.chordProgression || 'canon';
+        regime = regime || musicState.regime || 'UPTREND';
+
+        const progression = CHORD_PROGRESSIONS[progressionKey] || CHORD_PROGRESSIONS.canon;
+        const chordRegime = (regime === 'DOWNTREND' || regime === 'MINOR') ? 'MINOR' : 'MAJOR';
+        const degree = progression[chordRegime][stepIndex % 16];
+
+        const roman = (chordRegime === 'MAJOR' ? DEGREE_NAMES_MAJOR : DEGREE_NAMES_MINOR)[degree] || String(degree);
+        const rootInterval = (chordRegime === 'MAJOR' ? ROOT_INTERVALS_MAJOR : ROOT_INTERVALS_MINOR)[degree] || 0;
+        const quality = (chordRegime === 'MAJOR' ? DEGREE_QUALITY_MAJOR : DEGREE_QUALITY_MINOR)[degree] || '';
+
+        const rootMidi = musicState.rootMidi || 60;
+        const notePitchClass = (rootMidi + rootInterval) % 12;
+        const noteName = NOTE_NAMES_SHARP[notePitchClass] || '?';
+
+        // Build label: "V (G)" or "vi (A min)" or "vii° (B dim)"
+        const qualitySuffix = quality ? ' ' + quality : '';
+        const label = roman + ' (' + noteName + qualitySuffix + ')';
+
+        return { degree: degree, roman: roman, noteName: noteName, quality: quality, label: label };
+    }
+
+    /**
+     * Get the full 16-step chord sequence for the current progression settings.
+     * Returns an array of { stepIndex, degree, label, ... } objects.
+     * Adjacent steps with the same degree are grouped so the renderer can draw
+     * chord regions (start bar → end bar) rather than per-step lines.
+     *
+     * @param {string} [progressionKey]
+     * @param {string} [regime]
+     * @returns {Array<{startStep:number, endStep:number, degree:number, label:string, roman:string, noteName:string, quality:string}>}
+     */
+    function getChordSequence(progressionKey, regime) {
+        const regions = [];
+        var prev = null;
+        for (var i = 0; i < 16; i++) {
+            var info = getChordLabel(i, progressionKey, regime);
+            if (prev && prev.degree === info.degree) {
+                // extend current region
+                prev.endStep = i;
+            } else {
+                prev = {
+                    startStep: i,
+                    endStep: i,
+                    degree: info.degree,
+                    roman: info.roman,
+                    noteName: info.noteName,
+                    quality: info.quality,
+                    label: info.label
+                };
+                regions.push(prev);
+            }
+        }
+        return regions;
     }
 
     // ========================================================================
@@ -472,4 +574,7 @@
     _am.forceNoteDifferenceStrict = forceNoteDifferenceStrict;
     _am.ensureVoiceSeparation = ensureVoiceSeparation;
     _am.advanceProgression = advanceProgression;
+    _am.getChordComponentPCs = getChordComponentPCs;
+    _am.getChordLabel = getChordLabel;
+    _am.getChordSequence = getChordSequence;
 })();

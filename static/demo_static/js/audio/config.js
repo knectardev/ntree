@@ -245,7 +245,7 @@
     // Each genre has two scales: one for uptrend, one for downtrend
     const GENRES = {
         classical: {
-            label: "Classical / Baroque",
+            label: "Major / Natural Minor",
             scales: { 
                 UPTREND: [0, 2, 4, 5, 7, 9, 11],   // Major (Ionian)
                 DOWNTREND: [0, 2, 3, 5, 7, 8, 10]  // Natural Minor (Aeolian)
@@ -257,7 +257,7 @@
             }
         },
         indian_raags: {
-            label: "Indian Raags",
+            label: "Lydian / Phrygian (Raag)",
             scales: { 
                 UPTREND: [0, 2, 4, 6, 7, 9, 11],   // Yaman (Lydian-like)
                 DOWNTREND: [0, 1, 3, 5, 7, 8, 10]  // Bhairavi (Phrygian-like)
@@ -269,7 +269,7 @@
             }
         },
         jazz: {
-            label: "Jazz Bebop",
+            label: "Dorian / Altered",
             scales: { 
                 UPTREND: [0, 2, 3, 5, 7, 9, 10],   // Dorian
                 DOWNTREND: [0, 1, 3, 4, 6, 8, 10]  // Altered (Super Locrian)
@@ -281,10 +281,10 @@
             }
         },
         rock_bluegrass: {
-            label: "Rock / Bluegrass",
+            label: "Pentatonic (Major / Minor)",
             scales: { 
-                UPTREND: [0, 2, 4, 5, 7, 9, 10],   // Mixolydian
-                DOWNTREND: [0, 2, 4, 7, 9]         // Major Pentatonic
+                UPTREND: [0, 2, 4, 7, 9],           // Major Pentatonic (C D E G A)
+                DOWNTREND: [0, 3, 5, 7, 10]         // Minor Pentatonic (C Eb F G Bb)
             },
             complexity: {
                 blueNoteChance: 0.15,      // Add blue notes (b3, b5, b7)
@@ -293,7 +293,7 @@
             }
         },
         techno_experimental: {
-            label: "Techno / Experimental",
+            label: "Phrygian / Chromatic",
             scales: { 
                 UPTREND: [0, 1, 3, 5, 7, 8, 10],   // Phrygian
                 DOWNTREND: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]  // Chromatic

@@ -81,18 +81,25 @@
             enabled: true,
             volume: -23,
             instrument: 'harpsichord',
-            rhythm: '4'  // Quarter notes
+            rhythm: '4',  // Quarter notes
+            pattern: 'scale_asc',        // Voice pattern: scale_asc, scale_asc_desc, arp_asc, arp_asc_desc, scale_arp_alt, random_chord
+            patternOverride: false,      // When true, pattern overrides the deep pathfinder algorithm
+            restartOnChord: true         // When true, pattern resets to chord root on chord change
         },
         lowerWick: {
             enabled: true,
             volume: -17,
             instrument: 'acoustic_bass',
-            rhythm: '2'  // Half notes
+            rhythm: '2',  // Half notes
+            pattern: 'root_only',        // Voice pattern: root_only, root_3rd_5th
+            patternOverride: false,      // When true, pattern overrides the deep pathfinder algorithm
+            restartOnChord: true         // When true, pattern resets to chord root on chord change
         },
         genre: 'classical',
         rootKey: 'C',           // Root key for scales and chord progressions (C, C#, D, ... B)
         chordProgression: 'canon',
         displayNotes: true,
+        chordOverlay: true,     // Show chord progression overlay on chart
         sensitivity: 0.5,       // Repurposed: Complexity/Stochasticism (0=pure, 1=chaotic)
         melodicRange: 1.0,     // Vertical Zoom: expands/compresses price-to-MIDI mapping
         glowDuration: 3,
@@ -144,6 +151,12 @@
         upperRhythmBtn: document.getElementById('audioUpperRhythmBtn'),
         upperRhythmMenu: document.getElementById('audioUpperRhythmMenu'),
         upperRhythmLabel: document.getElementById('audioUpperRhythmLabel'),
+        sopranoPatternOverrideChk: document.getElementById('audioSopranoPatternOverride'),
+        sopranoRestartOnChordChk: document.getElementById('audioSopranoRestartOnChord'),
+        sopranoPatternDD: document.getElementById('audioSopranoPatternDD'),
+        sopranoPatternBtn: document.getElementById('audioSopranoPatternBtn'),
+        sopranoPatternMenu: document.getElementById('audioSopranoPatternMenu'),
+        sopranoPatternLabel: document.getElementById('audioSopranoPatternLabel'),
 
         // Lower wick
         lowerWickChk: document.getElementById('audioLowerWick'),
@@ -157,6 +170,12 @@
         lowerRhythmBtn: document.getElementById('audioLowerRhythmBtn'),
         lowerRhythmMenu: document.getElementById('audioLowerRhythmMenu'),
         lowerRhythmLabel: document.getElementById('audioLowerRhythmLabel'),
+        bassPatternOverrideChk: document.getElementById('audioBassPatternOverride'),
+        bassRestartOnChordChk: document.getElementById('audioBassRestartOnChord'),
+        bassPatternDD: document.getElementById('audioBassPatternDD'),
+        bassPatternBtn: document.getElementById('audioBassPatternBtn'),
+        bassPatternMenu: document.getElementById('audioBassPatternMenu'),
+        bassPatternLabel: document.getElementById('audioBassPatternLabel'),
 
         // Genre selection
         genreDD: document.getElementById('audioGenreDD'),
@@ -176,6 +195,7 @@
         chordProgressionMenu: document.getElementById('audioChordProgressionMenu'),
         chordProgressionLabel: document.getElementById('audioChordProgressionLabel'),
         displayNotesChk: document.getElementById('audioDisplayNotes'),
+        chordOverlayChk: document.getElementById('audioChordOverlay'),
 
         // Sync tuning sliders
         sensitivity: document.getElementById('audioSensitivity'),

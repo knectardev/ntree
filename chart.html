@@ -157,6 +157,32 @@
                   </div>
                 </div>
               </div>
+              <!-- Soprano voice pattern override -->
+              <div style="margin:0 0 12px 24px;" id="audioSopranoPatternGroup">
+                <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;">
+                  <input id="audioSopranoPatternOverride" type="checkbox" />
+                  <span class="hint" style="opacity:0.6;font-size:11px;">Pattern Override</span>
+                </label>
+                <div class="dd" id="audioSopranoPatternDD" style="width:100%;transition:opacity .15s;">
+                  <button class="ddBtn" id="audioSopranoPatternBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioSopranoPatternLabel">Asc. Scale</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioSopranoPatternMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="scale_asc">Asc. Scale</div>
+                    <div class="ddItem" role="option" data-value="scale_asc_desc">Asc / Desc. Scale</div>
+                    <div class="ddItem" role="option" data-value="arp_asc">Asc. Arpeggio</div>
+                    <div class="ddItem" role="option" data-value="arp_asc_desc">Asc / Desc. Arpeggio</div>
+                    <div class="ddItem" role="option" data-value="scale_arp_alt">Alternating Scale / Arpeggio</div>
+                    <div class="ddItem" role="option" data-value="scale_arp_alt_ad">Alt. Scale / Arp. (Asc/Desc)</div>
+                    <div class="ddItem" role="option" data-value="random_chord">Random from Chord</div>
+                  </div>
+                </div>
+                <label style="display:flex;align-items:center;gap:6px;margin-top:5px;cursor:pointer;">
+                  <input id="audioSopranoRestartOnChord" type="checkbox" checked />
+                  <span class="hint" style="opacity:0.5;font-size:10px;">Restart on chord change</span>
+                </label>
+              </div>
               
               <!-- Lower wick -->
               <label class="chkRow">
@@ -211,29 +237,50 @@
                   </div>
                 </div>
               </div>
+              <!-- Bass voice pattern override -->
+              <div style="margin:0 0 6px 24px;" id="audioBassPatternGroup">
+                <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;">
+                  <input id="audioBassPatternOverride" type="checkbox" />
+                  <span class="hint" style="opacity:0.6;font-size:11px;">Pattern Override</span>
+                </label>
+                <div class="dd" id="audioBassPatternDD" style="width:100%;transition:opacity .15s;">
+                  <button class="ddBtn" id="audioBassPatternBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioBassPatternLabel">Root Only</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioBassPatternMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="root_only">Root Only</div>
+                    <div class="ddItem" role="option" data-value="root_3rd_5th">Root, 3rd &amp; 5th</div>
+                  </div>
+                </div>
+                <label style="display:flex;align-items:center;gap:6px;margin-top:5px;cursor:pointer;">
+                  <input id="audioBassRestartOnChord" type="checkbox" checked />
+                  <span class="hint" style="opacity:0.5;font-size:10px;">Restart on chord change</span>
+                </label>
+              </div>
             </div>
           </details>
 
           <div class="sideDivider"></div>
 
-          <!-- Music and Genre Settings -->
-          <details class="subCard subCard--collapsible" id="audioPanelGenre" aria-label="Music and genre settings" style="margin-top:10px;" open>
-            <summary class="subCardTitle">Music and Genre Settings</summary>
+          <!-- Music and Scale Settings -->
+          <details class="subCard subCard--collapsible" id="audioPanelGenre" aria-label="Music and scale settings" style="margin-top:10px;" open>
+            <summary class="subCardTitle">Music and Scale Settings</summary>
             <div class="sideList">
-              <!-- Genre Selection -->
+              <!-- Scale Selection -->
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-                <span class="hint" style="min-width:110px;">Genre:</span>
+                <span class="hint" style="min-width:110px;">Scale:</span>
                 <div class="dd" id="audioGenreDD" style="flex:1;">
                   <button class="ddBtn" id="audioGenreBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
-                    <span id="audioGenreLabel">Classical / Baroque</span>
+                    <span id="audioGenreLabel">Major / Natural Minor</span>
                     <span class="ddChevron">▾</span>
                   </button>
                   <div class="ddMenu" id="audioGenreMenu" role="listbox">
-                    <div class="ddItem sel" role="option" data-value="classical">Classical / Baroque</div>
-                    <div class="ddItem" role="option" data-value="indian_raags">Indian Raags</div>
-                    <div class="ddItem" role="option" data-value="jazz">Jazz Bebop</div>
-                    <div class="ddItem" role="option" data-value="rock_bluegrass">Rock / Bluegrass</div>
-                    <div class="ddItem" role="option" data-value="techno_experimental">Techno / Experimental</div>
+                    <div class="ddItem sel" role="option" data-value="classical">Major / Natural Minor</div>
+                    <div class="ddItem" role="option" data-value="indian_raags">Lydian / Phrygian (Raag)</div>
+                    <div class="ddItem" role="option" data-value="jazz">Dorian / Altered</div>
+                    <div class="ddItem" role="option" data-value="rock_bluegrass">Pentatonic (Major / Minor)</div>
+                    <div class="ddItem" role="option" data-value="techno_experimental">Phrygian / Chromatic</div>
                   </div>
                 </div>
               </div>
@@ -282,6 +329,12 @@
                 <input id="audioDisplayNotes" type="checkbox" checked />
                 <span class="chkLbl">
                   <span class="chkName">Note Labels</span>
+                </span>
+              </label>
+              <label class="chkRow">
+                <input id="audioChordOverlay" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Chord Overlay</span>
                 </span>
               </label>
             </div>

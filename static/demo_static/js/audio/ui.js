@@ -124,18 +124,25 @@
                     enabled: audioState.upperWick.enabled,
                     volume: audioState.upperWick.volume,
                     instrument: audioState.upperWick.instrument,
-                    rhythm: audioState.upperWick.rhythm
+                    rhythm: audioState.upperWick.rhythm,
+                    pattern: audioState.upperWick.pattern,
+                    patternOverride: audioState.upperWick.patternOverride,
+                    restartOnChord: audioState.upperWick.restartOnChord
                 },
                 lowerWick: {
                     enabled: audioState.lowerWick.enabled,
                     volume: audioState.lowerWick.volume,
                     instrument: audioState.lowerWick.instrument,
-                    rhythm: audioState.lowerWick.rhythm
+                    rhythm: audioState.lowerWick.rhythm,
+                    pattern: audioState.lowerWick.pattern,
+                    patternOverride: audioState.lowerWick.patternOverride,
+                    restartOnChord: audioState.lowerWick.restartOnChord
                 },
                 genre: audioState.genre,
                 rootKey: audioState.rootKey,
                 chordProgression: audioState.chordProgression,
                 displayNotes: audioState.displayNotes,
+                chordOverlay: audioState.chordOverlay,
                 sensitivity: audioState.sensitivity,
                 melodicRange: audioState.melodicRange,
                 glowDuration: audioState.glowDuration,
@@ -167,12 +174,18 @@
                 audioState.upperWick.volume = settings.upperWick.volume ?? -23;
                 audioState.upperWick.instrument = settings.upperWick.instrument || 'harpsichord';
                 audioState.upperWick.rhythm = settings.upperWick.rhythm || '4';
+                audioState.upperWick.pattern = settings.upperWick.pattern || 'scale_asc';
+                audioState.upperWick.patternOverride = settings.upperWick.patternOverride ?? false;
+                audioState.upperWick.restartOnChord = settings.upperWick.restartOnChord ?? true;
             }
             if (settings.lowerWick) {
                 audioState.lowerWick.enabled = settings.lowerWick.enabled ?? true;
                 audioState.lowerWick.volume = settings.lowerWick.volume ?? -17;
                 audioState.lowerWick.instrument = settings.lowerWick.instrument || 'acoustic_bass';
                 audioState.lowerWick.rhythm = settings.lowerWick.rhythm || '2';
+                audioState.lowerWick.pattern = settings.lowerWick.pattern || 'root_only';
+                audioState.lowerWick.patternOverride = settings.lowerWick.patternOverride ?? false;
+                audioState.lowerWick.restartOnChord = settings.lowerWick.restartOnChord ?? true;
             }
             audioState.genre = settings.genre || 'classical';
             musicState.currentGenre = audioState.genre;  // Sync with musicState
@@ -180,6 +193,7 @@
             musicState.rootMidi = 60 + (ROOT_KEY_OFFSETS[audioState.rootKey] || 0);  // Sync with musicState
             audioState.chordProgression = settings.chordProgression || 'canon';
             audioState.displayNotes = settings.displayNotes ?? true;
+            audioState.chordOverlay = settings.chordOverlay ?? true;
             audioState.sensitivity = settings.sensitivity ?? 0.5;
             audioState.melodicRange = settings.melodicRange ?? 1.0;
             audioState.glowDuration = settings.glowDuration ?? 3;
@@ -211,6 +225,11 @@
         }
         applyDropdownSelection(ui.upperInstrumentMenu, ui.upperInstrumentLabel, audioState.upperWick.instrument);
         applyDropdownSelection(ui.upperRhythmMenu, ui.upperRhythmLabel, audioState.upperWick.rhythm);
+        applyDropdownSelection(ui.sopranoPatternMenu, ui.sopranoPatternLabel, audioState.upperWick.pattern);
+        if (ui.sopranoPatternOverrideChk) ui.sopranoPatternOverrideChk.checked = audioState.upperWick.patternOverride;
+        if (ui.sopranoPatternDD) ui.sopranoPatternDD.style.opacity = audioState.upperWick.patternOverride ? '1' : '0.35';
+        if (ui.sopranoPatternDD) ui.sopranoPatternDD.style.pointerEvents = audioState.upperWick.patternOverride ? 'auto' : 'none';
+        if (ui.sopranoRestartOnChordChk) ui.sopranoRestartOnChordChk.checked = audioState.upperWick.restartOnChord;
         
         // Lower wick
         if (ui.lowerWickChk) ui.lowerWickChk.checked = audioState.lowerWick.enabled;
@@ -220,6 +239,11 @@
         }
         applyDropdownSelection(ui.lowerInstrumentMenu, ui.lowerInstrumentLabel, audioState.lowerWick.instrument);
         applyDropdownSelection(ui.lowerRhythmMenu, ui.lowerRhythmLabel, audioState.lowerWick.rhythm);
+        applyDropdownSelection(ui.bassPatternMenu, ui.bassPatternLabel, audioState.lowerWick.pattern);
+        if (ui.bassPatternOverrideChk) ui.bassPatternOverrideChk.checked = audioState.lowerWick.patternOverride;
+        if (ui.bassPatternDD) ui.bassPatternDD.style.opacity = audioState.lowerWick.patternOverride ? '1' : '0.35';
+        if (ui.bassPatternDD) ui.bassPatternDD.style.pointerEvents = audioState.lowerWick.patternOverride ? 'auto' : 'none';
+        if (ui.bassRestartOnChordChk) ui.bassRestartOnChordChk.checked = audioState.lowerWick.restartOnChord;
         
         // Genre
         applyDropdownSelection(ui.genreMenu, ui.genreLabel, audioState.genre);
@@ -235,6 +259,8 @@
         
         // Display notes checkbox
         if (ui.displayNotesChk) ui.displayNotesChk.checked = audioState.displayNotes;
+        // Chord overlay checkbox
+        if (ui.chordOverlayChk) ui.chordOverlayChk.checked = audioState.chordOverlay;
         
         // Sub-panel open/closed state
         if (ui.panelChannels) ui.panelChannels.open = audioState.panels.channels;
@@ -313,6 +339,31 @@
                 console.log('[Audio] Upper rhythm changed to:', val);
                 saveSettings();
             });
+        setupDropdown(ui.sopranoPatternDD, ui.sopranoPatternBtn, ui.sopranoPatternMenu, ui.sopranoPatternLabel,
+            (val) => {
+                audioState.upperWick.pattern = val;
+                console.log('[Audio] Soprano pattern changed to:', val);
+                saveSettings();
+            });
+        if (ui.sopranoPatternOverrideChk) {
+            if (!hasSettings) audioState.upperWick.patternOverride = ui.sopranoPatternOverrideChk.checked;
+            ui.sopranoPatternOverrideChk.addEventListener('change', () => {
+                audioState.upperWick.patternOverride = ui.sopranoPatternOverrideChk.checked;
+                if (ui.sopranoPatternDD) {
+                    ui.sopranoPatternDD.style.opacity = audioState.upperWick.patternOverride ? '1' : '0.35';
+                    ui.sopranoPatternDD.style.pointerEvents = audioState.upperWick.patternOverride ? 'auto' : 'none';
+                }
+                console.log('[Audio] Soprano pattern override:', audioState.upperWick.patternOverride);
+                saveSettings();
+            });
+        }
+        if (ui.sopranoRestartOnChordChk) {
+            if (!hasSettings) audioState.upperWick.restartOnChord = ui.sopranoRestartOnChordChk.checked;
+            ui.sopranoRestartOnChordChk.addEventListener('change', () => {
+                audioState.upperWick.restartOnChord = ui.sopranoRestartOnChordChk.checked;
+                saveSettings();
+            });
+        }
 
         // Lower Wick controls
         if (ui.lowerWickChk) {
@@ -340,6 +391,31 @@
                 console.log('[Audio] Lower rhythm changed to:', val);
                 saveSettings();
             });
+        setupDropdown(ui.bassPatternDD, ui.bassPatternBtn, ui.bassPatternMenu, ui.bassPatternLabel,
+            (val) => {
+                audioState.lowerWick.pattern = val;
+                console.log('[Audio] Bass pattern changed to:', val);
+                saveSettings();
+            });
+        if (ui.bassPatternOverrideChk) {
+            if (!hasSettings) audioState.lowerWick.patternOverride = ui.bassPatternOverrideChk.checked;
+            ui.bassPatternOverrideChk.addEventListener('change', () => {
+                audioState.lowerWick.patternOverride = ui.bassPatternOverrideChk.checked;
+                if (ui.bassPatternDD) {
+                    ui.bassPatternDD.style.opacity = audioState.lowerWick.patternOverride ? '1' : '0.35';
+                    ui.bassPatternDD.style.pointerEvents = audioState.lowerWick.patternOverride ? 'auto' : 'none';
+                }
+                console.log('[Audio] Bass pattern override:', audioState.lowerWick.patternOverride);
+                saveSettings();
+            });
+        }
+        if (ui.bassRestartOnChordChk) {
+            if (!hasSettings) audioState.lowerWick.restartOnChord = ui.bassRestartOnChordChk.checked;
+            ui.bassRestartOnChordChk.addEventListener('change', () => {
+                audioState.lowerWick.restartOnChord = ui.bassRestartOnChordChk.checked;
+                saveSettings();
+            });
+        }
 
         // Genre Selection
         setupDropdown(ui.genreDD, ui.genreBtn, ui.genreMenu, ui.genreLabel,
@@ -347,7 +423,7 @@
                 audioState.genre = val;
                 musicState.currentGenre = val;
                 const genre = GENRES[val];
-                console.log(`[Audio] Genre changed to: ${genre ? genre.label : val}`);
+                console.log(`[Audio] Scale changed to: ${genre ? genre.label : val}`);
                 saveSettings();
             });
         
@@ -372,6 +448,14 @@
             if (!hasSettings) audioState.displayNotes = ui.displayNotesChk.checked;
             ui.displayNotesChk.addEventListener('change', () => {
                 audioState.displayNotes = ui.displayNotesChk.checked;
+                saveSettings();
+            });
+        }
+
+        if (ui.chordOverlayChk) {
+            if (!hasSettings) audioState.chordOverlay = ui.chordOverlayChk.checked;
+            ui.chordOverlayChk.addEventListener('change', () => {
+                audioState.chordOverlay = ui.chordOverlayChk.checked;
                 saveSettings();
             });
         }
