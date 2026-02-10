@@ -567,6 +567,70 @@
       drawGrid(pricePlot, { yMin: yMin, yMax: yMax, plot: plot, start: start, end: end, barsVisible: barsVisible });
     }
 
+<<<<<<< Current (Your changes)
+    // ── DRUM PULSE STRIP ──
+    // 25px strip above chord labels: 16 steps per bar, kick/snare/hat ticks; active step glows
+    (function drawDrumPulseStrip(){
+      try {
+        if (!audioActive) return;
+        var drumBeats = window._audioModule && window._audioModule.DRUM_BEATS;
+        if (!drumBeats) return;
+        var drumBeat = (window.audioState && window.audioState.drumBeat) || 'simple';
+        var pattern = drumBeats[drumBeat];
+        if (!pattern) return;
+
+        var drumStripH = 25;
+        var labelBandH = 22;
+        var drumStripY = pricePlot.y + pricePlot.h - labelBandH - drumStripH - 2;
+        var stripBottom = drumStripY + drumStripH;
+        var barWidth = plot.w / barsVisible;
+        var stepWidth = barWidth / 16;
+        var tickW = Math.max(2, Math.min(4, Math.floor(stepWidth * 0.6)));
+        var drumStep = window._audioDrumStep;
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(15, 22, 32, 0.4)';
+        ctx.fillRect(pricePlot.x, drumStripY, pricePlot.w, drumStripH);
+
+        var kickList = pattern.kick || [];
+        var snareList = pattern.snare || [];
+        var hatList = [];
+        if (pattern.hihat && pattern.hihat.length) hatList = pattern.hihat;
+        else if (pattern.ride && pattern.ride.length) hatList = pattern.ride;
+        var claveList = pattern.clave || [];
+
+        for (var bi = start; bi <= end; bi++) {
+          for (var s = 0; s < 16; s++) {
+            var cx = xForIndex(bi + (s + 0.5) / 16, plot, barsVisible);
+            if (cx < pricePlot.x - 5 || cx > pricePlot.x + pricePlot.w + 5) continue;
+
+            var isActive = drumStep && drumStep.barIndex === bi && drumStep.subStepInBar === s;
+            var op = isActive ? 1 : 0.3;
+
+            if (kickList.indexOf(s) >= 0) {
+              ctx.fillStyle = 'rgba(100, 180, 255, ' + op + ')';
+              ctx.fillRect(cx - tickW / 2, stripBottom - 10, tickW, 10);
+            }
+            if (snareList.indexOf(s) >= 0) {
+              ctx.fillStyle = 'rgba(200, 200, 220, ' + op + ')';
+              ctx.fillRect(cx - tickW / 2, stripBottom - 10 - 6 - 2, tickW, 6);
+            }
+            if (hatList.indexOf(s) >= 0) {
+              ctx.fillStyle = 'rgba(180, 180, 200, ' + op + ')';
+              ctx.fillRect(cx - 1, drumStripY, 2, 2);
+            }
+            if (claveList.indexOf(s) >= 0) {
+              ctx.fillStyle = 'rgba(255, 200, 120, ' + op + ')';
+              ctx.fillRect(cx - 1, drumStripY + 4, 2, 2);
+            }
+          }
+        }
+        ctx.restore();
+      } catch (_eDrum) {}
+    })();
+
+=======
+>>>>>>> Incoming (Background Agent changes)
     // ── CHORD PROGRESSION OVERLAY ──
     // Draws vertical separator lines and labels showing the active chord from
     // the selected chord progression while audio is playing.

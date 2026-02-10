@@ -103,6 +103,7 @@
         displayNotes: true,
         chordOverlay: true,     // Show chord progression overlay on chart
         sensitivity: 0.5,       // Repurposed: Complexity/Stochasticism (0=pure, 1=chaotic)
+        beatStochasticity: 0,   // 0-1: humanization for drums (dropouts, ghost notes, velocity, micro-timing)
         melodicRange: 1.0,     // Vertical Zoom: expands/compresses price-to-MIDI mapping
         glowDuration: 3,
         displayMode: 'bars',    // 'bars' (horizontal bars) or 'circles' (radius = note duration)
@@ -208,6 +209,8 @@
         // Sync tuning sliders
         sensitivity: document.getElementById('audioSensitivity'),
         sensitivityLabel: document.getElementById('audioSensitivityLabel'),
+        beatStochasticity: document.getElementById('audioBeatStochasticity'),
+        beatStochasticityLabel: document.getElementById('audioBeatStochasticityLabel'),
         melodicRange: document.getElementById('audioMelodicRange'),
         melodicRangeLabel: document.getElementById('audioMelodicRangeLabel'),
         glowDuration: document.getElementById('audioGlowDuration'),
