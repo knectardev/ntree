@@ -339,6 +339,27 @@
                 </div>
               </div>
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                <span class="hint" style="min-width:110px;">Bass Line Style:</span>
+                <div class="dd" id="audioBassLineStyleDD" style="flex:1;">
+                  <button class="ddBtn" id="audioBassLineStyleBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioBassLineStyleLabel">Walking Bass (Jazz Swing / Bebop)</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioBassLineStyleMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="walking_bass_jazz">Walking Bass (Jazz Swing / Bebop)</div>
+                    <div class="ddItem" role="option" data-value="bluegrass_old_time">Bluegrass / Old-Time Bass</div>
+                    <div class="ddItem" role="option" data-value="baroque_counterpoint">Baroque Counterpoint / Bach-Style Lines</div>
+                    <div class="ddItem" role="option" data-value="motown_soul">Motown / Soul Groove Bass</div>
+                    <div class="ddItem" role="option" data-value="reggae_dub">Reggae / Dub One-Drop Bass</div>
+                    <div class="ddItem" role="option" data-value="latin_afrocuban">Latin / Afro-Cuban Tumbao</div>
+                    <div class="ddItem" role="option" data-value="afrobeat_polyrhythmic">Afrobeat / Polyrhythmic Bass</div>
+                    <div class="ddItem" role="option" data-value="pop_rock_melodic">Pop / Rock Melodic Bass</div>
+                    <div class="ddItem" role="option" data-value="electronic_synth">Electronic / Synth Bass (EDM / Trap / House)</div>
+                    <div class="ddItem" role="option" data-value="minimal_pedal_drone">Minimal / Pedal Tone / Drone Bass</div>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
                 <span class="hint" style="min-width:110px;">Drum Beat:</span>
                 <div class="dd" id="audioDrumBeatDD" style="flex:1;">
                   <button class="ddBtn" id="audioDrumBeatBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
@@ -741,6 +762,7 @@
             </div>
           </div>
           <div class="pill"><label><input id="showBands" type="checkbox" checked /> Bands</label></div>
+          <div class="pill"><label><input id="grid" type="checkbox" checked /> Grid</label></div>
 
           <div class="pill pill--nocross"><label><input id="nocross" type="checkbox" checked /> No-cross</label></div>
           <div class="pill"><label><input id="fills" type="checkbox" checked /> Fill bands</label></div>
@@ -838,6 +860,7 @@
   <script src="static/demo_static/js/12_strategy_backtest.js"></script>
   <!-- Audio Visual Settings module (refactored from 13_audio_controls.js) -->
   <script src="static/demo_static/js/audio/config.js"></script>
+  <script src="static/demo_static/js/audio/bass_styles.js"></script>
   <script src="static/demo_static/js/audio/state.js"></script>
   <script src="static/demo_static/js/audio/drums.js"></script>
   <script src="static/demo_static/js/audio/theory.js"></script>

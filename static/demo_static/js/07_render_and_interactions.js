@@ -585,7 +585,9 @@
         var barWidth = plot.w / barsVisible;
         var stepWidth = barWidth / 16;
         var tickW = Math.max(2, Math.min(4, Math.floor(stepWidth * 0.6)));
-        var drumStep = window._audioDrumStep;
+        var nowMs = (window.performance && performance.now) ? performance.now() : Date.now();
+        var drumEvents = window._audioDrumEvents || [];
+        var activeByStep = {};
 
         ctx.save();
         ctx.fillStyle = 'rgba(15, 22, 32, 0.4)';
@@ -597,32 +599,87 @@
         if (pattern.hihat && pattern.hihat.length) hatList = pattern.hihat;
         else if (pattern.ride && pattern.ride.length) hatList = pattern.ride;
         var claveList = pattern.clave || [];
+        var hatInstKey = (pattern.hihat && pattern.hihat.length) ? 'hihat' : 'ride';
+
+        for (var di = 0; di < drumEvents.length; di++) {
+          var dev = drumEvents[di];
+          if (!dev || !dev.hits) continue;
+          if (!Number.isFinite(dev.glowUntil) || dev.glowUntil < nowMs) continue;
+          if (dev.barIndex < start - 1 || dev.barIndex > end + 1) continue;
+          var life = Math.max(1, (dev.glowUntil - (dev.time || nowMs)));
+          var remain = Math.max(0, dev.glowUntil - nowMs);
+          var intensity = remain / life;
+          var k = String(dev.barIndex) + '|' + String(dev.subStepInBar);
+          if (!activeByStep[k]) activeByStep[k] = {};
+          if (dev.hits.kick) activeByStep[k].kick = Math.max(activeByStep[k].kick || 0, intensity);
+          if (dev.hits.snare) activeByStep[k].snare = Math.max(activeByStep[k].snare || 0, intensity);
+          if (dev.hits.hihat) activeByStep[k].hihat = Math.max(activeByStep[k].hihat || 0, intensity);
+          if (dev.hits.ride) activeByStep[k].ride = Math.max(activeByStep[k].ride || 0, intensity);
+          if (dev.hits.clave) activeByStep[k].clave = Math.max(activeByStep[k].clave || 0, intensity);
+        }
 
         for (var bi = start; bi <= end; bi++) {
           for (var s = 0; s < 16; s++) {
             var cx = xForIndex(bi + (s + 0.5) / 16, plot, barsVisible);
             if (cx < pricePlot.x - 5 || cx > pricePlot.x + pricePlot.w + 5) continue;
 
-            var isActive = drumStep && drumStep.barIndex === bi && drumStep.subStepInBar === s;
-            var op = isActive ? 1 : 0.3;
+            var stepKey = String(bi) + '|' + String(s);
+            var active = activeByStep[stepKey] || null;
+            var kickGlow = active && active.kick ? active.kick : 0;
+            var snareGlow = active && active.snare ? active.snare : 0;
+            var hatGlow = active && active[hatInstKey] ? active[hatInstKey] : 0;
+            var claveGlow = active && active.clave ? active.clave : 0;
 
             if (kickList.indexOf(s) >= 0) {
-              ctx.fillStyle = 'rgba(100, 180, 255, ' + op + ')';
+              var kickOp = 0.28 + (kickGlow * 0.72);
+              if (kickGlow > 0.02) {
+                ctx.save();
+                ctx.shadowBlur = 8 + (kickGlow * 10);
+                ctx.shadowColor = 'rgba(100, 180, 255, ' + (0.5 + kickGlow * 0.1) + ')';
+              }
+              ctx.fillStyle = 'rgba(100, 180, 255, ' + kickOp + ')';
               ctx.fillRect(cx - tickW / 2, stripBottom - 10, tickW, 10);
+              if (kickGlow > 0.02) ctx.restore();
             }
             if (snareList.indexOf(s) >= 0) {
-              ctx.fillStyle = 'rgba(200, 200, 220, ' + op + ')';
+              var snareOp = 0.28 + (snareGlow * 0.72);
+              if (snareGlow > 0.02) {
+                ctx.save();
+                ctx.shadowBlur = 7 + (snareGlow * 8);
+                ctx.shadowColor = 'rgba(220, 220, 240, ' + (0.45 + snareGlow * 0.4) + ')';
+              }
+              ctx.fillStyle = 'rgba(200, 200, 220, ' + snareOp + ')';
               ctx.fillRect(cx - tickW / 2, stripBottom - 10 - 6 - 2, tickW, 6);
+              if (snareGlow > 0.02) ctx.restore();
             }
             if (hatList.indexOf(s) >= 0) {
-              ctx.fillStyle = 'rgba(180, 180, 200, ' + op + ')';
+              var hatOp = 0.22 + (hatGlow * 0.78);
+              if (hatGlow > 0.02) {
+                ctx.save();
+                ctx.shadowBlur = 5 + (hatGlow * 6);
+                ctx.shadowColor = 'rgba(185, 200, 230, ' + (0.35 + hatGlow * 0.4) + ')';
+              }
+              ctx.fillStyle = 'rgba(180, 180, 200, ' + hatOp + ')';
               ctx.fillRect(cx - 1, drumStripY, 2, 2);
+              if (hatGlow > 0.02) ctx.restore();
             }
             if (claveList.indexOf(s) >= 0) {
-              ctx.fillStyle = 'rgba(255, 200, 120, ' + op + ')';
+              var claveOp = 0.22 + (claveGlow * 0.78);
+              if (claveGlow > 0.02) {
+                ctx.save();
+                ctx.shadowBlur = 7 + (claveGlow * 8);
+                ctx.shadowColor = 'rgba(255, 200, 120, ' + (0.45 + claveGlow * 0.4) + ')';
+              }
+              ctx.fillStyle = 'rgba(255, 200, 120, ' + claveOp + ')';
               ctx.fillRect(cx - 1, drumStripY + 4, 2, 2);
+              if (claveGlow > 0.02) ctx.restore();
             }
           }
+        }
+        if (window._audioDrumEvents && window._audioDrumEvents.length) {
+          window._audioDrumEvents = window._audioDrumEvents.filter(function(ev){
+            return ev && Number.isFinite(ev.glowUntil) && ev.glowUntil >= (nowMs - 50);
+          });
         }
         ctx.restore();
       } catch (_eDrum) {}
@@ -635,8 +692,73 @@
       try {
         if (!audioActive) return;
         if (window.audioState && window.audioState.chordOverlay === false) return;
-        var chordEvents = window._audioChordEvents;
-        if (!chordEvents || chordEvents.length === 0) return;
+        var chordEvents = Array.isArray(window._audioChordEvents) ? window._audioChordEvents : [];
+        var playheadBar = Number(window._audioPlayheadIndex);
+        if (!Number.isFinite(playheadBar)) {
+          playheadBar = Number(state && state.xOffset) || 0;
+        }
+        var anchorBar = Math.floor(playheadBar);
+        var visEndBar = Math.ceil((Number(state && state.xOffset) || 0) + barsVisible + 2);
+        var audioModule = window._audioModule || {};
+        var getChordLabelFn = audioModule.getChordLabel;
+        var musicStateRef = window._musicState || {};
+        var progressionStep = Number(musicStateRef.progressionStep);
+        if (!Number.isFinite(progressionStep)) progressionStep = 0;
+        progressionStep = ((Math.floor(progressionStep) % 16) + 16) % 16;
+        var regimeNow = String(musicStateRef.regime || 'UPTREND');
+
+        // Build a deterministic forward-looking chord timeline so upcoming labels
+        // are visible to the right of the playhead, like the drum step strip.
+        var displayChordEvents = [];
+        for (var ei = 0; ei < chordEvents.length; ei++) {
+          var ev = chordEvents[ei];
+          if (!ev) continue;
+          if (!Number.isFinite(ev.endBarIndex) || ev.endBarIndex < anchorBar) {
+            displayChordEvents.push(ev);
+          }
+        }
+
+        if (typeof getChordLabelFn === 'function') {
+          var forecast = [];
+          var stepIdx = progressionStep;
+          var cycleNum = 1;
+          if (displayChordEvents.length > 0) {
+            for (var cci = 0; cci < displayChordEvents.length; cci++) {
+              if (displayChordEvents[cci] && displayChordEvents[cci].cycleStart) cycleNum++;
+            }
+          }
+          for (var b = anchorBar; b <= visEndBar; b++) {
+            var info = getChordLabelFn(stepIdx, undefined, regimeNow) || {};
+            var isCycleStart = (stepIdx === 0);
+            var prevRegion = forecast.length ? forecast[forecast.length - 1] : null;
+            if (prevRegion && prevRegion.degree === info.degree && !isCycleStart) {
+              prevRegion.endBarIndex = b;
+            } else {
+              forecast.push({
+                startBarIndex: b,
+                endBarIndex: b,
+                degree: info.degree,
+                roman: info.roman || '',
+                noteName: info.noteName || '',
+                quality: info.quality || '',
+                label: info.label || '',
+                progressionStep: stepIdx,
+                regime: regimeNow,
+                cycleStart: isCycleStart,
+                cycleNum: isCycleStart ? cycleNum : 0
+              });
+              if (isCycleStart) cycleNum++;
+            }
+            stepIdx = (stepIdx + 1) % 16;
+          }
+          for (var fi = 0; fi < forecast.length; fi++) {
+            displayChordEvents.push(forecast[fi]);
+          }
+        } else if (displayChordEvents.length === 0) {
+          displayChordEvents = chordEvents;
+        }
+
+        if (!displayChordEvents || displayChordEvents.length === 0) return;
 
         ctx.save();
 
@@ -655,8 +777,8 @@
         ctx.fillStyle = 'rgba(15, 22, 32, 0.35)';
         ctx.fillRect(pricePlot.x, labelBandY, pricePlot.w, labelBandH);
 
-        for (var ci = 0; ci < chordEvents.length; ci++) {
-          var ce = chordEvents[ci];
+        for (var ci = 0; ci < displayChordEvents.length; ci++) {
+          var ce = displayChordEvents[ci];
           // Compute pixel positions for start and end of this chord region
           var x0 = xForIndex(ce.startBarIndex, plot, barsVisible);
           var x1 = xForIndex(ce.endBarIndex + 1, plot, barsVisible);  // +1 to cover full last bar

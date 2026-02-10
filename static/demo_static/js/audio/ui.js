@@ -16,6 +16,8 @@
     const ui = _am.ui;
     const allAudioDropdowns = _am.allAudioDropdowns;
     const GENRES = _am.GENRES;
+    const BASS_LINE_STYLES = _am.BASS_LINE_STYLES || {};
+    const DEFAULT_BASS_LINE_STYLE = _am.DEFAULT_BASS_LINE_STYLE || 'walking_bass_jazz';
     const ROOT_KEY_OFFSETS = _am.ROOT_KEY_OFFSETS;
     const updateStatus = _am.updateStatus;
     const reloadSampler = _am.reloadSampler;
@@ -142,6 +144,7 @@
                 genre: audioState.genre,
                 rootKey: audioState.rootKey,
                 chordProgression: audioState.chordProgression,
+                bassLineStyle: audioState.bassLineStyle,
                 drumBeat: audioState.drumBeat,
                 drumVolume: audioState.drumVolume,
                 displayNotes: audioState.displayNotes,
@@ -196,6 +199,7 @@
             audioState.rootKey = settings.rootKey || 'C';
             musicState.rootMidi = 60 + (ROOT_KEY_OFFSETS[audioState.rootKey] || 0);  // Sync with musicState
             audioState.chordProgression = settings.chordProgression || 'canon';
+            audioState.bassLineStyle = settings.bassLineStyle || DEFAULT_BASS_LINE_STYLE;
             audioState.drumBeat = settings.drumBeat || 'simple';
             audioState.drumVolume = settings.drumVolume ?? -12;
             audioState.displayNotes = settings.displayNotes ?? true;
@@ -260,6 +264,9 @@
         
         // Chord progression
         applyDropdownSelection(ui.chordProgressionMenu, ui.chordProgressionLabel, audioState.chordProgression);
+
+        // Bass line style
+        applyDropdownSelection(ui.bassLineStyleMenu, ui.bassLineStyleLabel, audioState.bassLineStyle);
         
         // Drum beat
         applyDropdownSelection(ui.drumBeatMenu, ui.drumBeatLabel, audioState.drumBeat);
@@ -475,6 +482,15 @@
         setupDropdown(ui.chordProgressionDD, ui.chordProgressionBtn, ui.chordProgressionMenu, ui.chordProgressionLabel,
             (val) => { 
                 audioState.chordProgression = val; 
+                saveSettings();
+            });
+
+        // Bass Line Style
+        setupDropdown(ui.bassLineStyleDD, ui.bassLineStyleBtn, ui.bassLineStyleMenu, ui.bassLineStyleLabel,
+            (val) => {
+                audioState.bassLineStyle = val || DEFAULT_BASS_LINE_STYLE;
+                const style = BASS_LINE_STYLES[audioState.bassLineStyle];
+                console.log('[Audio] Bass line style changed to:', style ? style.label : audioState.bassLineStyle);
                 saveSettings();
             });
 

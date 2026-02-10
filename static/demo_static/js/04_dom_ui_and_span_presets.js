@@ -88,9 +88,11 @@
   }
 
   function enforceAlwaysOnOptions(){
-    if(ui.showVolume) ui.showVolume.checked = true;
-    if(ui.grid) ui.grid.checked = true;
-    if(ui.scale) ui.scale.checked = true;
+    // Only force controls that are virtual/removed from UI.
+    // If a real checkbox exists, respect user selection + persisted config.
+    if(ui.showVolume && ui.showVolume.disabled) ui.showVolume.checked = true;
+    if(ui.grid && ui.grid.disabled) ui.grid.checked = true;
+    if(ui.scale && ui.scale.disabled) ui.scale.checked = true;
   }
 
   // Ensure virtual always-on controls exist even though their checkboxes may be removed from the UI.

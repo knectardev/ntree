@@ -14,6 +14,7 @@
     const musicState = _am.musicState;
     const audioState = _am.audioState;
     const GENRES = _am.GENRES;
+    const getBassLineStyle = _am.getBassLineStyle;
     const nearestScaleNote = _am.nearestScaleNote;
     const offsetScaleDegree = _am.offsetScaleDegree;
     const getScaleNotes = _am.getScaleNotes;
@@ -544,9 +545,18 @@
         // Pattern intervals from root (in semitones): [0, 7, 5, chromatic]
         const WALK_PATTERN_UP = [0, 7, 5, 1];    // Root, 5th, 4th, chromatic step up
         const WALK_PATTERN_DOWN = [0, -5, -7, -1]; // Root, 4th below, 5th below, chromatic step down
+        const bassStyle = typeof getBassLineStyle === 'function'
+            ? getBassLineStyle(audioState.bassLineStyle)
+            : null;
+        const styleUp = (bassStyle && Array.isArray(bassStyle.walkUp) && bassStyle.walkUp.length)
+            ? bassStyle.walkUp
+            : WALK_PATTERN_UP;
+        const styleDown = (bassStyle && Array.isArray(bassStyle.walkDown) && bassStyle.walkDown.length)
+            ? bassStyle.walkDown
+            : WALK_PATTERN_DOWN;
         
         if (vs.runMode === 'walk_up' || vs.runMode === 'walk_down') {
-            const pattern = vs.runMode === 'walk_up' ? WALK_PATTERN_UP : WALK_PATTERN_DOWN;
+            const pattern = vs.runMode === 'walk_up' ? styleUp : styleDown;
             const stepIndex = vs.walkDegreeIndex % pattern.length;
             vs.walkDegreeIndex++;
             

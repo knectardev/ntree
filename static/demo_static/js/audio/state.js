@@ -21,7 +21,8 @@
         consecutiveUpBars: 0,
         prevBarClose: null,
         regimeSwitchThreshold: 3,
-        progressionStep: 0,
+        // Use a pre-advance sentinel so the first bar boundary lands on step 0.
+        progressionStep: 15,
         rootMidi: 60,  // C4
         prevSoprano: 72,
         prevBass: 48,
@@ -99,6 +100,7 @@
         genre: 'classical',
         rootKey: 'C',           // Root key for scales and chord progressions (C, C#, D, ... B)
         chordProgression: 'canon',
+        bassLineStyle: 'walking_bass_jazz',
         drumBeat: 'simple',
         displayNotes: true,
         chordOverlay: true,     // Show chord progression overlay on chart
@@ -199,6 +201,10 @@
         chordProgressionBtn: document.getElementById('audioChordProgressionBtn'),
         chordProgressionMenu: document.getElementById('audioChordProgressionMenu'),
         chordProgressionLabel: document.getElementById('audioChordProgressionLabel'),
+        bassLineStyleDD: document.getElementById('audioBassLineStyleDD'),
+        bassLineStyleBtn: document.getElementById('audioBassLineStyleBtn'),
+        bassLineStyleMenu: document.getElementById('audioBassLineStyleMenu'),
+        bassLineStyleLabel: document.getElementById('audioBassLineStyleLabel'),
         drumBeatDD: document.getElementById('audioDrumBeatDD'),
         drumBeatBtn: document.getElementById('audioDrumBeatBtn'),
         drumBeatMenu: document.getElementById('audioDrumBeatMenu'),

@@ -223,6 +223,7 @@ The standalone oscillation tool (`osc/index.html`) includes its own **client-sid
   - Used by band view: `/ticker/<sym>?band` → iframe → `/chart.html?mode=api&symbol=<sym>`
   - Back-compat: `/demo_static.html` redirects to `/chart.html`
   - **Page chrome**: App nav links (Dashboard, Backtest Config), status chip (“Last update”) for live feedback; UI refs in `static/demo_static/js/04_dom_ui_and_span_presets.js`.
+  - **Main toolbar toggles** include `Bands`, `Grid`, `Fill bands`, `Smooth`, `High/Low bands (or wicks)`, `Open/Close bands`, and `Avg line`; `Grid` is user-toggleable and persisted via UI config.
   - **Session History modal**: Replay/practice session history in three views — **Cards** (glance), **Ledger** (FIFO lots), **Matrix** (summary). Buttons: Refresh, Close. Opened from Practice toolbar (“History”); wired in `08_replay_and_file_io.js` (open/close, Escape), `07_render_and_interactions.js` (view mode, table render). Data loaded from persisted replay events (SQLite).
   - Grid lines are axis-driven:
     - Horizontal grid aligns to Y-axis price ticks (nice intervals)
@@ -330,11 +331,12 @@ The chart page includes an **Audio Visual Settings** sidebar panel and a **Tone.
 
 **Source files (modular, in `static/demo_static/js/audio/`)**
 
-The audio system was refactored from a single 3,454-line file into 7 focused modules that communicate via the shared `window._audioModule` namespace (`_am`). Each module is an IIFE that reads dependencies from `_am` and exports its own functions back to `_am`. Load order in `chart.html` must be preserved:
+The audio system was refactored from a single 3,454-line file into 9 focused modules that communicate via the shared `window._audioModule` namespace (`_am`). Each module is an IIFE that reads dependencies from `_am` and exports its own functions back to `_am`. Load order in `chart.html` must be preserved:
 
 | File | Lines | Responsibility | Key exports to `_am` |
 |------|-------|----------------|----------------------|
 | `config.js` | ~280 | Pure constants: instruments, note ranges, chord progressions, chord maps, genre/scale configs, kick config | `INSTRUMENT_MAP`, `NOTE_CONFIG`, `CHORD_PROGRESSIONS`, `CHORD_MAP_MAJOR/MINOR`, `GENRES`, `SCALES`, `ROOT_KEY_OFFSETS`, `KICK_CONFIG` |
+| `bass_styles.js` | ~90 | Bass line style registry and interval presets for walking-bass variants | `BASS_LINE_STYLES`, `DEFAULT_BASS_LINE_STYLE`, `getBassLineStyle()` |
 | `drums.js` | ~250 | Drum beat patterns (16 sub-steps), percussion synths (kick, snare, hi-hat, ride, clave), playDrumStep with beat stochasticity (dropout, ghost notes, velocity, micro-timing) | `DRUM_BEATS`, `playDrumStep()`, `setDrumVolume()`, `disposeDrums()` |
 | `state.js` | ~250 | Shared state objects + small utilities | `musicState`, `audioState`, `ui`, `allAudioDropdowns`, `updateStatus()`, `midiToNoteName()`, `rhythmToDuration()`, `rhythmToDurationMs()` |
 | `theory.js` | ~370 | Scale/chord math, regime detection, pattern detection, voice separation, chord label helpers | `updateRegimeFromPrice()`, `getScaleNotes()`, `getCurrentChordToneMods()`, `quantizeToChord()`, `nearestScaleNote()`, `offsetScaleDegree()`, `nearestScaleNoteAbove()`, `updateVisiblePriceRange()`, `detectMelodicPattern()`, `getDynamicMidiRange()`, `getChordTonesInRange()`, `forceNoteDifference()`, `forceNoteDifferenceStrict()`, `ensureVoiceSeparation()`, `advanceProgression()`, `getChordLabel()`, `getChordSequence()`, `getChordComponentPCs()` |
@@ -367,6 +369,7 @@ The audio system was refactored from a single 3,454-line file into 7 focused mod
 - `window._audioPlayheadIndex` — current smooth playback position (float bar index); set by conductor, read by renderer
 - `window._audioNoteEvents` — array of note event objects for visual rendering; set by conductor, read by renderer
 - `window._audioChordEvents` — array of chord region objects for chord overlay rendering; set by `emitChordEvent()`, read by renderer. Each entry has `startBarIndex`, `endBarIndex`, `degree`, `roman`, `noteName`, `quality`, `regime`, `cycleStart`, `cycleNum`
+- `window._audioDrumEvents` — short-lived drum hit events (`barIndex`, `subStepInBar`, `hits`, `time`, `glowUntil`) emitted by conductor and consumed by the drum pulse strip renderer for per-component glow highlighting
 - `window._audioSubStepSeconds` — sub-step duration (1/16 sec); set by conductor
 - `window.onReplayBarAdvance` — callback registered by `hookIntoReplaySystem()` for Practice mode integration
 
@@ -435,7 +438,7 @@ The renderer in `07_render_and_interactions.js` reads this array, maps `barIndex
 
 **Settings persistence (in `ui.js`, localStorage key: `ntree_audio_visual_settings`)**
 
-Saved on every UI change. Restored on page load. Includes: upper/lower wick settings (enabled, volume, instrument, rhythm, pattern, patternOverride, restartOnChord), drumVolume, genre (internally keyed; user-facing label is "Scale"), rootKey, chordProgression, drumBeat, displayNotes, chordOverlay, sensitivity, beatStochasticity, melodicRange, glowDuration, displayMode, panel open/closed states, speed (BPM).
+Saved on every UI change. Restored on page load. Includes: upper/lower wick settings (enabled, volume, instrument, rhythm, pattern, patternOverride, restartOnChord), drumVolume, genre (internally keyed; user-facing label is "Scale"), rootKey, chordProgression, bassLineStyle, drumBeat, displayNotes, chordOverlay, sensitivity, beatStochasticity, melodicRange, glowDuration, displayMode, panel open/closed states, speed (BPM).
 
 **Shared state objects (in `state.js`)**
 
@@ -460,7 +463,7 @@ The Pathfinding Sequencer implements a **"Hierarchical Composition Layer"** — 
   - **Bass Pattern** dropdown: Chord Root Only, Root/3rd/5th.
   - **Restart on chord change** checkbox (per voice): When checked, the pattern index resets to the nearest note in the new chord when the chord progression advances. When unchecked, the pattern continues from wherever it left off.
 - **Instruments**: MIDI soundfonts (FluidR3_GM via gleitz.github.io): harpsichord, synth lead, pipe organ, strings, flute (upper); acoustic bass, electric bass, synth pad, pipe organ (lower).
-- **Music and Scale Settings**: Scale selection (Major/Natural Minor, Lydian/Phrygian (Raag), Dorian/Altered, Pentatonic (Major/Minor), Phrygian/Chromatic), chord progression (classical, pop, blues, jazz, canon, fifties, old, bridge), **Drum Beat** dropdown (Simple, Minimal Jazz, Latin/Salsa, Reggaeton/Latin Trap, Folk-Country Shuffle, Indian Tabla, Afrobeat, Funk Pocket, Lo-Fi/Dilla, Brazilian Samba, Electronic House), root key (C through B), Note Labels toggle, Chord Overlay toggle.
+- **Music and Scale Settings**: Scale selection (Major/Natural Minor, Lydian/Phrygian (Raag), Dorian/Altered, Pentatonic (Major/Minor), Phrygian/Chromatic), chord progression (classical, pop, blues, jazz, canon, fifties, old, bridge), **Bass Line Style** dropdown (Walking Bass, Bluegrass, Baroque Counterpoint, Motown, Reggae, Latin Tumbao, Afrobeat, Pop/Rock Melodic, Electronic/Synth, Minimal/Drone), **Drum Beat** dropdown (Simple, Minimal Jazz, Latin/Salsa, Reggaeton/Latin Trap, Folk-Country Shuffle, Indian Tabla, Afrobeat, Funk Pocket, Lo-Fi/Dilla, Brazilian Samba, Electronic House), root key (C through B), Note Labels toggle, Chord Overlay toggle.
 - **Audio visual sync tuning**:
   - **Complexity** (0-1): Controls stochastic interruption probability, scaled by genre-specific ornament chances. 0 = pure melodic cells; 1 = maximum genre ornamentation.
   - **Beat Stochasticity** (0-1): Humanization for drum beats. At 0 = deterministic; at 1 = note dropout (up to 30% skip), ghost notes (soft hi-hat/snare on off-beats), velocity variation, and micro-timing jitter. Reduces mechanical repetition.
@@ -490,6 +493,7 @@ The Pathfinding Sequencer implements a **"Hierarchical Composition Layer"** — 
 **Rendering**
 - When audio is **playing**, the main canvas in `07_render_and_interactions.js` reserves a **note axis** (40px) on the **left** of the plot for piano-keyboard-style note labels; `noteAxisW = audioActive ? 40 : 0` so plot width and layout adjust automatically.
 - **Chord progression overlay** (`drawChordOverlay()` in `07_render_and_interactions.js`): Dashed vertical lines at chord boundaries with two-tone pill labels (roman numeral + note name) in a band near the bottom of the price pane. Toggled via "Chord Overlay" checkbox. Labels are **regime-colored**: green (`#7cffc2`) in uptrend/major, red/rose (`#ff6b8a`) in downtrend/minor.
+- **Chord look-ahead rendering**: While audio is active, the overlay projects chord regions ahead of the playhead using the current progression step, so upcoming chord labels remain visible in the forward (future) viewport area.
 - **Cycle restart indicator**: When the 16-step chord progression loops, a solid amber vertical line replaces the dashed separator, with a numbered badge (`↺ 1`, `↺ 2`, ...) at the top showing which cycle is starting.
 - **Regime-aware note colors**: Soprano dots are green in uptrend/major, rose-red in downtrend/minor. Bass dots are blue in uptrend/major, purple in downtrend/minor. The regime is stamped on each note event at emission time for historical accuracy.
 
@@ -1095,7 +1099,7 @@ From `templates/detail.html` / `templates/synthetic_detail.html`:
 
 From `chart.html` (standalone demo / band view):
 - **Tone.js** (e.g. `tone@14.7.77` from unpkg; fallback cdnjs) — used by Audio Visual Settings sonification (`static/demo_static/js/audio/*.js`). Loaded before other chart scripts; no build step.
-- Chart demo scripts load in order: core/overlays → mode/loader → persistence → DOM/span presets → state/math → loaders → features → render → replay → dials/boot → feature UI → strategy backtest → **audio modules** (last, 8 files: config → state → drums → theory → pathfinder → engine → conductor → ui).
+- Chart demo scripts load in order: core/overlays → mode/loader → persistence → DOM/span presets → state/math → loaders → features → render → replay → dials/boot → feature UI → strategy backtest → **audio modules** (last, 9 files: config → bass_styles → state → drums → theory → pathfinder → engine → conductor → ui).
 
 ---
 
@@ -1165,6 +1169,11 @@ The following reflects the latest series of changes to the chart and replay expe
 - **Drum volume control**: Volume slider for drum layer added to Channel Instruments section (below Lower wick). Controls kick + all percussion. `setDrumVolume()` in drums.js updates all drum synths. Persisted in `drumVolume` (default -12 dB).
 - **Beat Stochasticity slider**: Added to Audio Visual Tuning. `playDrumStep()` in drums.js now applies humanization when `beatStochasticity` > 0: note dropout (30% max skip), ghost notes (soft hi-hat/snare on off-beats), velocity variation, micro-timing jitter. Persisted in `beatStochasticity` (default 0).
 - **Chart runtime hotfix**: Removed accidental merge-conflict markers from `static/demo_static/js/07_render_and_interactions.js` that caused browser parse failure (`Unexpected token '<<'`), which in turn prevented global draw/practice helpers from initializing (`draw`, `_syncPracticeSpeedLabel`).
+- **Drum pulse strip highlighting**: Drum visualization now highlights whichever component actually fires (kick/snare/hat/ride/clave) with short glow decay, driven by emitted drum-hit events (`window._audioDrumEvents`) from `conductor.js` + `drums.js` and rendered in `07_render_and_interactions.js`.
+- **Chord overlay look-ahead**: `drawChordOverlay()` now blends historical emitted chord events with deterministic forward projection from the current progression step, showing upcoming chord labels in the right-side future window while playback runs.
+- **Chord progression timing fix**: Audio progression state now initializes with a pre-advance sentinel step (`15`) so the first processed bar aligns to step `0`; this removes the one-bar offset in chord overlays/progression sequencing (notably visible in Blues 12-bar mode).
+- **Grid toggle in main chart toolbar**: Added visible `Grid` checkbox (`id="grid"`) to the top chart controls; rendering now respects user on/off state and persists/restores via UI config.
+- **Bass Line Style dropdown + registry module**: Added `Bass Line Style` to Music and Scale Settings with 10 starter options from backlog; new `audio/bass_styles.js` defines style keys/interval presets, selection persists as `bassLineStyle`, and `pathfinder.js` uses the selected style for walking-bass interval patterns.
 
 ---
 

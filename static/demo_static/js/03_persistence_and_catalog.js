@@ -278,9 +278,11 @@
         setSymbol(cfg.symbol.trim());
       }
 
-      // Always-on options (removed from UI): ignore persisted values.
+      // Always-on options (removed from UI): showVolume + scale remain forced.
+      // Grid is user-toggleable in the main toolbar.
       if(ui.showBands && cfg.showBands !== undefined) ui.showBands.checked = coerceBool(cfg.showBands, ui.showBands.checked);
       if(ui.showCandles && cfg.showCandles !== undefined) ui.showCandles.checked = coerceBool(cfg.showCandles, ui.showCandles.checked);
+      if(ui.grid && cfg.grid !== undefined) ui.grid.checked = coerceBool(cfg.grid, ui.grid.checked);
       if(ui.nocross && cfg.nocross !== undefined) ui.nocross.checked = coerceBool(cfg.nocross, ui.nocross.checked);
       if(ui.fills && cfg.fills !== undefined) ui.fills.checked = coerceBool(cfg.fills, ui.fills.checked);
       if(ui.smooth && cfg.smooth !== undefined) ui.smooth.checked = coerceBool(cfg.smooth, ui.smooth.checked);

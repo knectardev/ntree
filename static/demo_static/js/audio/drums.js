@@ -180,8 +180,8 @@
      */
     function playDrumStep(beatKey, subStepInBar, now) {
         const pattern = DRUM_BEATS[beatKey];
-        if (!pattern) return;
-        if (!audioState._initialized || !audioState._kickSynth) return;
+        if (!pattern) return null;
+        if (!audioState._initialized || !audioState._kickSynth) return null;
 
         ensurePercussionSynths();
 
@@ -210,22 +210,28 @@
         const inHihat = pattern.hihat && pattern.hihat.includes(subStepInBar);
         const inRide = pattern.ride && pattern.ride.includes(subStepInBar);
         const inClave = pattern.clave && pattern.clave.includes(subStepInBar);
+        const hits = { kick: false, snare: false, hihat: false, ride: false, clave: false };
 
         if (inKick && shouldTrigger(true)) {
             audioState._kickSynth.triggerAttackRelease('C1', '8n', t, velocity(0.5));
+            hits.kick = true;
         }
         if (inSnare && shouldTrigger(true) && _snareSynth) {
             _snareSynth.noise.triggerAttackRelease('16n', t);
             _snareSynth.tone.triggerAttackRelease('C2', '16n', t, velocity(0.5));
+            hits.snare = true;
         }
         if (inHihat && shouldTrigger(true) && _hihatSynth) {
             _hihatSynth.triggerAttackRelease('32n', t, velocity(0.3));
+            hits.hihat = true;
         }
         if (inRide && shouldTrigger(true) && _rideSynth) {
             _rideSynth.triggerAttackRelease('16n', t, velocity(0.25));
+            hits.ride = true;
         }
         if (inClave && shouldTrigger(true) && _claveSynth) {
             _claveSynth.triggerAttackRelease('16n', t, velocity(0.35));
+            hits.clave = true;
         }
 
         if (stoch > 0 && !inHihat && !inRide && ghostChance() && _hihatSynth) {
@@ -235,6 +241,11 @@
             _snareSynth.noise.triggerAttackRelease('16n', t);
             _snareSynth.tone.triggerAttackRelease('C2', '16n', t, velocity(0.2));
         }
+
+        if (hits.kick || hits.snare || hits.hihat || hits.ride || hits.clave) {
+            return hits;
+        }
+        return null;
     }
 
     /**

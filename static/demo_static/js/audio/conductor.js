@@ -323,8 +323,11 @@
         audioState._bassRef = null;
         musicState._prevSopranoPrice = null;
         musicState._prevBassPrice = null;
-        musicState.progressionStep = 0;
+        // Pre-advance sentinel so first processed bar is progression step 0.
+        musicState.progressionStep = 15;
         window._audioChordEvents = [];  // Reset chord overlay events
+        window._audioDrumEvents = [];   // Reset drum highlight events
+        window._audioDrumStep = null;   // Legacy active-step marker
         resetOverrideState();           // Reset pattern override state
         musicState.prevBarClose = null;
         musicState.consecutiveDownBars = 0;
@@ -408,6 +411,8 @@
         // Clear playhead and chord overlay
         window._audioPlayheadIndex = -1;
         window._audioChordEvents = [];
+        window._audioDrumEvents = [];
+        window._audioDrumStep = null;
         audioState._smoothPosition = 0;
         if (typeof window.requestDraw === 'function') {
             window.requestDraw('audio_stop');
@@ -502,7 +507,8 @@
             audioState._subStepPosition = 0;
             audioState._lastSubStep = -1;
             // Reset music state for fresh start
-            musicState.progressionStep = 0;
+            // Pre-advance sentinel so loop restarts from progression step 0.
+            musicState.progressionStep = 15;
             musicState.prevBarClose = null;
             currentSopranoNote = null;
             currentBassNote = null;
@@ -584,7 +590,10 @@
         // Drum beat (every sub-step; pattern decides what to play)
         if (playDrumStep) {
             const drumBeat = audioState.drumBeat || 'simple';
-            playDrumStep(drumBeat, subStepInBar, now);
+            const drumHits = playDrumStep(drumBeat, subStepInBar, now);
+            if (drumHits) {
+                emitDrumStepEvent(barIndex, subStepInBar, drumHits, perfNow);
+            }
         }
         
         // ── BAR BOUNDARY: Update targets, regime, progression ──
@@ -949,6 +958,42 @@
         // Keep up to 300 events for trail
         while (window._audioNoteEvents.length > 300) {
             window._audioNoteEvents.shift();
+        }
+    }
+
+    /**
+     * Emit drum-step highlight events for the drum pulse strip renderer.
+     * Uses short-lived glow events, similar to note-event highlighting.
+     */
+    function emitDrumStepEvent(barIndex, subStepInBar, hits, startTime) {
+        if (!hits) return;
+        if (!window._audioDrumEvents) window._audioDrumEvents = [];
+
+        const glowMs = (audioState.glowDuration || 3) * 120;
+        const event = {
+            barIndex: barIndex,
+            subStepInBar: subStepInBar,
+            hits: {
+                kick: !!hits.kick,
+                snare: !!hits.snare,
+                hihat: !!hits.hihat,
+                ride: !!hits.ride,
+                clave: !!hits.clave
+            },
+            time: startTime,
+            glowUntil: startTime + glowMs
+        };
+
+        window._audioDrumEvents.push(event);
+        window._audioDrumStep = {
+            barIndex: barIndex,
+            subStepInBar: subStepInBar,
+            hits: event.hits,
+            time: startTime
+        };
+
+        while (window._audioDrumEvents.length > 600) {
+            window._audioDrumEvents.shift();
         }
     }
 

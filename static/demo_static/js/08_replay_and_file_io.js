@@ -467,7 +467,7 @@
     assert(!!document.getElementById('sessClosed'), 'session toggle closed exists');
     assert(!!ui.autoW, 'autoW control exists');
     assert(!!ui.showVolume && ui.showVolume.checked === true, 'showVolume forced on');
-    assert(!!ui.grid && ui.grid.checked === true, 'grid forced on');
+    assert(!!ui.grid, 'grid control exists');
     assert(!!ui.scale && ui.scale.checked === true, 'scale forced on');
 
     var b0 = applyYScaleBounds(0, 10, 2);
