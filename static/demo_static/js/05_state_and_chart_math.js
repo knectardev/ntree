@@ -304,6 +304,7 @@
     state.yScaleFactor = 1;
     state.yPan = 0;
     ui.scale.checked = true;
+    scheduleSaveUiConfig();
     draw();
   }
 

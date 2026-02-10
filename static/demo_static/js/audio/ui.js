@@ -29,6 +29,15 @@
     const resumeAudioAnimation = _am.resumeAudioAnimation;
     const hookIntoReplaySystem = _am.hookIntoReplaySystem;
     const setDrumVolume = _am.setDrumVolume;
+    const VOLUME_MIN_DB = -36;
+    const VOLUME_MAX_DB = 6;
+
+    function clampDb(val, fallback) {
+        const n = Number(val);
+        const f = Number.isFinite(fallback) ? fallback : -12;
+        if (!Number.isFinite(n)) return f;
+        return Math.max(VOLUME_MIN_DB, Math.min(VOLUME_MAX_DB, Math.round(n)));
+    }
 
     // ========================================================================
     // GENERIC UI HELPERS
@@ -92,8 +101,9 @@
 
         const updateLabel = (shouldSave) => {
             if (shouldSave === undefined) shouldSave = false;
-            const val = parseInt(slider.value, 10);
-            labelEl.textContent = Math.abs(val) + ' DB';
+            const val = clampDb(parseInt(slider.value, 10), audioState[wickType + 'Wick'].volume);
+            slider.value = String(val);
+            labelEl.textContent = val + ' dB';
             audioState[wickType + 'Wick'].volume = val;
 
             // Update sampler volume if playing
@@ -178,7 +188,7 @@
             // Apply to audioState
             if (settings.upperWick) {
                 audioState.upperWick.enabled = settings.upperWick.enabled ?? true;
-                audioState.upperWick.volume = settings.upperWick.volume ?? -23;
+                audioState.upperWick.volume = clampDb(settings.upperWick.volume, -18);
                 audioState.upperWick.instrument = settings.upperWick.instrument || 'harpsichord';
                 audioState.upperWick.rhythm = settings.upperWick.rhythm || '4';
                 audioState.upperWick.pattern = settings.upperWick.pattern || 'scale_asc';
@@ -187,7 +197,7 @@
             }
             if (settings.lowerWick) {
                 audioState.lowerWick.enabled = settings.lowerWick.enabled ?? true;
-                audioState.lowerWick.volume = settings.lowerWick.volume ?? -17;
+                audioState.lowerWick.volume = clampDb(settings.lowerWick.volume, -18);
                 audioState.lowerWick.instrument = settings.lowerWick.instrument || 'acoustic_bass';
                 audioState.lowerWick.rhythm = settings.lowerWick.rhythm || '2';
                 audioState.lowerWick.pattern = settings.lowerWick.pattern || 'root_only';
@@ -201,7 +211,7 @@
             audioState.chordProgression = settings.chordProgression || 'canon';
             audioState.bassLineStyle = settings.bassLineStyle || DEFAULT_BASS_LINE_STYLE;
             audioState.drumBeat = settings.drumBeat || 'simple';
-            audioState.drumVolume = settings.drumVolume ?? -12;
+            audioState.drumVolume = clampDb(settings.drumVolume, -12);
             audioState.displayNotes = settings.displayNotes ?? true;
             audioState.chordOverlay = settings.chordOverlay ?? true;
             audioState.sensitivity = settings.sensitivity ?? 0.5;
@@ -232,7 +242,7 @@
         if (ui.upperWickChk) ui.upperWickChk.checked = audioState.upperWick.enabled;
         if (ui.upperVolume) {
             ui.upperVolume.value = audioState.upperWick.volume;
-            if (ui.upperVolumeLabel) ui.upperVolumeLabel.textContent = audioState.upperWick.volume + ' DB';
+            if (ui.upperVolumeLabel) ui.upperVolumeLabel.textContent = audioState.upperWick.volume + ' dB';
         }
         applyDropdownSelection(ui.upperInstrumentMenu, ui.upperInstrumentLabel, audioState.upperWick.instrument);
         applyDropdownSelection(ui.upperRhythmMenu, ui.upperRhythmLabel, audioState.upperWick.rhythm);
@@ -246,7 +256,7 @@
         if (ui.lowerWickChk) ui.lowerWickChk.checked = audioState.lowerWick.enabled;
         if (ui.lowerVolume) {
             ui.lowerVolume.value = audioState.lowerWick.volume;
-            if (ui.lowerVolumeLabel) ui.lowerVolumeLabel.textContent = audioState.lowerWick.volume + ' DB';
+            if (ui.lowerVolumeLabel) ui.lowerVolumeLabel.textContent = audioState.lowerWick.volume + ' dB';
         }
         applyDropdownSelection(ui.lowerInstrumentMenu, ui.lowerInstrumentLabel, audioState.lowerWick.instrument);
         applyDropdownSelection(ui.lowerRhythmMenu, ui.lowerRhythmLabel, audioState.lowerWick.rhythm);
@@ -274,7 +284,7 @@
         // Drum volume
         if (ui.drumVolume) {
             ui.drumVolume.value = audioState.drumVolume;
-            if (ui.drumVolumeLabel) ui.drumVolumeLabel.textContent = Math.abs(audioState.drumVolume) + ' DB';
+            if (ui.drumVolumeLabel) ui.drumVolumeLabel.textContent = audioState.drumVolume + ' dB';
             if (setDrumVolume) setDrumVolume(audioState.drumVolume);
         }
         
@@ -357,8 +367,9 @@
         if (ui.drumVolume && ui.drumVolumeLabel) {
             const updateDrumLabel = (shouldSave) => {
                 if (shouldSave === undefined) shouldSave = false;
-                const val = parseInt(ui.drumVolume.value, 10);
-                ui.drumVolumeLabel.textContent = Math.abs(val) + ' DB';
+                const val = clampDb(parseInt(ui.drumVolume.value, 10), audioState.drumVolume);
+                ui.drumVolume.value = String(val);
+                ui.drumVolumeLabel.textContent = val + ' dB';
                 audioState.drumVolume = val;
                 if (setDrumVolume) setDrumVolume(val);
                 if (shouldSave) saveSettings();

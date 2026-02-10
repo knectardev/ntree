@@ -601,6 +601,16 @@
       else if(!persist.hadConfig) setCandleStyle('std');
       syncCandleStyleEnabled();
 
+      // Zoom scale restore/apply.
+      // IMPORTANT: this runs after span preset handling because setSpanPreset() resets xZoom to 1.
+      // Precedence: explicit URL zoom params > saved config zoom.
+      var zxQ = getQueryParam('zoom_x', '');
+      var zyQ = getQueryParam('zoom_y', '');
+      var zxRaw = (zxQ !== '') ? Number(zxQ) : Number(cfg && cfg.zoom_x);
+      var zyRaw = (zyQ !== '') ? Number(zyQ) : Number(cfg && cfg.zoom_y);
+      if(Number.isFinite(zxRaw)) state.xZoom = clamp(zxRaw, 1, 256);
+      if(Number.isFinite(zyRaw)) state.yScaleFactor = clamp(zyRaw, 0.2, 6);
+
       updateUrlBarSize();
       enforceAlwaysOnOptions();
     })();

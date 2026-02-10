@@ -132,13 +132,13 @@
             // Load soprano (upper wick) sampler
             const sopranoInstrument = getSelectedInstrument('upper');
             audioState._sopranoSampler = await loadSampler(sopranoInstrument);
-            audioState._sopranoSampler.volume.value = -10;  // Audible volume
+            audioState._sopranoSampler.volume.value = Number.isFinite(audioState.upperWick.volume) ? audioState.upperWick.volume : -18;
             console.log('[Audio] Soprano sampler loaded:', sopranoInstrument);
 
             // Load bass (lower wick) sampler
             const bassInstrument = getSelectedInstrument('lower');
             audioState._bassSampler = await loadSampler(bassInstrument);
-            audioState._bassSampler.volume.value = -10;  // Audible volume
+            audioState._bassSampler.volume.value = Number.isFinite(audioState.lowerWick.volume) ? audioState.lowerWick.volume : -18;
             console.log('[Audio] Bass sampler loaded:', bassInstrument);
 
             // Create kick drum synth for downbeat

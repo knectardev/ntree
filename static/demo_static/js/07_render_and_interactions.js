@@ -30,8 +30,9 @@
     var volSep = showVolume ? 8 : 0;
     var volH = 0;
     if(showVolume){
-      // Default volume pane ~22% of plot height; clamp for small canvases.
-      volH = clamp(Math.floor(plot.h * 0.22), 46, Math.floor(plot.h * 0.35));
+      // Keep volume pane compact so price pane gets more vertical room.
+      // Default ~14% of plot height, with tighter min/max clamps.
+      volH = clamp(Math.floor(plot.h * 0.14), 28, Math.floor(plot.h * 0.22));
       // Ensure we always leave a reasonable price pane (avoid negative heights on small charts).
       var maxVolH = Math.max(0, Math.floor(plot.h - 110));
       if(volH > maxVolH) volH = maxVolH;
@@ -102,22 +103,24 @@
 
     var n = state.data.length;
     
-    // Compute FULL data range (all bars) for fixed note-to-price mapping
-    // This ensures notes have fixed "virtual prices" that scale with chart zoom
-    var fullDataMin = Infinity, fullDataMax = -Infinity;
-    for (var fi = 0; fi < n; fi++) {
-      var fd = state.data[fi];
-      if (!fd) continue;
-      if (Number.isFinite(fd.l) && fd.l < fullDataMin) fullDataMin = fd.l;
-      if (Number.isFinite(fd.h) && fd.h > fullDataMax) fullDataMax = fd.h;
+    // NOTE/MIDI Y mapping range.
+    // Prefer the audio module's visible-price range so note spacing follows the
+    // current chart viewport/zoom and feels visually "in tune" with price.
+    // Fallback to the rendered price range when unavailable.
+    var noteMapMin = yMin;
+    var noteMapMax = yMax;
+    try{
+      var ms = window._musicState || null;
+      if(ms && Number.isFinite(ms.visiblePriceMin) && Number.isFinite(ms.visiblePriceMax) && ms.visiblePriceMax > ms.visiblePriceMin){
+        noteMapMin = Number(ms.visiblePriceMin);
+        noteMapMax = Number(ms.visiblePriceMax);
+      }
+    } catch(_eNoteMap){}
+    if(!Number.isFinite(noteMapMin) || !Number.isFinite(noteMapMax) || noteMapMax <= noteMapMin){
+      noteMapMin = yMin;
+      noteMapMax = yMax;
     }
-    if (!Number.isFinite(fullDataMin) || !Number.isFinite(fullDataMax) || fullDataMax <= fullDataMin) {
-      fullDataMin = 0; fullDataMax = 100;
-    }
-    // Add small padding to full range
-    var fullDataSpan = fullDataMax - fullDataMin;
-    fullDataMin -= fullDataSpan * 0.02;
-    fullDataMax += fullDataSpan * 0.02;
+    var noteMapSpan = Math.max(1e-9, noteMapMax - noteMapMin);
     
     if(!n){
       // Grid + "No data" message are still clipped to the plot area.
@@ -1662,8 +1665,8 @@
             var midiNorm = (noteEv.midi - midiMin) / (midiMax - midiMin);
             midiNorm = Math.max(0, Math.min(1, midiNorm));
             
-            // Map to price using full data range (same as axis)
-            var notePrice = fullDataMin + midiNorm * (fullDataMax - fullDataMin);
+            // Map to the current note mapping range (same as left note axis)
+            var notePrice = noteMapMin + midiNorm * noteMapSpan;
             
             // Convert to Y coordinate (scales with zoom)
             noteY = yForPrice(notePrice, pricePlot, yMin, yMax);
@@ -1805,7 +1808,7 @@
           // Calculate Y position using same formula as note drawing
           // Map MIDI to FIXED price (full data range), then to Y (scales with zoom)
           var midiNorm = (midi - midiMin) / (midiMax - midiMin);
-          var notePrice = fullDataMin + midiNorm * (fullDataMax - fullDataMin);
+          var notePrice = noteMapMin + midiNorm * noteMapSpan;
           var noteY = yForPrice(notePrice, pricePlot, yMin, yMax);
           
           // Skip if outside visible range
@@ -2430,9 +2433,11 @@
     } catch(_e){
       // ignore pan-to-fetch failures
     }
+    var wasYDragging = !!state.yDragging;
     state.dragging = false;
     state.yDragging = false;
     state.lastDragDx = 0;
+    if(wasYDragging) scheduleSaveUiConfig();
   });
 
   canvas.addEventListener('wheel', function(e){
@@ -2504,6 +2509,14 @@
       }, 220);
     } catch(_e3){}
 
+    // Persist zoom level even when span bucket doesn't change.
+    try{
+      if(state._zoomPersistTimer) clearTimeout(state._zoomPersistTimer);
+      state._zoomPersistTimer = setTimeout(function(){
+        scheduleSaveUiConfig();
+      }, 220);
+    } catch(_e4){}
+
     // Auto W recompute on zoom: if the recommended bar size changes, refetch.
     try{
       if(ui.autoW && ui.autoW.checked && Number.isFinite(state.viewSpanMs) && state.viewSpanMs > 0){
@@ -2531,6 +2544,11 @@
       u.searchParams.set('bar_s', String(Math.floor(state.windowSec)));
       // Time scale preset (requested span).
       if(state && state.spanPreset) u.searchParams.set('span', String(state.spanPreset));
+      // Keep zoom scale in URL so refresh/share preserves current chart scale.
+      var zx = Math.round((Number(state.xZoom) || 1) * 1000) / 1000;
+      var zy = Math.round((Number(state.yScaleFactor) || 1) * 1000) / 1000;
+      u.searchParams.set('zoom_x', String(zx));
+      u.searchParams.set('zoom_y', String(zy));
       if(ui.autoW && ui.autoW.checked) u.searchParams.set('auto_w', '1');
       else u.searchParams.delete('auto_w');
       u.searchParams.set('max_bars', String(Math.floor(Number(getQueryParam('max_bars','') || '5000') || 5000)));

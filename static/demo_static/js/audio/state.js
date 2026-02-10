@@ -80,7 +80,7 @@
     window.audioState = {
         upperWick: {
             enabled: true,
-            volume: -23,
+            volume: -18,
             instrument: 'harpsichord',
             rhythm: '4',  // Quarter notes
             pattern: 'scale_asc',        // Voice pattern: scale_asc, scale_asc_desc, arp_asc, arp_asc_desc, scale_arp_alt, random_chord
@@ -90,7 +90,7 @@
         drumVolume: -12,
         lowerWick: {
             enabled: true,
-            volume: -17,
+            volume: -18,
             instrument: 'acoustic_bass',
             rhythm: '2',  // Half notes
             pattern: 'root_only',        // Voice pattern: root_only, root_3rd_5th

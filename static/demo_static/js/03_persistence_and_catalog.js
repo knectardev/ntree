@@ -316,6 +316,19 @@
         setSpanPreset(cfg.span.trim(), { skipLoad: true, skipSave: true, skipUrl: true });
       }
 
+      // Persisted chart zoom state.
+      // Apply after span preset, because setSpanPreset() intentionally resets xZoom to 1.
+      // - zoom_x: horizontal zoom from wheel interaction.
+      // - zoom_y: vertical zoom from Y-axis drag interaction.
+      if(cfg.zoom_x !== undefined){
+        var zx = Number(cfg.zoom_x);
+        if(Number.isFinite(zx)) state.xZoom = clamp(zx, 1, 256);
+      }
+      if(cfg.zoom_y !== undefined){
+        var zy = Number(cfg.zoom_y);
+        if(Number.isFinite(zy)) state.yScaleFactor = clamp(zy, 0.2, 6);
+      }
+
       if(typeof cfg.candleStyle === 'string' && cfg.candleStyle){
         setCandleStyle(cfg.candleStyle);
       }
@@ -377,6 +390,8 @@
       symbol: getSymbol(),
       bar_s: Math.floor(Number(state.windowSec) || 60),
       span: String(state.spanPreset || '1d'),
+      zoom_x: Math.round((Number(state.xZoom) || 1) * 1000) / 1000,
+      zoom_y: Math.round((Number(state.yScaleFactor) || 1) * 1000) / 1000,
       auto_w: !!(ui.autoW && ui.autoW.checked),
       showBands: !!(ui.showBands && ui.showBands.checked),
       showCandles: !!(ui.showCandles && ui.showCandles.checked),
@@ -439,10 +454,33 @@
     if(persist.saveTimer) clearTimeout(persist.saveTimer);
     persist.saveTimer = setTimeout(function(){
       try{
+        persist.saveTimer = null;
         localStorage.setItem(UI_CFG_KEY, JSON.stringify(collectUiConfig()));
       } catch(_e){}
     }, 250);
   }
+
+  function saveUiConfigNow(){
+    if(!persist.enabled || persist.applying) return;
+    try{
+      if(persist.saveTimer){
+        clearTimeout(persist.saveTimer);
+        persist.saveTimer = null;
+      }
+      localStorage.setItem(UI_CFG_KEY, JSON.stringify(collectUiConfig()));
+    } catch(_e){}
+  }
+
+  // Ensure the last interaction is persisted even on quick refresh/tab close.
+  try{
+    window.addEventListener('beforeunload', saveUiConfigNow);
+    window.addEventListener('pagehide', saveUiConfigNow);
+    document.addEventListener('visibilitychange', function(){
+      try{
+        if(document.visibilityState === 'hidden') saveUiConfigNow();
+      } catch(_e){}
+    });
+  } catch(_e){}
 
   // Robust rounded-rect path: never passes a negative radius to arcTo.
   function roundRect(ctx, x, y, w, h, r){

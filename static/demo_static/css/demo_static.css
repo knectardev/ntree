@@ -432,7 +432,7 @@
     .tradePnlUp{color:rgba(80,220,140,.95); font-weight:750}
     .tradePnlDn{color:rgba(255,110,110,.95); font-weight:750}
     .tradeMeta{color:rgba(215,224,234,.70)}
-    canvas{display:block;width:100%;height:710px}
+    canvas{display:block;width:100%;height:780px}
     .footer{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid rgba(255,255,255,.07);color:var(--muted);font-size:12px;min-height:40px}
     .k{color:var(--text)}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
