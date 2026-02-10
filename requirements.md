@@ -332,10 +332,10 @@ The audio system was refactored from a single 3,454-line file into 7 focused mod
 |------|-------|----------------|----------------------|
 | `config.js` | ~280 | Pure constants: instruments, note ranges, chord progressions, chord maps, genre/scale configs, kick config | `INSTRUMENT_MAP`, `NOTE_CONFIG`, `CHORD_PROGRESSIONS`, `CHORD_MAP_MAJOR/MINOR`, `GENRES`, `SCALES`, `ROOT_KEY_OFFSETS`, `KICK_CONFIG` |
 | `state.js` | ~250 | Shared state objects + small utilities | `musicState`, `audioState`, `ui`, `allAudioDropdowns`, `updateStatus()`, `midiToNoteName()`, `rhythmToDuration()`, `rhythmToDurationMs()` |
-| `theory.js` | ~370 | Scale/chord math, regime detection, pattern detection, voice separation | `updateRegimeFromPrice()`, `getScaleNotes()`, `getCurrentChordToneMods()`, `quantizeToChord()`, `nearestScaleNote()`, `offsetScaleDegree()`, `nearestScaleNoteAbove()`, `updateVisiblePriceRange()`, `detectMelodicPattern()`, `getDynamicMidiRange()`, `getChordTonesInRange()`, `forceNoteDifference()`, `forceNoteDifferenceStrict()`, `ensureVoiceSeparation()`, `advanceProgression()` |
+| `theory.js` | ~370 | Scale/chord math, regime detection, pattern detection, voice separation, chord label helpers | `updateRegimeFromPrice()`, `getScaleNotes()`, `getCurrentChordToneMods()`, `quantizeToChord()`, `nearestScaleNote()`, `offsetScaleDegree()`, `nearestScaleNoteAbove()`, `updateVisiblePriceRange()`, `detectMelodicPattern()`, `getDynamicMidiRange()`, `getChordTonesInRange()`, `forceNoteDifference()`, `forceNoteDifferenceStrict()`, `ensureVoiceSeparation()`, `advanceProgression()`, `getChordLabel()`, `getChordSequence()`, `getChordComponentPCs()` |
 | `pathfinder.js` | ~580 | Melodic cell system: soprano/bass note generation, scale runs, orbits, arpeggios, enclosures, walking bass, wick gravity, genre complexity | `generateSopranoNote()`, `getScaleRunNote()`, `getArpeggioNote()`, `applyGenrePhrasing()`, `updateSopranoHistory()`, `updateBassHistory()`, `startMelodicRun()`, `executeRunStep()`, `applyWickGravity()`, `needsWickReturn()`, `startVoiceCell()`, `executeSopranoRunStep()`, `executeWalkingStep()`, `applyGenreComplexity()`, `generateBassNote()` |
 | `engine.js` | ~310 | Tone.js lifecycle: sampler load/dispose, init/stop, hot-swap, price-to-MIDI, generateScore | `loadSampler()`, `reloadSampler()`, `initAudioEngine()`, `getSelectedInstrument()`, `stopAudioEngine()`, `updatePriceRange()`, `priceToMidi()`, `generateScore()` |
-| `conductor.js` | ~580 | Animation loop (RAF), processSubStep orchestrator, visual note emission, chart scroll sync, replay integration | `startAudioAnimation()`, `stopAudioAnimation()`, `pauseAudioAnimation()`, `resumeAudioAnimation()`, `processSubStep()`, `emitSubStepNote()`, `emitNoteEvent()`, `onBarAdvance()`, `hookIntoReplaySystem()`, `PLAYHEAD_POSITION`, `SUB_STEP_COUNT`, `SUB_STEP_SECONDS` |
+| `conductor.js` | ~1100 | Animation loop (RAF), processSubStep orchestrator, visual note emission, chart scroll sync, replay integration, pattern override engine, chord event emission | `startAudioAnimation()`, `stopAudioAnimation()`, `pauseAudioAnimation()`, `resumeAudioAnimation()`, `processSubStep()`, `emitSubStepNote()`, `emitNoteEvent()`, `emitChordEvent()`, `generatePatternNote()`, `onBarAdvance()`, `hookIntoReplaySystem()`, `PLAYHEAD_POSITION`, `SUB_STEP_COUNT`, `SUB_STEP_SECONDS` |
 | `ui.js` | ~430 | UI wiring (dropdowns/sliders), settings persistence (localStorage), init entry point, keyboard shortcuts | N/A (self-contained; calls into other modules) |
 
 **Inter-module namespace pattern**: Each file follows:
@@ -361,6 +361,7 @@ The audio system was refactored from a single 3,454-line file into 7 focused mod
 - `window._midiToNoteName` — alias to `_am.midiToNoteName`
 - `window._audioPlayheadIndex` — current smooth playback position (float bar index); set by conductor, read by renderer
 - `window._audioNoteEvents` — array of note event objects for visual rendering; set by conductor, read by renderer
+- `window._audioChordEvents` — array of chord region objects for chord overlay rendering; set by `emitChordEvent()`, read by renderer. Each entry has `startBarIndex`, `endBarIndex`, `degree`, `roman`, `noteName`, `quality`, `regime`, `cycleStart`, `cycleNum`
 - `window._audioSubStepSeconds` — sub-step duration (1/16 sec); set by conductor
 - `window.onReplayBarAdvance` — callback registered by `hookIntoReplaySystem()` for Practice mode integration
 
@@ -428,7 +429,7 @@ The renderer in `07_render_and_interactions.js` reads this array, maps `barIndex
 
 **Settings persistence (in `ui.js`, localStorage key: `ntree_audio_visual_settings`)**
 
-Saved on every UI change. Restored on page load. Includes: upper/lower wick settings (enabled, volume, instrument, rhythm), genre, rootKey, chordProgression, displayNotes, sensitivity, melodicRange, glowDuration, displayMode, panel open/closed states, speed (BPM).
+Saved on every UI change. Restored on page load. Includes: upper/lower wick settings (enabled, volume, instrument, rhythm, pattern, patternOverride, restartOnChord), genre (internally keyed; user-facing label is "Scale"), rootKey, chordProgression, displayNotes, chordOverlay, sensitivity, melodicRange, glowDuration, displayMode, panel open/closed states, speed (BPM).
 
 **Shared state objects (in `state.js`)**
 
@@ -447,9 +448,13 @@ The Pathfinding Sequencer implements a **"Hierarchical Composition Layer"** — 
 **Debugging benefit**: If a Raag or mode sounds "off," set Complexity to 0. If it still sounds off, the scale interval array itself is wrong. If it sounds correct at 0 but wrong at higher complexity, the issue is in the ornament/interruption logic.
 
 **UI (sidebar, collapsible)**
-- **Channel instruments**: Upper wick and lower wick each have enable checkbox, volume (dB), instrument dropdown, and rhythm dropdown (e.g. quarter, eighth, sixteenth for upper; half, quarter, whole for lower).
+- **Channel instruments**: Upper wick and lower wick each have enable checkbox, volume (dB), instrument dropdown, and rhythm dropdown (e.g. quarter, eighth, sixteenth for upper; half, quarter, whole for lower). Each voice also has:
+  - **Pattern Override** checkbox: When checked, bypasses the deep pathfinder algorithm and uses the selected simple pattern from the voice's pattern dropdown instead. When unchecked (default), the full pathfinder algorithm runs.
+  - **Soprano Pattern** dropdown (visible when Pattern Override is checked): Linear Ascending Scale, Asc/Desc Scale, Linear Ascending Arpeggio, Asc/Desc Arpeggio, Alternating Scale/Arpeggio, Alt. Scale/Arp. (Asc/Desc), Random Notes from Chord.
+  - **Bass Pattern** dropdown: Chord Root Only, Root/3rd/5th.
+  - **Restart on chord change** checkbox (per voice): When checked, the pattern index resets to the nearest note in the new chord when the chord progression advances. When unchecked, the pattern continues from wherever it left off.
 - **Instruments**: MIDI soundfonts (FluidR3_GM via gleitz.github.io): harpsichord, synth lead, pipe organ, strings, flute (upper); acoustic bass, electric bass, synth pad, pipe organ (lower).
-- **Music and genre**: Genre selection (Classical/Baroque, Indian Raags, Jazz Bebop, Rock/Bluegrass, Techno/Experimental), chord progression (classical, pop, blues, jazz, canon, fifties), root key (C through B), optional note labels on chart.
+- **Music and Scale Settings**: Scale selection (Major/Natural Minor, Lydian/Phrygian (Raag), Dorian/Altered, Pentatonic (Major/Minor), Phrygian/Chromatic), chord progression (classical, pop, blues, jazz, canon, fifties, old, bridge), root key (C through B), Note Labels toggle, Chord Overlay toggle.
 - **Audio visual sync tuning**:
   - **Complexity** (0-1): Controls stochastic interruption probability, scaled by genre-specific ornament chances. 0 = pure melodic cells; 1 = maximum genre ornamentation.
   - **Melodic Range** (0.3x-3.0x): Vertical zoom -- expands or compresses the price-to-MIDI mapping. Low = compressed (tighter movements); High = expanded (wider, dramatic leaps).
@@ -459,18 +464,27 @@ The Pathfinding Sequencer implements a **"Hierarchical Composition Layer"** — 
 
 **Music theory (client-side, in `config.js` + `theory.js`)**
 - **Regime**: UPTREND/DOWNTREND derived from price trend (consecutive up/down bars with configurable threshold of 3). Maps to genre-specific ascending/descending scales.
-- **Genres** (defined in `config.js` → `GENRES`): Each genre defines two scales (uptrend/downtrend) and a complexity config with ornament probabilities:
-  - Classical/Baroque: Major (Ionian) `[0,2,4,5,7,9,11]` / Natural Minor `[0,2,3,5,7,8,10]`; passing tones, neighbor tones, trills
-  - Indian Raags: Yaman (Lydian) `[0,2,4,6,7,9,11]` / Bhairavi (Phrygian) `[0,1,3,5,7,8,10]`; gamaka oscillation, meend slides
-  - Jazz Bebop: Dorian `[0,2,3,5,7,9,10]` / Altered (Super Locrian) `[0,1,3,4,6,8,10]`; chromatic approaches, bebop enclosures, tritone subs
-  - Rock/Bluegrass: Mixolydian `[0,2,4,5,7,9,10]` / Major Pentatonic `[0,2,4,7,9]`; blue notes, bends, slides
-  - Techno/Experimental: Phrygian `[0,1,3,5,7,8,10]` / Chromatic `[0-11]`; random jumps, clusters
-- **Chord progressions** (in `config.js` → `CHORD_PROGRESSIONS`): 16-step patterns per preset (classical, pop, blues, jazz, canon, fifties), each with MAJOR and MINOR variants. Chord maps for major/minor keys map scale degrees to intervals (I=major, ii=minor, etc.).
+- **Scales** (defined in `config.js` → `GENRES`; user-facing label is "Scale"): Each scale option defines two scale arrays (uptrend/downtrend) and a complexity config with ornament probabilities:
+  - Major / Natural Minor: Major (Ionian) `[0,2,4,5,7,9,11]` / Natural Minor (Aeolian) `[0,2,3,5,7,8,10]`; passing tones, neighbor tones, trills
+  - Lydian / Phrygian (Raag): Yaman (Lydian) `[0,2,4,6,7,9,11]` / Bhairavi (Phrygian) `[0,1,3,5,7,8,10]`; gamaka oscillation, meend slides
+  - Dorian / Altered: Dorian `[0,2,3,5,7,9,10]` / Altered (Super Locrian) `[0,1,3,4,6,8,10]`; chromatic approaches, bebop enclosures, tritone subs
+  - Pentatonic (Major / Minor): Major Pentatonic `[0,2,4,7,9]` / Minor Pentatonic `[0,3,5,7,10]`; blue notes, bends, slides
+  - Phrygian / Chromatic: Phrygian `[0,1,3,5,7,8,10]` / Chromatic `[0-11]`; random jumps, clusters
+- **Chord progressions** (in `config.js` → `CHORD_PROGRESSIONS`): 16-step patterns per preset (classical, pop, blues, jazz, canon, fifties, old, bridge), each with MAJOR and MINOR variants. Chord maps for major/minor keys map scale degrees to intervals (I=major, ii=minor, etc.). "Old" and "Bridge" are user-defined custom progressions.
 - **Chord quantization** (in `theory.js` → `quantizeToChord()`): Maps raw MIDI to the nearest chord tone with voice-leading preference (weighted blend of proximity to target: 60%, smooth motion from previous note: 40%).
 - **Note range**: Bass C1-F#3 (MIDI 24-54), Soprano F#3-C6 (MIDI 54-84); scale quantization and chord-tone targeting for smoother voice leading. Root key defaults to C (MIDI 60) and is adjustable via `ROOT_KEY_OFFSETS`.
 
+**Pattern Override Engine** (in `conductor.js` → `generatePatternNote()`)
+- When a voice's **Pattern Override** checkbox is checked, `processSubStep()` calls `generatePatternNote()` instead of the deep pathfinder for that voice. This bypasses cell selection, genre complexity, and wick gravity entirely.
+- Patterns generate notes deterministically from the current scale pool or chord pool: ascending scales, ascending/descending scales, ascending arpeggios, ascending/descending arpeggios, alternating scale/arpeggio, alternating scale/arpeggio with ascending/descending direction, random chord tones, chord root only, root/3rd/5th.
+- Override state (`_overrideState`) tracks per-voice: current index, direction, last progression step, alternation toggle/counter, previous MIDI. Reset on start/stop.
+- **Restart on chord change**: When enabled, the pattern index snaps to the nearest note in the new chord's pool when the progression step changes. When disabled, the pattern continues from its current position.
+
 **Rendering**
 - When audio is **playing**, the main canvas in `07_render_and_interactions.js` reserves a **note axis** (40px) on the **left** of the plot for piano-keyboard-style note labels; `noteAxisW = audioActive ? 40 : 0` so plot width and layout adjust automatically.
+- **Chord progression overlay** (`drawChordOverlay()` in `07_render_and_interactions.js`): Dashed vertical lines at chord boundaries with two-tone pill labels (roman numeral + note name) in a band near the bottom of the price pane. Toggled via "Chord Overlay" checkbox. Labels are **regime-colored**: green (`#7cffc2`) in uptrend/major, red/rose (`#ff6b8a`) in downtrend/minor.
+- **Cycle restart indicator**: When the 16-step chord progression loops, a solid amber vertical line replaces the dashed separator, with a numbered badge (`↺ 1`, `↺ 2`, ...) at the top showing which cycle is starting.
+- **Regime-aware note colors**: Soprano dots are green in uptrend/major, rose-red in downtrend/minor. Bass dots are blue in uptrend/major, purple in downtrend/minor. The regime is stamped on each note event at emission time for historical accuracy.
 
 ### Oscillation Signal Analysis (Static Web Page)
 
@@ -1133,6 +1147,13 @@ The following reflects the latest series of changes to the chart and replay expe
 - **Audio Pathfinding Sequencer architecture**: Unified all playback through `processSubStep()` (the "Conductor" in `conductor.js`). Replaced static snap-to-nearest-note with **4-note melodic cells** (scale runs, arpeggios, orbits) that walk toward wick targets through scale degrees and cross bar boundaries. Added per-voice pathfinding: soprano uses `executeSopranoRunStep()` (high agility), bass uses `executeWalkingStep()` (root/4th/5th walking bass). Implemented `quantizeToChord()` for voice-leading-aware chord quantization. Updated `priceToMidi()` to use visible viewport for tight wick-hugging. Added **Melodic Range** slider (vertical zoom). Repurposed Sensitivity slider as **Complexity** (0-1, multiplies genre-specific ornament probabilities). Genre complexity configs now drive stochastic interruptions (Jazz enclosures, Classical trills, Raag gamaka, etc.).
 - **Audio Pathfinder v2 — Hierarchical Composition Layer**: Overhauled melody engine to fix "repeating arpeggiated chords" problem. Implements the **Hierarchical Composition** concept: complexity is built in layers controlled by the Complexity slider (0 = "Naked" ground-truth scale runs, mid = structured cells, 1 = full genre-specific ornamentation). Key changes: (1) Distance-based cell selection: >4 semitones from wick = SCALE_RUN (walk 1 degree/step), ≤4 = ORBIT (dance pattern around wick). (2) **orbit** cell type: Target→+2→-1→Target→+1→-2 pattern for wick-hugging. (3) **Dynamic cell sizing**: 4-8 steps based on distance (longer runs when far). (4) **Beat-gated genre ornaments**: genre complexity no longer interrupts mid-scale-run. (5) **Relaxed wick gravity**: safety net only (>14 semitones), not constant pull. (6) Scale runs step exactly 1 degree for audible genre-specific scale passages. (7) Bass pathfinder uses same distance-based logic (>5 semitones = walk, ≤5 = arpeggio). (8) `nearestScaleNote()` constraint enforcement on every note — ensures genre scale integrity at all complexity levels.
 - **stock_data.db**: Modified by normal ingestion/backfill or replay event persistence (no schema change implied by the above).
+- **Genre → Scale UI rename**: User-facing label changed from "Genre" to "Scale" across `chart.html`, `config.js` label properties, and `ui.js` console logs. Internal keys (`audioState.genre`, `GENRES`, `musicState.currentGenre`) kept stable for localStorage compatibility. Scale option labels now show actual scale names: Major/Natural Minor, Lydian/Phrygian (Raag), Dorian/Altered, Pentatonic (Major/Minor), Phrygian/Chromatic.
+- **Pentatonic scale fix**: Rock/Bluegrass option changed from Mixolydian (uptrend) / Major Pentatonic (downtrend) to **Major Pentatonic** `[0,2,4,7,9]` (uptrend) / **Minor Pentatonic** `[0,3,5,7,10]` (downtrend). The previous Major Pentatonic in downtrend mode clashed with minor chord tones (major 3rd vs minor 3rd, major 6th vs flat 6th).
+- **Chord progression overlay**: New `drawChordOverlay()` IIFE in `07_render_and_interactions.js` renders dashed vertical lines at chord change boundaries with two-tone pill labels (roman numeral + note name). Data sourced from `window._audioChordEvents` populated by `emitChordEvent()` in `conductor.js`. Toggleable via "Chord Overlay" checkbox next to "Note Labels".
+- **Pattern Override system**: Added per-voice (soprano/bass) pattern override with dropdown, enable checkbox, and restart-on-chord-change checkbox. `generatePatternNote()` in `conductor.js` handles all pattern types. `processSubStep()` now has an `if (patternOverride)` branch that bypasses the full pathfinder.
+- **Regime-aware note colors**: Note dots are now colored by regime at emission time: soprano green/red, bass blue/purple. Chord labels also colored green (major/uptrend) or red (minor/downtrend).
+- **Cycle restart indicator**: Amber solid line + numbered `↺ N` badge at top of price pane when the 16-step chord progression loops.
+- **Custom chord progressions**: Added "Old" (D-F-C-G pattern, 16 single-step chords) and "Bridge" (I-V-vi-IV verse + ii-I-V-ii chorus, 8 paired chords).
 
 ---
 

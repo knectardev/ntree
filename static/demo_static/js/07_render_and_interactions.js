@@ -584,8 +584,7 @@
         var lineColor = 'rgba(255, 255, 255, 0.12)';
         var labelBg = 'rgba(15, 22, 32, 0.72)';
         var labelTextColor = 'rgba(215, 224, 234, 0.88)';
-        var romanColor = 'rgba(255, 255, 255, 0.95)';
-        var noteColor = 'rgba(160, 180, 210, 0.75)';
+        // romanColor and noteColor are now computed per-chord based on regime (see below)
 
         // Position the label band near the bottom of the price pane
         var labelBandH = 22;
@@ -612,15 +611,71 @@
 
           // ── Vertical separator line at chord boundary ──
           if (x0 >= pricePlot.x && x0 <= pricePlot.x + pricePlot.w) {
-            ctx.strokeStyle = lineColor;
-            ctx.lineWidth = 1;
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.moveTo(x0, pricePlot.y);
-            ctx.lineTo(x0, pricePlot.y + pricePlot.h);
-            ctx.stroke();
-            ctx.setLineDash([]);
+            if (ce.cycleStart) {
+              // Cycle restart — prominent solid line with glow
+              ctx.save();
+              ctx.strokeStyle = 'rgba(255, 190, 60, 0.35)';
+              ctx.lineWidth = 3;
+              ctx.setLineDash([]);
+              ctx.beginPath();
+              ctx.moveTo(x0, pricePlot.y);
+              ctx.lineTo(x0, pricePlot.y + pricePlot.h);
+              ctx.stroke();
+              // Inner brighter line
+              ctx.strokeStyle = 'rgba(255, 190, 60, 0.7)';
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(x0, pricePlot.y);
+              ctx.lineTo(x0, pricePlot.y + pricePlot.h);
+              ctx.stroke();
+              // Cycle number badge at top
+              if (ce.cycleNum) {
+                var badgeText = '↺ ' + ce.cycleNum;
+                ctx.font = 'bold 10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+                var badgeW = ctx.measureText(badgeText).width + 8;
+                var badgeH = 16;
+                var badgeX = x0 + 3;
+                var badgeY = pricePlot.y + 4;
+                // Badge background
+                ctx.fillStyle = 'rgba(255, 190, 60, 0.18)';
+                ctx.beginPath();
+                ctx.moveTo(badgeX + 3, badgeY);
+                ctx.lineTo(badgeX + badgeW - 3, badgeY);
+                ctx.quadraticCurveTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + 3);
+                ctx.lineTo(badgeX + badgeW, badgeY + badgeH - 3);
+                ctx.quadraticCurveTo(badgeX + badgeW, badgeY + badgeH, badgeX + badgeW - 3, badgeY + badgeH);
+                ctx.lineTo(badgeX + 3, badgeY + badgeH);
+                ctx.quadraticCurveTo(badgeX, badgeY + badgeH, badgeX, badgeY + badgeH - 3);
+                ctx.lineTo(badgeX, badgeY + 3);
+                ctx.quadraticCurveTo(badgeX, badgeY, badgeX + 3, badgeY);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255, 190, 60, 0.4)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                // Badge text
+                ctx.fillStyle = 'rgba(255, 200, 80, 0.92)';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + badgeH / 2);
+              }
+              ctx.restore();
+            } else {
+              ctx.strokeStyle = lineColor;
+              ctx.lineWidth = 1;
+              ctx.setLineDash([4, 4]);
+              ctx.beginPath();
+              ctx.moveTo(x0, pricePlot.y);
+              ctx.lineTo(x0, pricePlot.y + pricePlot.h);
+              ctx.stroke();
+              ctx.setLineDash([]);
+            }
           }
+
+          // ── Regime-aware label colors ──
+          var isMinor = (ce.regime === 'DOWNTREND' || ce.regime === 'MINOR');
+          var romanColor = isMinor ? 'rgba(255, 107, 138, 0.95)' : 'rgba(124, 255, 194, 0.95)';
+          var noteColor  = isMinor ? 'rgba(255, 107, 138, 0.65)' : 'rgba(124, 255, 194, 0.65)';
 
           // ── Chord label (centered in the region) ──
           var labelCenterX = cx0 + regionW / 2;

@@ -964,13 +964,21 @@
 
         var info = getChordLabel(musicState.progressionStep);
         var events = window._audioChordEvents;
+        var isCycleStart = (musicState.progressionStep === 0) || (events.length === 0);
 
         // Only push a new entry when the chord actually changes (or first event)
         var last = events.length > 0 ? events[events.length - 1] : null;
-        if (last && last.degree === info.degree) {
+        if (last && last.degree === info.degree && !isCycleStart) {
             // Same chord — just extend the region's end bar
             last.endBarIndex = barIndex;
         } else {
+            // Count which cycle we're on
+            var cycleNum = 1;
+            if (isCycleStart && events.length > 0) {
+                for (var ei = 0; ei < events.length; ei++) {
+                    if (events[ei].cycleStart) cycleNum++;
+                }
+            }
             events.push({
                 startBarIndex: barIndex,
                 endBarIndex: barIndex,
@@ -979,7 +987,10 @@
                 noteName: info.noteName,
                 quality: info.quality,
                 label: info.label,
-                progressionStep: musicState.progressionStep
+                progressionStep: musicState.progressionStep,
+                regime: musicState.regime,
+                cycleStart: isCycleStart,
+                cycleNum: isCycleStart ? cycleNum : 0
             });
         }
 

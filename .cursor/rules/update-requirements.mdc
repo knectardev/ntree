@@ -1,0 +1,28 @@
+---
+description: Auto-update requirements.md after any feature change, bug fix, or refactor
+alwaysApply: true
+---
+
+# Auto-Update requirements.md
+
+After completing any feature implementation, bug fix, or significant refactor, you MUST update `requirements.md` before considering the task done. Do not wait for the user to ask.
+
+## What to Update
+
+1. **Module table** (line counts, responsibility descriptions, key exports) if functions were added/removed/renamed
+2. **Window-level globals** if new `window.*` properties were introduced
+3. **UI section** if new controls (checkboxes, dropdowns, sliders) were added or existing ones renamed
+4. **Music theory section** if scales, chord progressions, or chord maps changed
+5. **Rendering section** if new visual features were added to the canvas
+6. **Architecture section** if the pathfinder, conductor, or engine logic changed structurally
+7. **Settings persistence** line if new values are saved/restored from localStorage
+8. **Recent updates** section at the bottom — append a concise bullet summarizing the change
+
+## How to Update
+
+- Keep entries **factual and concise** — describe what changed and where, not why
+- Use the same style and formatting as existing entries
+- Do NOT rewrite sections that haven't changed
+- Do NOT remove or reorder existing content unless it is now incorrect
+- When renaming user-facing labels, note both the old and new names for traceability
+- When adding new config values, list their defaults
