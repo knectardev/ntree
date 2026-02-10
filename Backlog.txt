@@ -1,7 +1,5 @@
 Volume effects
 
-Vary note durations
-
 Melody generation: 
 Enclosures
 Synchronicity beat

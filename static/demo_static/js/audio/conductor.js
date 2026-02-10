@@ -57,6 +57,103 @@
     // Track current held notes for extension (module scope)
     let currentSopranoNote = null;
     let currentBassNote = null;
+    const _phrasingState = {
+        soprano: { lastMidi: null, lastPrice: null },
+        bass: { lastMidi: null, lastPrice: null }
+    };
+    const _euclidCache = {};
+
+    function clamp01(v) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return 0;
+        return Math.max(0, Math.min(1, n));
+    }
+
+    function getEuclideanPattern(hits, steps) {
+        const n = Math.max(1, Math.floor(Number(steps) || 16));
+        const k = Math.max(1, Math.min(n, Math.floor(Number(hits) || 8)));
+        const key = k + ':' + n;
+        if (_euclidCache[key]) return _euclidCache[key];
+        const pattern = new Array(n).fill(0);
+        for (let i = 0; i < n; i++) {
+            if (((i * k) % n) < k) pattern[i] = 1;
+        }
+        _euclidCache[key] = pattern;
+        return pattern;
+    }
+
+    function shouldTriggerRhythmicPulse(subStepInBar, voice) {
+        if (voice === 'bass' && !audioState.phrasingApplyToBass) {
+            return false;
+        }
+        const density = Math.max(1, Math.min(SUB_STEP_COUNT, Math.round(Number(audioState.rhythmDensity) || 8)));
+        const pattern = getEuclideanPattern(density, SUB_STEP_COUNT);
+        const phaseOffset = (voice === 'bass') ? 2 : 0;
+        const idx = ((subStepInBar + phaseOffset) % SUB_STEP_COUNT + SUB_STEP_COUNT) % SUB_STEP_COUNT;
+        return pattern[idx] === 1;
+    }
+
+    function getRangeNormForBar(barIndex) {
+        const d = state && Array.isArray(state.data) ? state.data : [];
+        if (!d.length) return 0.5;
+        const i1 = Math.max(0, Math.min(d.length - 1, Math.floor(barIndex)));
+        const i0 = Math.max(0, i1 - 47);
+        let minR = Infinity;
+        let maxR = -Infinity;
+        for (let i = i0; i <= i1; i++) {
+            const bar = d[i];
+            if (!bar) continue;
+            const r = Math.max(0, Number(bar.h) - Number(bar.l));
+            if (!Number.isFinite(r)) continue;
+            if (r < minR) minR = r;
+            if (r > maxR) maxR = r;
+        }
+        const cur = d[i1];
+        const curR = cur ? Math.max(0, Number(cur.h) - Number(cur.l)) : NaN;
+        if (!Number.isFinite(curR)) return 0.5;
+        if (!Number.isFinite(minR) || !Number.isFinite(maxR) || maxR <= minR) return 0.5;
+        return Math.max(0, Math.min(1, (curR - minR) / (maxR - minR)));
+    }
+
+    function computeDynamicDurationSec(barIndex, voice) {
+        const sustain = clamp01(audioState.sustainFactor ?? 0.35);
+        const norm = getRangeNormForBar(barIndex);
+        const minSec = 0.05 + sustain * 0.08;
+        const maxSec = 0.22 + sustain * 0.55;
+        let sec = minSec + (maxSec - minSec) * norm;
+        if (voice === 'bass') sec *= 1.1;
+        if (!Number.isFinite(sec)) sec = 0.18;
+        return Math.max(0.04, Math.min(1.2, sec));
+    }
+
+    function shouldTieNote(voice, midi, price) {
+        if (voice === 'bass' && !audioState.phrasingApplyToBass) return false;
+        const st = _phrasingState[voice];
+        if (!st) return false;
+        const sustain = clamp01(audioState.sustainFactor ?? 0.35);
+        if (sustain <= 0) return false;
+        if (st.lastMidi === null || st.lastMidi !== midi) return false;
+        const visMin = Number(musicState.visiblePriceMin);
+        const visMax = Number(musicState.visiblePriceMax);
+        const span = (Number.isFinite(visMin) && Number.isFinite(visMax) && visMax > visMin) ? (visMax - visMin) : 1;
+        const pNow = Number(price);
+        const pPrev = Number(st.lastPrice);
+        if (!Number.isFinite(pNow) || !Number.isFinite(pPrev)) return false;
+        const delta = Math.abs(pNow - pPrev);
+        const threshold = span * (0.001 + sustain * 0.02);
+        return delta <= threshold;
+    }
+
+    function extendLastNoteEvent(voice, durationMs, nowMs) {
+        if (!window._audioNoteEvents || !window._audioNoteEvents.length) return;
+        for (let i = window._audioNoteEvents.length - 1; i >= 0; i--) {
+            const ev = window._audioNoteEvents[i];
+            if (!ev || ev.voice !== voice) continue;
+            ev.endTime = Math.max(Number(ev.endTime) || 0, nowMs + durationMs);
+            ev.durationMs = Math.max(Number(ev.durationMs) || 0, ev.endTime - (Number(ev.time) || nowMs));
+            return;
+        }
+    }
 
     // ========================================================================
     // PATTERN OVERRIDE STATE & GENERATOR
@@ -316,6 +413,10 @@
         // Reset held note tracking
         currentSopranoNote = null;
         currentBassNote = null;
+        _phrasingState.soprano.lastMidi = null;
+        _phrasingState.soprano.lastPrice = null;
+        _phrasingState.bass.lastMidi = null;
+        _phrasingState.bass.lastPrice = null;
         
         // Reset reference prices for fresh MIDI mapping
         audioState._referencePrice = null;
@@ -414,6 +515,10 @@
         window._audioDrumEvents = [];
         window._audioDrumStep = null;
         audioState._smoothPosition = 0;
+        _phrasingState.soprano.lastMidi = null;
+        _phrasingState.soprano.lastPrice = null;
+        _phrasingState.bass.lastMidi = null;
+        _phrasingState.bass.lastPrice = null;
         if (typeof window.requestDraw === 'function') {
             window.requestDraw('audio_stop');
         }
@@ -512,6 +617,10 @@
             musicState.prevBarClose = null;
             currentSopranoNote = null;
             currentBassNote = null;
+            _phrasingState.soprano.lastMidi = null;
+            _phrasingState.soprano.lastPrice = null;
+            _phrasingState.bass.lastMidi = null;
+            _phrasingState.bass.lastPrice = null;
         }
         
         // Get current sub-step (global across all bars)
@@ -632,9 +741,7 @@
         const bassChordPool = getChordTonesInRange(bassRange.min, bassRange.max);
         
         // ── SOPRANO PATHFINDER (High Agility: runs, arpeggios, orbits) ──
-        const sopranoRhythm = parseInt(audioState.upperWick.rhythm) || 4;
-        const sopranoInterval = SUB_STEP_COUNT / sopranoRhythm;
-        const shouldPlaySoprano = (subStepInBar % sopranoInterval === 0);
+        const shouldPlaySoprano = shouldTriggerRhythmicPulse(subStepInBar, 'soprano');
         
         let sopranoMidi = musicState.prevSoprano || 72;
         
@@ -746,22 +853,34 @@
             sopranoMidi = Math.max(sopranoRange.min, Math.min(sopranoRange.max, sopranoMidi));
             updateSopranoHistory(sopranoMidi);
             
-            const sopranoDurationMs = sopranoInterval * SUB_STEP_SECONDS * 1000;
+            const sopranoDurationSec = computeDynamicDurationSec(barIndex, 'soprano');
+            const sopranoDurationMs = sopranoDurationSec * 1000;
+            const tieSoprano = shouldTieNote('soprano', sopranoMidi, barData.h);
             if (audioState._sopranoSampler) {
                 const noteFreq = Tone.Frequency(sopranoMidi, 'midi').toNote();
-                const toneDuration = rhythmToDuration(audioState.upperWick.rhythm);
-                try {
-                    audioState._sopranoSampler.triggerAttackRelease(noteFreq, toneDuration, now, 0.7);
-                } catch (e) {}
+                if (!tieSoprano) {
+                    try {
+                        audioState._sopranoSampler.triggerAttackRelease(noteFreq, sopranoDurationSec, now, 0.7);
+                    } catch (e) {}
+                }
             }
-            emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow);
+            if (tieSoprano) {
+                extendLastNoteEvent('soprano', sopranoDurationMs, perfNow);
+            } else {
+                emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow);
+            }
+            _phrasingState.soprano.lastMidi = sopranoMidi;
+            _phrasingState.soprano.lastPrice = Number(barData.h);
             musicState.prevSoprano = sopranoMidi;
         }
         
         // ── BASS PATHFINDER (High Stability: walking bass, root/4th/5th leaps) ──
+        const bassPhrasingEnabled = !!audioState.phrasingApplyToBass;
         const bassRhythm = parseInt(audioState.lowerWick.rhythm) || 2;
         const bassInterval = SUB_STEP_COUNT / bassRhythm;
-        const shouldPlayBass = (subStepInBar % bassInterval === 0);
+        const shouldPlayBass = bassPhrasingEnabled
+            ? shouldTriggerRhythmicPulse(subStepInBar, 'bass')
+            : (subStepInBar % bassInterval === 0);
         
         let bassMidi = musicState.prevBass || 48;
         
@@ -857,15 +976,27 @@
             bassMidi = Math.max(bassRange.min, Math.min(bassRange.max, bassMidi));
             updateBassHistory(bassMidi);
             
-            const bassDurationMs = bassInterval * SUB_STEP_SECONDS * 1000;
+            const bassDurationSec = bassPhrasingEnabled
+                ? computeDynamicDurationSec(barIndex, 'bass')
+                : (bassInterval * SUB_STEP_SECONDS);
+            const bassDurationMs = bassDurationSec * 1000;
+            const tieBass = bassPhrasingEnabled ? shouldTieNote('bass', bassMidi, barData.l) : false;
             if (audioState._bassSampler) {
                 const noteFreq = Tone.Frequency(bassMidi, 'midi').toNote();
-                const toneDuration = rhythmToDuration(audioState.lowerWick.rhythm);
-                try {
-                    audioState._bassSampler.triggerAttackRelease(noteFreq, toneDuration, now, 0.7);
-                } catch (e) {}
+                if (!tieBass) {
+                    try {
+                        const toneDuration = bassPhrasingEnabled ? bassDurationSec : rhythmToDuration(audioState.lowerWick.rhythm);
+                        audioState._bassSampler.triggerAttackRelease(noteFreq, toneDuration, now, 0.7);
+                    } catch (e) {}
+                }
             }
-            emitSubStepNote('bass', bassMidi, barData.l, preciseBarIndex, bassDurationMs, perfNow);
+            if (tieBass) {
+                extendLastNoteEvent('bass', bassDurationMs, perfNow);
+            } else {
+                emitSubStepNote('bass', bassMidi, barData.l, preciseBarIndex, bassDurationMs, perfNow);
+            }
+            _phrasingState.bass.lastMidi = bassMidi;
+            _phrasingState.bass.lastPrice = Number(barData.l);
             musicState.prevBass = bassMidi;
         }
         

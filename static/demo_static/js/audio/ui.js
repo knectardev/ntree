@@ -161,6 +161,9 @@
                 chordOverlay: audioState.chordOverlay,
                 sensitivity: audioState.sensitivity,
                 beatStochasticity: audioState.beatStochasticity,
+                rhythmDensity: audioState.rhythmDensity,
+                sustainFactor: audioState.sustainFactor,
+                phrasingApplyToBass: !!audioState.phrasingApplyToBass,
                 melodicRange: audioState.melodicRange,
                 glowDuration: audioState.glowDuration,
                 displayMode: audioState.displayMode,
@@ -216,6 +219,9 @@
             audioState.chordOverlay = settings.chordOverlay ?? true;
             audioState.sensitivity = settings.sensitivity ?? 0.5;
             audioState.beatStochasticity = settings.beatStochasticity ?? 0;
+            audioState.rhythmDensity = Math.max(1, Math.min(16, Math.round(settings.rhythmDensity ?? 8)));
+            audioState.sustainFactor = settings.sustainFactor ?? 0.35;
+            audioState.phrasingApplyToBass = settings.phrasingApplyToBass ?? false;
             audioState.melodicRange = settings.melodicRange ?? 1.0;
             audioState.glowDuration = settings.glowDuration ?? 3;
             audioState.displayMode = settings.displayMode || 'bars';
@@ -310,6 +316,17 @@
         if (ui.beatStochasticity) {
             ui.beatStochasticity.value = audioState.beatStochasticity;
             if (ui.beatStochasticityLabel) ui.beatStochasticityLabel.textContent = audioState.beatStochasticity.toFixed(2);
+        }
+        if (ui.rhythmDensity) {
+            ui.rhythmDensity.value = audioState.rhythmDensity;
+            if (ui.rhythmDensityLabel) ui.rhythmDensityLabel.textContent = String(Math.round(audioState.rhythmDensity));
+        }
+        if (ui.sustainFactor) {
+            ui.sustainFactor.value = audioState.sustainFactor;
+            if (ui.sustainFactorLabel) ui.sustainFactorLabel.textContent = Math.round(audioState.sustainFactor * 100) + '%';
+        }
+        if (ui.phrasingApplyBassChk) {
+            ui.phrasingApplyBassChk.checked = !!audioState.phrasingApplyToBass;
         }
         if (ui.melodicRange) {
             ui.melodicRange.value = audioState.melodicRange;
@@ -548,6 +565,14 @@
         // Tuning sliders
         setupSlider(ui.sensitivity, ui.sensitivityLabel, '', 'sensitivity', v => v.toFixed(2));
         setupSlider(ui.beatStochasticity, ui.beatStochasticityLabel, '', 'beatStochasticity', v => v.toFixed(2));
+        setupSlider(ui.rhythmDensity, ui.rhythmDensityLabel, '', 'rhythmDensity', v => Math.round(v));
+        setupSlider(ui.sustainFactor, ui.sustainFactorLabel, '%', 'sustainFactor', v => Math.round(v * 100));
+        if (ui.phrasingApplyBassChk) {
+            ui.phrasingApplyBassChk.addEventListener('change', () => {
+                audioState.phrasingApplyToBass = !!ui.phrasingApplyBassChk.checked;
+                saveSettings();
+            });
+        }
         setupSlider(ui.melodicRange, ui.melodicRangeLabel, 'X', 'melodicRange', v => v.toFixed(1));
         setupSlider(ui.glowDuration, ui.glowDurationLabel, ' UNITS', 'glowDuration', v => Math.round(v));
 
