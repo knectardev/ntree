@@ -689,29 +689,60 @@ def api_window():
         # Pull base bars in the requested window.
         start_sec = int(start_ms // 1000)
         end_sec = int(end_ms // 1000)
-        cur.execute(
-            """
-            SELECT
-                timestamp,
-                COALESCE(open_price, price)  AS o,
-                COALESCE(high_price, price)  AS h,
-                COALESCE(low_price, price)   AS l,
-                price                        AS c,
-                COALESCE(volume, 0)          AS v,
-                ema_9, ema_21, ema_50, ema_200, vwap
-            FROM stock_data
-            WHERE ticker = ?
-              AND interval = ?
-              AND strftime('%s', timestamp) >= ?
-              AND strftime('%s', timestamp) <= ?
-            ORDER BY timestamp ASC
-            """,
-            (symbol, base_interval, str(start_sec), str(end_sec)),
-        )
+        # Select indicator columns that exist; ema_200 may be missing in older DBs
+        try:
+            cur.execute(
+                """
+                SELECT
+                    timestamp,
+                    COALESCE(open_price, price)  AS o,
+                    COALESCE(high_price, price)  AS h,
+                    COALESCE(low_price, price)   AS l,
+                    price                        AS c,
+                    COALESCE(volume, 0)          AS v,
+                    ema_9, ema_21, ema_50, ema_200, vwap
+                FROM stock_data
+                WHERE ticker = ?
+                  AND interval = ?
+                  AND strftime('%s', timestamp) >= ?
+                  AND strftime('%s', timestamp) <= ?
+                ORDER BY timestamp ASC
+                """,
+                (symbol, base_interval, str(start_sec), str(end_sec)),
+            )
+        except Exception:
+            # Fallback when ema_200 (or other indicator column) does not exist
+            cur.execute(
+                """
+                SELECT
+                    timestamp,
+                    COALESCE(open_price, price)  AS o,
+                    COALESCE(high_price, price)  AS h,
+                    COALESCE(low_price, price)  AS l,
+                    price                        AS c,
+                    COALESCE(volume, 0)          AS v,
+                    ema_9, ema_21, ema_50, vwap
+                FROM stock_data
+                WHERE ticker = ?
+                  AND interval = ?
+                  AND strftime('%s', timestamp) >= ?
+                  AND strftime('%s', timestamp) <= ?
+                ORDER BY timestamp ASC
+                """,
+                (symbol, base_interval, str(start_sec), str(end_sec)),
+            )
         base_rows = cur.fetchall()
 
+        # Each row is either 11 cols (with ema_200) or 10 cols (without: ema_9, ema_21, ema_50, vwap only)
         parsed: List[Tuple[int, float, float, float, float, float, Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]] = []
-        for (ts, o, h, l, c, v, e9, e21, e50, e200, vw) in base_rows:
+        for row in base_rows:
+            ts, o, h, l, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
+            e9 = row[6] if len(row) > 6 else None
+            e21 = row[7] if len(row) > 7 else None
+            e50 = row[8] if len(row) > 8 else None
+            # When 10 cols: row[9] is vwap; when 11 cols: row[9] is ema_200, row[10] is vwap
+            e200 = row[9] if len(row) > 10 else None
+            vw = row[10] if len(row) > 10 else (row[9] if len(row) > 9 else None)
             t_ms = _parse_iso_to_epoch_ms(ts)
             if t_ms is None:
                 continue
