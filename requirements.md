@@ -1164,6 +1164,7 @@ The following reflects the latest series of changes to the chart and replay expe
 - **Drum Beat dropdown**: New `drums.js` module with 11 selectable beat patterns (Simple, Minimal Jazz, Latin/Salsa, Reggaeton/Latin Trap, Folk-Country Shuffle, Indian Tabla, Afrobeat, Funk Pocket, Lo-Fi/Dilla, Brazilian Samba, Electronic House). Drum Beat dropdown added to Music and Scale Settings section. Percussion synths (kick, snare, hi-hat, ride, clave) created lazily; `playDrumStep()` called every sub-step from conductor. Selection persisted in `drumBeat` via localStorage.
 - **Drum volume control**: Volume slider for drum layer added to Channel Instruments section (below Lower wick). Controls kick + all percussion. `setDrumVolume()` in drums.js updates all drum synths. Persisted in `drumVolume` (default -12 dB).
 - **Beat Stochasticity slider**: Added to Audio Visual Tuning. `playDrumStep()` in drums.js now applies humanization when `beatStochasticity` > 0: note dropout (30% max skip), ghost notes (soft hi-hat/snare on off-beats), velocity variation, micro-timing jitter. Persisted in `beatStochasticity` (default 0).
+- **Chart runtime hotfix**: Removed accidental merge-conflict markers from `static/demo_static/js/07_render_and_interactions.js` that caused browser parse failure (`Unexpected token '<<'`), which in turn prevented global draw/practice helpers from initializing (`draw`, `_syncPracticeSpeedLabel`).
 
 ---
 

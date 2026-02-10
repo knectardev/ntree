@@ -567,7 +567,6 @@
       drawGrid(pricePlot, { yMin: yMin, yMax: yMax, plot: plot, start: start, end: end, barsVisible: barsVisible });
     }
 
-<<<<<<< Current (Your changes)
     // ── DRUM PULSE STRIP ──
     // 25px strip above chord labels: 16 steps per bar, kick/snare/hat ticks; active step glows
     (function drawDrumPulseStrip(){
@@ -629,8 +628,6 @@
       } catch (_eDrum) {}
     })();
 
-=======
->>>>>>> Incoming (Background Agent changes)
     // ── CHORD PROGRESSION OVERLAY ──
     // Draws vertical separator lines and labels showing the active chord from
     // the selected chord progression while audio is playing.
