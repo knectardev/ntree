@@ -258,6 +258,17 @@
                   <span class="hint" style="opacity:0.5;font-size:10px;">Restart on chord change</span>
                 </label>
               </div>
+              
+              <!-- Drum -->
+              <label class="chkRow" style="margin-top:8px;">
+                <span class="chkLbl">
+                  <span class="chkName">Drum</span>
+                </span>
+              </label>
+              <div style="display:flex;gap:8px;align-items:center;margin:6px 0 0 24px;">
+                <input id="audioDrumVolume" type="range" min="-60" max="0" step="1" value="-12" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioDrumVolumeLabel" style="min-width:42px;text-align:right;">12 DB</span>
+              </div>
             </div>
           </details>
 
@@ -324,6 +335,28 @@
                     <div class="ddItem" role="option" data-value="fifties">50s Doo-Wop</div>
                     <div class="ddItem" role="option" data-value="old">Old</div>
                     <div class="ddItem" role="option" data-value="bridge">Bridge</div>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                <span class="hint" style="min-width:110px;">Drum Beat:</span>
+                <div class="dd" id="audioDrumBeatDD" style="flex:1;">
+                  <button class="ddBtn" id="audioDrumBeatBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioDrumBeatLabel">Simple (downbeat only)</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioDrumBeatMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="simple">Simple (downbeat only)</div>
+                    <div class="ddItem" role="option" data-value="minimal_jazz">Minimal Jazz (sticks on rim/cymbal)</div>
+                    <div class="ddItem" role="option" data-value="latin_salsa">Latin / Salsa (Palmieri, Puente)</div>
+                    <div class="ddItem" role="option" data-value="reggaeton_trap">Reggaeton / Latin Trap (Bad Bunny)</div>
+                    <div class="ddItem" role="option" data-value="folk_country">Folk-Country Shuffle (Grateful Dead)</div>
+                    <div class="ddItem" role="option" data-value="indian_tabla">Indian Tabla</div>
+                    <div class="ddItem" role="option" data-value="afrobeat">Afrobeat / West African (Fela Kuti)</div>
+                    <div class="ddItem" role="option" data-value="funk_pocket">Funk Pocket (James Brown)</div>
+                    <div class="ddItem" role="option" data-value="lofi_dilla">Lo-Fi / Neo-Soul / Dilla Feel</div>
+                    <div class="ddItem" role="option" data-value="brazilian_samba">Brazilian Samba / Bossa Nova</div>
+                    <div class="ddItem" role="option" data-value="electronic_house">Electronic House / Minimal Techno</div>
                   </div>
                 </div>
               </div>
@@ -799,6 +832,7 @@
   <!-- Audio Visual Settings module (refactored from 13_audio_controls.js) -->
   <script src="static/demo_static/js/audio/config.js"></script>
   <script src="static/demo_static/js/audio/state.js"></script>
+  <script src="static/demo_static/js/audio/drums.js"></script>
   <script src="static/demo_static/js/audio/theory.js"></script>
   <script src="static/demo_static/js/audio/pathfinder.js"></script>
   <script src="static/demo_static/js/audio/engine.js"></script>

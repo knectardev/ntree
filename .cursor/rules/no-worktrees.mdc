@@ -1,0 +1,14 @@
+---
+description: CRITICAL - Always use main project path, NEVER worktrees
+alwaysApply: true
+---
+
+# DO NOT USE WORKTREES
+
+**The main project path is:** `c:\local_dev\ntree`
+
+**NEVER** edit files under:
+- `C:\Users\chris\.cursor\worktrees\ntree\*`
+- Any path containing `worktrees\ntree\` (e.g. wrn, uso, cpe, ooo)
+
+All code changes must be made in the main project at `c:\local_dev\ntree`. Ignore workspace path if it points to a worktree.

@@ -86,6 +86,7 @@
             patternOverride: false,      // When true, pattern overrides the deep pathfinder algorithm
             restartOnChord: true         // When true, pattern resets to chord root on chord change
         },
+        drumVolume: -12,
         lowerWick: {
             enabled: true,
             volume: -17,
@@ -98,6 +99,7 @@
         genre: 'classical',
         rootKey: 'C',           // Root key for scales and chord progressions (C, C#, D, ... B)
         chordProgression: 'canon',
+        drumBeat: 'simple',
         displayNotes: true,
         chordOverlay: true,     // Show chord progression overlay on chart
         sensitivity: 0.5,       // Repurposed: Complexity/Stochasticism (0=pure, 1=chaotic)
@@ -162,6 +164,8 @@
         lowerWickChk: document.getElementById('audioLowerWick'),
         lowerVolume: document.getElementById('audioLowerVolume'),
         lowerVolumeLabel: document.getElementById('audioLowerVolumeLabel'),
+        drumVolume: document.getElementById('audioDrumVolume'),
+        drumVolumeLabel: document.getElementById('audioDrumVolumeLabel'),
         lowerInstrumentDD: document.getElementById('audioLowerInstrumentDD'),
         lowerInstrumentBtn: document.getElementById('audioLowerInstrumentBtn'),
         lowerInstrumentMenu: document.getElementById('audioLowerInstrumentMenu'),
@@ -194,6 +198,10 @@
         chordProgressionBtn: document.getElementById('audioChordProgressionBtn'),
         chordProgressionMenu: document.getElementById('audioChordProgressionMenu'),
         chordProgressionLabel: document.getElementById('audioChordProgressionLabel'),
+        drumBeatDD: document.getElementById('audioDrumBeatDD'),
+        drumBeatBtn: document.getElementById('audioDrumBeatBtn'),
+        drumBeatMenu: document.getElementById('audioDrumBeatMenu'),
+        drumBeatLabel: document.getElementById('audioDrumBeatLabel'),
         displayNotesChk: document.getElementById('audioDisplayNotes'),
         chordOverlayChk: document.getElementById('audioChordOverlay'),
 

@@ -1,19 +1,27 @@
-Walking bass
-Volume
+Drum beats (in progress)
+
+Bass line styles 
+* Walking bass
+* Bluegrass bass lines
+* Bluegrass bass lines
+* Bach invention / counterpoint style 
+* Suss bass line (octave) for tension
+* Blues travelers bass line
+
 Volume effects
-Latin beats
-Beats in general 
-Suss bass line (octave) for tension
-Strudel(?)
-Chord layer (inner candles)
-Counterpoint / alternate leading voice 
+
+
 Vary note durations
-Blues travelers bass line
-Bluegrass bass lines
-Tonal inflections
-Arthur app review
+
+
+
+Melody generation: 
 Enclosures
-Export to midi / sheet music 
 Synchronicity beat
-Jazz drum
+Counterpoint / alternate leading voice 
+
+Misc Features / Future: 
+Export to midi / sheet music 
 Equalizer
+Strudel(?) type integrations
+Chord Layer

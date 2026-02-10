@@ -1,5 +1,9 @@
 # ntree — Requirements & Technical Specification
 
+> **IMPORTANT — DO NOT USE WORKTREES**
+>
+> All edits must be made in the **main project** at `c:\local_dev\ntree`. Do **NOT** edit files under `C:\Users\chris\.cursor\worktrees\ntree\*` (e.g. wrn, uso, cpe, ooo). The active directory is the main project only.
+
 This document describes the **current** functionality and technical specifications implemented in this repo (Flask app, SQLite schema, APIs, UI pages, strategy/backtest semantics, and dependencies).
 
 ---
@@ -331,6 +335,7 @@ The audio system was refactored from a single 3,454-line file into 7 focused mod
 | File | Lines | Responsibility | Key exports to `_am` |
 |------|-------|----------------|----------------------|
 | `config.js` | ~280 | Pure constants: instruments, note ranges, chord progressions, chord maps, genre/scale configs, kick config | `INSTRUMENT_MAP`, `NOTE_CONFIG`, `CHORD_PROGRESSIONS`, `CHORD_MAP_MAJOR/MINOR`, `GENRES`, `SCALES`, `ROOT_KEY_OFFSETS`, `KICK_CONFIG` |
+| `drums.js` | ~200 | Drum beat patterns (16 sub-steps), percussion synths (snare, hi-hat, ride, clave), playDrumStep | `DRUM_BEATS`, `playDrumStep()`, `disposeDrums()` |
 | `state.js` | ~250 | Shared state objects + small utilities | `musicState`, `audioState`, `ui`, `allAudioDropdowns`, `updateStatus()`, `midiToNoteName()`, `rhythmToDuration()`, `rhythmToDurationMs()` |
 | `theory.js` | ~370 | Scale/chord math, regime detection, pattern detection, voice separation, chord label helpers | `updateRegimeFromPrice()`, `getScaleNotes()`, `getCurrentChordToneMods()`, `quantizeToChord()`, `nearestScaleNote()`, `offsetScaleDegree()`, `nearestScaleNoteAbove()`, `updateVisiblePriceRange()`, `detectMelodicPattern()`, `getDynamicMidiRange()`, `getChordTonesInRange()`, `forceNoteDifference()`, `forceNoteDifferenceStrict()`, `ensureVoiceSeparation()`, `advanceProgression()`, `getChordLabel()`, `getChordSequence()`, `getChordComponentPCs()` |
 | `pathfinder.js` | ~580 | Melodic cell system: soprano/bass note generation, scale runs, orbits, arpeggios, enclosures, walking bass, wick gravity, genre complexity | `generateSopranoNote()`, `getScaleRunNote()`, `getArpeggioNote()`, `applyGenrePhrasing()`, `updateSopranoHistory()`, `updateBassHistory()`, `startMelodicRun()`, `executeRunStep()`, `applyWickGravity()`, `needsWickReturn()`, `startVoiceCell()`, `executeSopranoRunStep()`, `executeWalkingStep()`, `applyGenreComplexity()`, `generateBassNote()` |
@@ -400,7 +405,8 @@ The audio playback uses a `requestAnimationFrame`-based loop for smooth, frame-r
 1. **`startAudioAnimation()`**: Calculates `barsPerMs` from BPM, sets initial `_smoothPosition` so the playhead starts at center-screen, resets all melodic state (voice cells, histories, regime), calls `updateVisiblePriceRange()`.
 2. **`smoothAnimationLoop(timestamp)`**: RAF callback. Calculates `deltaMs` since last frame (clamped to 100ms for backgrounded tabs). Converts to sub-step advancement: `subStepsPerMs = (bpm / 60) * 16 / 1000`. Calls `processSubStep()` for each new sub-step crossed. Calls `updateSmoothScroll()` every frame for continuous chart scrolling.
 3. **`processSubStep(barIndex, subStepInBar, globalSubStep)`**: The Conductor.
-   - Bar boundary (subStepInBar=0): regime update, progression advance, viewport refresh, kick drum, target updates for both voices.
+   - Every sub-step: drum beat (via `playDrumStep()` from `drums.js`; pattern selected from Drum Beat dropdown).
+   - Bar boundary (subStepInBar=0): regime update, progression advance, viewport refresh, target updates for both voices.
    - Soprano rhythm boundary: runs soprano pathfinder (cell selection → `executeSopranoRunStep()` → genre complexity → wick gravity → audio trigger → visual emit).
    - Bass rhythm boundary: runs bass pathfinder (cell selection → `executeWalkingStep()` → genre complexity → wick gravity → audio trigger → visual emit).
    - Voice separation check. Status label update on bar boundaries.
@@ -429,7 +435,7 @@ The renderer in `07_render_and_interactions.js` reads this array, maps `barIndex
 
 **Settings persistence (in `ui.js`, localStorage key: `ntree_audio_visual_settings`)**
 
-Saved on every UI change. Restored on page load. Includes: upper/lower wick settings (enabled, volume, instrument, rhythm, pattern, patternOverride, restartOnChord), genre (internally keyed; user-facing label is "Scale"), rootKey, chordProgression, displayNotes, chordOverlay, sensitivity, melodicRange, glowDuration, displayMode, panel open/closed states, speed (BPM).
+Saved on every UI change. Restored on page load. Includes: upper/lower wick settings (enabled, volume, instrument, rhythm, pattern, patternOverride, restartOnChord), drumVolume, genre (internally keyed; user-facing label is "Scale"), rootKey, chordProgression, drumBeat, displayNotes, chordOverlay, sensitivity, melodicRange, glowDuration, displayMode, panel open/closed states, speed (BPM).
 
 **Shared state objects (in `state.js`)**
 
@@ -448,13 +454,13 @@ The Pathfinding Sequencer implements a **"Hierarchical Composition Layer"** — 
 **Debugging benefit**: If a Raag or mode sounds "off," set Complexity to 0. If it still sounds off, the scale interval array itself is wrong. If it sounds correct at 0 but wrong at higher complexity, the issue is in the ornament/interruption logic.
 
 **UI (sidebar, collapsible)**
-- **Channel instruments**: Upper wick and lower wick each have enable checkbox, volume (dB), instrument dropdown, and rhythm dropdown (e.g. quarter, eighth, sixteenth for upper; half, quarter, whole for lower). Each voice also has:
+- **Channel instruments**: Upper wick and lower wick each have enable checkbox, volume (dB), instrument dropdown, and rhythm dropdown (e.g. quarter, eighth, sixteenth for upper; half, quarter, whole for lower). **Drum** layer has volume (dB) slider. Each voice also has:
   - **Pattern Override** checkbox: When checked, bypasses the deep pathfinder algorithm and uses the selected simple pattern from the voice's pattern dropdown instead. When unchecked (default), the full pathfinder algorithm runs.
   - **Soprano Pattern** dropdown (visible when Pattern Override is checked): Linear Ascending Scale, Asc/Desc Scale, Linear Ascending Arpeggio, Asc/Desc Arpeggio, Alternating Scale/Arpeggio, Alt. Scale/Arp. (Asc/Desc), Random Notes from Chord.
   - **Bass Pattern** dropdown: Chord Root Only, Root/3rd/5th.
   - **Restart on chord change** checkbox (per voice): When checked, the pattern index resets to the nearest note in the new chord when the chord progression advances. When unchecked, the pattern continues from wherever it left off.
 - **Instruments**: MIDI soundfonts (FluidR3_GM via gleitz.github.io): harpsichord, synth lead, pipe organ, strings, flute (upper); acoustic bass, electric bass, synth pad, pipe organ (lower).
-- **Music and Scale Settings**: Scale selection (Major/Natural Minor, Lydian/Phrygian (Raag), Dorian/Altered, Pentatonic (Major/Minor), Phrygian/Chromatic), chord progression (classical, pop, blues, jazz, canon, fifties, old, bridge), root key (C through B), Note Labels toggle, Chord Overlay toggle.
+- **Music and Scale Settings**: Scale selection (Major/Natural Minor, Lydian/Phrygian (Raag), Dorian/Altered, Pentatonic (Major/Minor), Phrygian/Chromatic), chord progression (classical, pop, blues, jazz, canon, fifties, old, bridge), **Drum Beat** dropdown (Simple, Minimal Jazz, Latin/Salsa, Reggaeton/Latin Trap, Folk-Country Shuffle, Indian Tabla, Afrobeat, Funk Pocket, Lo-Fi/Dilla, Brazilian Samba, Electronic House), root key (C through B), Note Labels toggle, Chord Overlay toggle.
 - **Audio visual sync tuning**:
   - **Complexity** (0-1): Controls stochastic interruption probability, scaled by genre-specific ornament chances. 0 = pure melodic cells; 1 = maximum genre ornamentation.
   - **Melodic Range** (0.3x-3.0x): Vertical zoom -- expands or compresses the price-to-MIDI mapping. Low = compressed (tighter movements); High = expanded (wider, dramatic leaps).
@@ -1088,7 +1094,7 @@ From `templates/detail.html` / `templates/synthetic_detail.html`:
 
 From `chart.html` (standalone demo / band view):
 - **Tone.js** (e.g. `tone@14.7.77` from unpkg; fallback cdnjs) — used by Audio Visual Settings sonification (`static/demo_static/js/audio/*.js`). Loaded before other chart scripts; no build step.
-- Chart demo scripts load in order: core/overlays → mode/loader → persistence → DOM/span presets → state/math → loaders → features → render → replay → dials/boot → feature UI → strategy backtest → **audio modules** (last, 7 files: config → state → theory → pathfinder → engine → conductor → ui).
+- Chart demo scripts load in order: core/overlays → mode/loader → persistence → DOM/span presets → state/math → loaders → features → render → replay → dials/boot → feature UI → strategy backtest → **audio modules** (last, 8 files: config → state → drums → theory → pathfinder → engine → conductor → ui).
 
 ---
 
@@ -1154,6 +1160,8 @@ The following reflects the latest series of changes to the chart and replay expe
 - **Regime-aware note colors**: Note dots are now colored by regime at emission time: soprano green/red, bass blue/purple. Chord labels also colored green (major/uptrend) or red (minor/downtrend).
 - **Cycle restart indicator**: Amber solid line + numbered `↺ N` badge at top of price pane when the 16-step chord progression loops.
 - **Custom chord progressions**: Added "Old" (D-F-C-G pattern, 16 single-step chords) and "Bridge" (I-V-vi-IV verse + ii-I-V-ii chorus, 8 paired chords).
+- **Drum Beat dropdown**: New `drums.js` module with 11 selectable beat patterns (Simple, Minimal Jazz, Latin/Salsa, Reggaeton/Latin Trap, Folk-Country Shuffle, Indian Tabla, Afrobeat, Funk Pocket, Lo-Fi/Dilla, Brazilian Samba, Electronic House). Drum Beat dropdown added to Music and Scale Settings section. Percussion synths (kick, snare, hi-hat, ride, clave) created lazily; `playDrumStep()` called every sub-step from conductor. Selection persisted in `drumBeat` via localStorage.
+- **Drum volume control**: Volume slider for drum layer added to Channel Instruments section (below Lower wick). Controls kick + all percussion. `setDrumVolume()` in drums.js updates all drum synths. Persisted in `drumVolume` (default -12 dB).
 
 ---
 

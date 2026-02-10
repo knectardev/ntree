@@ -26,6 +26,7 @@
     const pauseAudioAnimation = _am.pauseAudioAnimation;
     const resumeAudioAnimation = _am.resumeAudioAnimation;
     const hookIntoReplaySystem = _am.hookIntoReplaySystem;
+    const setDrumVolume = _am.setDrumVolume;
 
     // ========================================================================
     // GENERIC UI HELPERS
@@ -141,6 +142,8 @@
                 genre: audioState.genre,
                 rootKey: audioState.rootKey,
                 chordProgression: audioState.chordProgression,
+                drumBeat: audioState.drumBeat,
+                drumVolume: audioState.drumVolume,
                 displayNotes: audioState.displayNotes,
                 chordOverlay: audioState.chordOverlay,
                 sensitivity: audioState.sensitivity,
@@ -192,6 +195,8 @@
             audioState.rootKey = settings.rootKey || 'C';
             musicState.rootMidi = 60 + (ROOT_KEY_OFFSETS[audioState.rootKey] || 0);  // Sync with musicState
             audioState.chordProgression = settings.chordProgression || 'canon';
+            audioState.drumBeat = settings.drumBeat || 'simple';
+            audioState.drumVolume = settings.drumVolume ?? -12;
             audioState.displayNotes = settings.displayNotes ?? true;
             audioState.chordOverlay = settings.chordOverlay ?? true;
             audioState.sensitivity = settings.sensitivity ?? 0.5;
@@ -253,6 +258,16 @@
         
         // Chord progression
         applyDropdownSelection(ui.chordProgressionMenu, ui.chordProgressionLabel, audioState.chordProgression);
+        
+        // Drum beat
+        applyDropdownSelection(ui.drumBeatMenu, ui.drumBeatLabel, audioState.drumBeat);
+        
+        // Drum volume
+        if (ui.drumVolume) {
+            ui.drumVolume.value = audioState.drumVolume;
+            if (ui.drumVolumeLabel) ui.drumVolumeLabel.textContent = Math.abs(audioState.drumVolume) + ' DB';
+            if (setDrumVolume) setDrumVolume(audioState.drumVolume);
+        }
         
         // Display mode
         applyDropdownSelection(ui.displayModeMenu, ui.displayModeLabel, audioState.displayMode);
@@ -324,6 +339,20 @@
             });
         }
         setupVolumeSlider(ui.upperVolume, ui.upperVolumeLabel, 'upper');
+        
+        // Drum volume
+        if (ui.drumVolume && ui.drumVolumeLabel) {
+            const updateDrumLabel = (shouldSave) => {
+                if (shouldSave === undefined) shouldSave = false;
+                const val = parseInt(ui.drumVolume.value, 10);
+                ui.drumVolumeLabel.textContent = Math.abs(val) + ' DB';
+                audioState.drumVolume = val;
+                if (setDrumVolume) setDrumVolume(val);
+                if (shouldSave) saveSettings();
+            };
+            ui.drumVolume.addEventListener('input', () => updateDrumLabel(true));
+            updateDrumLabel(false);
+        }
         setupDropdown(ui.upperInstrumentDD, ui.upperInstrumentBtn, ui.upperInstrumentMenu, ui.upperInstrumentLabel,
             (val) => { 
                 audioState.upperWick.instrument = val;
@@ -440,6 +469,13 @@
         setupDropdown(ui.chordProgressionDD, ui.chordProgressionBtn, ui.chordProgressionMenu, ui.chordProgressionLabel,
             (val) => { 
                 audioState.chordProgression = val; 
+                saveSettings();
+            });
+
+        // Drum Beat
+        setupDropdown(ui.drumBeatDD, ui.drumBeatBtn, ui.drumBeatMenu, ui.drumBeatLabel,
+            (val) => { 
+                audioState.drumBeat = val; 
                 saveSettings();
             });
 

@@ -38,6 +38,7 @@
     const applyWickGravity = _am.applyWickGravity;
     const updateSopranoHistory = _am.updateSopranoHistory;
     const updateBassHistory = _am.updateBassHistory;
+    const playDrumStep = _am.playDrumStep;
 
     // ========================================================================
     // CONSTANTS
@@ -580,6 +581,12 @@
         const regime = musicState.regime;
         const complexity = audioState.sensitivity || 0.5;  // Complexity slider (0=pure, 1=chaotic)
         
+        // Drum beat (every sub-step; pattern decides what to play)
+        if (playDrumStep) {
+            const drumBeat = audioState.drumBeat || 'simple';
+            playDrumStep(drumBeat, subStepInBar, now);
+        }
+        
         // ── BAR BOUNDARY: Update targets, regime, progression ──
         if (subStepInBar === 0) {
             updateRegimeFromPrice(barData.c);
@@ -590,11 +597,6 @@
             
             // Refresh viewport price range every bar for tight wick-hugging
             updateVisiblePriceRange();
-            
-            // Kick drum on downbeat
-            if (audioState._kickSynth) {
-                audioState._kickSynth.triggerAttackRelease('C1', '8n', now, 0.4);
-            }
             
             // Update targets for both voices (but DON'T reset current cells)
             const rawSopranoTarget = priceToMidi(barData.h, 'soprano');

@@ -143,7 +143,7 @@
 
             // Create kick drum synth for downbeat
             audioState._kickSynth = new Tone.MembraneSynth(KICK_CONFIG).toDestination();
-            audioState._kickSynth.volume.value = -6;  // Louder kick
+            audioState._kickSynth.volume.value = audioState.drumVolume !== undefined ? audioState.drumVolume : -12;
             console.log('[Audio] Kick synth initialized');
             
             // Play a test note to verify audio is working
@@ -204,6 +204,7 @@
             audioState._kickSynth.dispose();
             audioState._kickSynth = null;
         }
+        if (_am.disposeDrums) _am.disposeDrums();
 
         Tone.Transport.stop();
         Tone.Transport.cancel();
