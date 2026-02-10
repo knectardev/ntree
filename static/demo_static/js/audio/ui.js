@@ -147,6 +147,7 @@
                 displayNotes: audioState.displayNotes,
                 chordOverlay: audioState.chordOverlay,
                 sensitivity: audioState.sensitivity,
+                beatStochasticity: audioState.beatStochasticity,
                 melodicRange: audioState.melodicRange,
                 glowDuration: audioState.glowDuration,
                 displayMode: audioState.displayMode,
@@ -200,6 +201,7 @@
             audioState.displayNotes = settings.displayNotes ?? true;
             audioState.chordOverlay = settings.chordOverlay ?? true;
             audioState.sensitivity = settings.sensitivity ?? 0.5;
+            audioState.beatStochasticity = settings.beatStochasticity ?? 0;
             audioState.melodicRange = settings.melodicRange ?? 1.0;
             audioState.glowDuration = settings.glowDuration ?? 3;
             audioState.displayMode = settings.displayMode || 'bars';
@@ -287,6 +289,10 @@
         if (ui.sensitivity) {
             ui.sensitivity.value = audioState.sensitivity;
             if (ui.sensitivityLabel) ui.sensitivityLabel.textContent = audioState.sensitivity.toFixed(2);
+        }
+        if (ui.beatStochasticity) {
+            ui.beatStochasticity.value = audioState.beatStochasticity;
+            if (ui.beatStochasticityLabel) ui.beatStochasticityLabel.textContent = audioState.beatStochasticity.toFixed(2);
         }
         if (ui.melodicRange) {
             ui.melodicRange.value = audioState.melodicRange;
@@ -514,6 +520,7 @@
 
         // Tuning sliders
         setupSlider(ui.sensitivity, ui.sensitivityLabel, '', 'sensitivity', v => v.toFixed(2));
+        setupSlider(ui.beatStochasticity, ui.beatStochasticityLabel, '', 'beatStochasticity', v => v.toFixed(2));
         setupSlider(ui.melodicRange, ui.melodicRangeLabel, 'X', 'melodicRange', v => v.toFixed(1));
         setupSlider(ui.glowDuration, ui.glowDurationLabel, ' UNITS', 'glowDuration', v => Math.round(v));
 

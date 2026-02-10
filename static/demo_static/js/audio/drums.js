@@ -172,6 +172,8 @@
 
     /**
      * Play drum sounds for the current sub-step based on the selected beat.
+     * Humanization (when beatStochasticity > 0): note dropout, ghost notes,
+     * velocity variation, micro-timing jitter.
      * @param {string} beatKey - Key from DRUM_BEATS (e.g. 'minimal_jazz')
      * @param {number} subStepInBar - 0-15
      * @param {number} now - Tone.now() time
@@ -183,21 +185,55 @@
 
         ensurePercussionSynths();
 
-        if (pattern.kick && pattern.kick.includes(subStepInBar)) {
-            audioState._kickSynth.triggerAttackRelease('C1', '8n', now, 0.5);
+        const stoch = audioState.beatStochasticity !== undefined ? audioState.beatStochasticity : 0;
+        const jitter = stoch > 0 ? (Math.random() - 0.5) * stoch * 0.02 : 0;
+        const t = now + jitter;
+
+        const shouldTrigger = (inPattern) => {
+            if (inPattern) {
+                if (stoch === 0) return true;
+                return Math.random() > (stoch * 0.3);
+            }
+            return false;
+        };
+
+        const ghostChance = () => stoch > 0 && Math.random() < stoch * 0.06;
+
+        const velocity = (base) => {
+            if (stoch === 0) return base;
+            const v = base - (Math.random() * stoch * 0.4);
+            return Math.max(0.15, Math.min(1, v));
+        };
+
+        const inKick = pattern.kick && pattern.kick.includes(subStepInBar);
+        const inSnare = pattern.snare && pattern.snare.includes(subStepInBar);
+        const inHihat = pattern.hihat && pattern.hihat.includes(subStepInBar);
+        const inRide = pattern.ride && pattern.ride.includes(subStepInBar);
+        const inClave = pattern.clave && pattern.clave.includes(subStepInBar);
+
+        if (inKick && shouldTrigger(true)) {
+            audioState._kickSynth.triggerAttackRelease('C1', '8n', t, velocity(0.5));
         }
-        if (pattern.snare && pattern.snare.includes(subStepInBar) && _snareSynth) {
-            _snareSynth.noise.triggerAttackRelease('16n', now);
-            _snareSynth.tone.triggerAttackRelease('C2', '16n', now, 0.5);
+        if (inSnare && shouldTrigger(true) && _snareSynth) {
+            _snareSynth.noise.triggerAttackRelease('16n', t);
+            _snareSynth.tone.triggerAttackRelease('C2', '16n', t, velocity(0.5));
         }
-        if (pattern.hihat && pattern.hihat.includes(subStepInBar) && _hihatSynth) {
-            _hihatSynth.triggerAttackRelease('32n', now, 0.3);
+        if (inHihat && shouldTrigger(true) && _hihatSynth) {
+            _hihatSynth.triggerAttackRelease('32n', t, velocity(0.3));
         }
-        if (pattern.ride && pattern.ride.includes(subStepInBar) && _rideSynth) {
-            _rideSynth.triggerAttackRelease('16n', now, 0.25);
+        if (inRide && shouldTrigger(true) && _rideSynth) {
+            _rideSynth.triggerAttackRelease('16n', t, velocity(0.25));
         }
-        if (pattern.clave && pattern.clave.includes(subStepInBar) && _claveSynth) {
-            _claveSynth.triggerAttackRelease('16n', now, 0.35);
+        if (inClave && shouldTrigger(true) && _claveSynth) {
+            _claveSynth.triggerAttackRelease('16n', t, velocity(0.35));
+        }
+
+        if (stoch > 0 && !inHihat && !inRide && ghostChance() && _hihatSynth) {
+            _hihatSynth.triggerAttackRelease('32n', t, velocity(0.15));
+        }
+        if (stoch > 0 && !inSnare && ghostChance() && _snareSynth) {
+            _snareSynth.noise.triggerAttackRelease('16n', t);
+            _snareSynth.tone.triggerAttackRelease('C2', '16n', t, velocity(0.2));
         }
     }
 

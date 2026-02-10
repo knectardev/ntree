@@ -335,7 +335,7 @@ The audio system was refactored from a single 3,454-line file into 7 focused mod
 | File | Lines | Responsibility | Key exports to `_am` |
 |------|-------|----------------|----------------------|
 | `config.js` | ~280 | Pure constants: instruments, note ranges, chord progressions, chord maps, genre/scale configs, kick config | `INSTRUMENT_MAP`, `NOTE_CONFIG`, `CHORD_PROGRESSIONS`, `CHORD_MAP_MAJOR/MINOR`, `GENRES`, `SCALES`, `ROOT_KEY_OFFSETS`, `KICK_CONFIG` |
-| `drums.js` | ~200 | Drum beat patterns (16 sub-steps), percussion synths (snare, hi-hat, ride, clave), playDrumStep | `DRUM_BEATS`, `playDrumStep()`, `disposeDrums()` |
+| `drums.js` | ~250 | Drum beat patterns (16 sub-steps), percussion synths (kick, snare, hi-hat, ride, clave), playDrumStep with beat stochasticity (dropout, ghost notes, velocity, micro-timing) | `DRUM_BEATS`, `playDrumStep()`, `setDrumVolume()`, `disposeDrums()` |
 | `state.js` | ~250 | Shared state objects + small utilities | `musicState`, `audioState`, `ui`, `allAudioDropdowns`, `updateStatus()`, `midiToNoteName()`, `rhythmToDuration()`, `rhythmToDurationMs()` |
 | `theory.js` | ~370 | Scale/chord math, regime detection, pattern detection, voice separation, chord label helpers | `updateRegimeFromPrice()`, `getScaleNotes()`, `getCurrentChordToneMods()`, `quantizeToChord()`, `nearestScaleNote()`, `offsetScaleDegree()`, `nearestScaleNoteAbove()`, `updateVisiblePriceRange()`, `detectMelodicPattern()`, `getDynamicMidiRange()`, `getChordTonesInRange()`, `forceNoteDifference()`, `forceNoteDifferenceStrict()`, `ensureVoiceSeparation()`, `advanceProgression()`, `getChordLabel()`, `getChordSequence()`, `getChordComponentPCs()` |
 | `pathfinder.js` | ~580 | Melodic cell system: soprano/bass note generation, scale runs, orbits, arpeggios, enclosures, walking bass, wick gravity, genre complexity | `generateSopranoNote()`, `getScaleRunNote()`, `getArpeggioNote()`, `applyGenrePhrasing()`, `updateSopranoHistory()`, `updateBassHistory()`, `startMelodicRun()`, `executeRunStep()`, `applyWickGravity()`, `needsWickReturn()`, `startVoiceCell()`, `executeSopranoRunStep()`, `executeWalkingStep()`, `applyGenreComplexity()`, `generateBassNote()` |
@@ -435,7 +435,7 @@ The renderer in `07_render_and_interactions.js` reads this array, maps `barIndex
 
 **Settings persistence (in `ui.js`, localStorage key: `ntree_audio_visual_settings`)**
 
-Saved on every UI change. Restored on page load. Includes: upper/lower wick settings (enabled, volume, instrument, rhythm, pattern, patternOverride, restartOnChord), drumVolume, genre (internally keyed; user-facing label is "Scale"), rootKey, chordProgression, drumBeat, displayNotes, chordOverlay, sensitivity, melodicRange, glowDuration, displayMode, panel open/closed states, speed (BPM).
+Saved on every UI change. Restored on page load. Includes: upper/lower wick settings (enabled, volume, instrument, rhythm, pattern, patternOverride, restartOnChord), drumVolume, genre (internally keyed; user-facing label is "Scale"), rootKey, chordProgression, drumBeat, displayNotes, chordOverlay, sensitivity, beatStochasticity, melodicRange, glowDuration, displayMode, panel open/closed states, speed (BPM).
 
 **Shared state objects (in `state.js`)**
 
@@ -463,6 +463,7 @@ The Pathfinding Sequencer implements a **"Hierarchical Composition Layer"** — 
 - **Music and Scale Settings**: Scale selection (Major/Natural Minor, Lydian/Phrygian (Raag), Dorian/Altered, Pentatonic (Major/Minor), Phrygian/Chromatic), chord progression (classical, pop, blues, jazz, canon, fifties, old, bridge), **Drum Beat** dropdown (Simple, Minimal Jazz, Latin/Salsa, Reggaeton/Latin Trap, Folk-Country Shuffle, Indian Tabla, Afrobeat, Funk Pocket, Lo-Fi/Dilla, Brazilian Samba, Electronic House), root key (C through B), Note Labels toggle, Chord Overlay toggle.
 - **Audio visual sync tuning**:
   - **Complexity** (0-1): Controls stochastic interruption probability, scaled by genre-specific ornament chances. 0 = pure melodic cells; 1 = maximum genre ornamentation.
+  - **Beat Stochasticity** (0-1): Humanization for drum beats. At 0 = deterministic; at 1 = note dropout (up to 30% skip), ghost notes (soft hi-hat/snare on off-beats), velocity variation, and micro-timing jitter. Reduces mechanical repetition.
   - **Melodic Range** (0.3x-3.0x): Vertical zoom -- expands or compresses the price-to-MIDI mapping. Low = compressed (tighter movements); High = expanded (wider, dramatic leaps).
   - **Glow Duration** (1-8 units): Controls visual glow persistence of note events on chart.
 - **Speed**: 30-240 (controls BPM for playback).
@@ -1162,6 +1163,7 @@ The following reflects the latest series of changes to the chart and replay expe
 - **Custom chord progressions**: Added "Old" (D-F-C-G pattern, 16 single-step chords) and "Bridge" (I-V-vi-IV verse + ii-I-V-ii chorus, 8 paired chords).
 - **Drum Beat dropdown**: New `drums.js` module with 11 selectable beat patterns (Simple, Minimal Jazz, Latin/Salsa, Reggaeton/Latin Trap, Folk-Country Shuffle, Indian Tabla, Afrobeat, Funk Pocket, Lo-Fi/Dilla, Brazilian Samba, Electronic House). Drum Beat dropdown added to Music and Scale Settings section. Percussion synths (kick, snare, hi-hat, ride, clave) created lazily; `playDrumStep()` called every sub-step from conductor. Selection persisted in `drumBeat` via localStorage.
 - **Drum volume control**: Volume slider for drum layer added to Channel Instruments section (below Lower wick). Controls kick + all percussion. `setDrumVolume()` in drums.js updates all drum synths. Persisted in `drumVolume` (default -12 dB).
+- **Beat Stochasticity slider**: Added to Audio Visual Tuning. `playDrumStep()` in drums.js now applies humanization when `beatStochasticity` > 0: note dropout (30% max skip), ghost notes (soft hi-hat/snare on off-beats), velocity variation, micro-timing jitter. Persisted in `beatStochasticity` (default 0).
 
 ---
 
