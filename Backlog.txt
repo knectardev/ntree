@@ -1,18 +1,3 @@
-Drum beats (in progress)
-
-Bass line styles 
-1. Walking Bass (Jazz Swing / Bebop) - Think: Ray Brown
-2. Bluegrass / Old-Time Bass - Think: Mike Bub
-3. Baroque Counterpoint / Bach-Style Lines - Think Bach
-4. Motown / Soul Groove Bass - Think: James Jamerson
-5. Reggae / Dub One-Drop Bass - Think: Aston Barrett
-6. Latin / Afro-Cuban Tumbao - Think: Cachao López
-7. Afrobeat / Polyrhythmic Bass - Think: Fela Kuti
-8. Pop / Rock Melodic Bass - Think: Paul McCartney
-9. Electronic / Synth Bass (EDM / Trap / House) - Think: Deadmau5
-10. Minimal / Pedal Tone / Drone Bass - Think: Brian Eno
-
-
 Volume effects
 
 Vary note durations
