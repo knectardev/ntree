@@ -1182,6 +1182,7 @@ The following reflects the latest series of changes to the chart and replay expe
 - **Audio level usability retune**: Audio volume sliders now use a tighter practical range (`-36 dB` to `+6 dB`) so useful loudness appears earlier in travel; saved volumes are clamped to this range, default wick levels were rebalanced to `-18 dB`, and sampler initialization now honors configured wick volume instead of forcing `-10 dB`.
 - **Rhythmic Phrasing engine (Euclidean + Tie/Legato)**: Added global `Pattern Density` (1-16) and `Flow / Sustain` (0-100%) sliders in Audio Visual Tuning, persisted as `audioState.rhythmDensity` and `audioState.sustainFactor`; `processSubStep()` now gates note triggers with a Euclidean pulse mask, applies deterministic tie logic when pitch is unchanged and price movement is small, and maps note duration to candle wick range for volatility-shaped phrasing.
 - **Bass phrasing opt-in toggle**: Added `Apply to Bass` checkbox (`audioPhrasingApplyBass`) next to rhythmic phrasing controls; default behavior is soprano-only phrasing, while enabling the toggle applies Euclidean gating, tie/legato, and dynamic duration mapping to bass as well. Persisted as `audioState.phrasingApplyToBass`.
+- **Soprano rhythm randomization modes**: Added two Upper-wick rhythm options — `Random (1/4, 1/8, 1/16)` and `Random (1/4, 1/8)` — that randomize soprano note duration per triggered note while preserving existing phrasing/gating logic.
 
 ---
 

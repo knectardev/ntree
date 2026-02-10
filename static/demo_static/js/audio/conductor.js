@@ -155,6 +155,30 @@
         }
     }
 
+    function pickSopranoRhythmValue() {
+        const raw = String(audioState.upperWick && audioState.upperWick.rhythm ? audioState.upperWick.rhythm : '4');
+        if (raw === 'random_4_8_16') {
+            const opts = ['4', '8', '16'];
+            return opts[Math.floor(Math.random() * opts.length)];
+        }
+        if (raw === 'random_4_8') {
+            return (Math.random() < 0.5) ? '4' : '8';
+        }
+        if (raw === '1' || raw === '2' || raw === '4' || raw === '8' || raw === '16') return raw;
+        return '4';
+    }
+
+    function rhythmDurationScale(rhythm) {
+        switch (String(rhythm)) {
+            case '1': return 1.85;
+            case '2': return 1.35;
+            case '4': return 1.0;
+            case '8': return 0.72;
+            case '16': return 0.5;
+            default: return 1.0;
+        }
+    }
+
     // ========================================================================
     // PATTERN OVERRIDE STATE & GENERATOR
     // ========================================================================
@@ -853,7 +877,8 @@
             sopranoMidi = Math.max(sopranoRange.min, Math.min(sopranoRange.max, sopranoMidi));
             updateSopranoHistory(sopranoMidi);
             
-            const sopranoDurationSec = computeDynamicDurationSec(barIndex, 'soprano');
+            const sopranoRhythmForNote = pickSopranoRhythmValue();
+            const sopranoDurationSec = computeDynamicDurationSec(barIndex, 'soprano') * rhythmDurationScale(sopranoRhythmForNote);
             const sopranoDurationMs = sopranoDurationSec * 1000;
             const tieSoprano = shouldTieNote('soprano', sopranoMidi, barData.h);
             if (audioState._sopranoSampler) {
@@ -867,7 +892,7 @@
             if (tieSoprano) {
                 extendLastNoteEvent('soprano', sopranoDurationMs, perfNow);
             } else {
-                emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow);
+                emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow, sopranoRhythmForNote);
             }
             _phrasingState.soprano.lastMidi = sopranoMidi;
             _phrasingState.soprano.lastPrice = Number(barData.h);
@@ -1027,7 +1052,7 @@
     /**
      * Emit a note event at a specific sub-step position
      */
-    function emitSubStepNote(voice, midi, price, barIndex, durationMs, startTime) {
+    function emitSubStepNote(voice, midi, price, barIndex, durationMs, startTime, rhythmOverride) {
         if (!window._audioNoteEvents) window._audioNoteEvents = [];
         
         // Debug: log first few notes to verify they're being created
@@ -1039,7 +1064,7 @@
         const glowMs = (audioState.glowDuration || 3) * 200;
         
         // Store rhythm for circle display mode
-        const rhythm = voice === 'soprano' ? audioState.upperWick.rhythm : audioState.lowerWick.rhythm;
+        const rhythm = rhythmOverride || (voice === 'soprano' ? audioState.upperWick.rhythm : audioState.lowerWick.rhythm);
         
         window._audioNoteEvents.push({
             voice: voice,
