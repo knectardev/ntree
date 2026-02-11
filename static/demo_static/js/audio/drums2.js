@@ -4,28 +4,224 @@
  * Primary mode: local one-shot files in static/demo_static/audio/drums/.
  * Fallback mode: midi-js-soundfonts sampler sources when local files are missing.
  *
- * Loaded after audio/drums.js so it can override drum exports on _audioModule
- * while preserving existing UI state, beat patterns, and conductor wiring.
+ * This module is now the primary drum engine in chart.html and preserves
+ * existing UI state, beat patterns, and conductor wiring through _audioModule.
  */
 (function() {
     'use strict';
     const _am = window._audioModule = window._audioModule || {};
     const audioState = _am.audioState || window.audioState || {};
 
-    const DRUM_BEATS = _am.DRUM_BEATS || {
-        simple: { label: 'Simple Kick Pulse (legacy)', kick: [0], snare: [], hihat: [], tom: [], conga: [], cymbal: [], ride: [], clave: [] },
-        standard_7piece: { label: 'Standard 7-Piece Groove', kick: [0, 8, 11], snare: [4, 12], hihat: [0, 2, 4, 6, 8, 10, 12, 14], tom: [6, 14], conga: [3, 7, 11, 14], cymbal: [0], ride: [], clave: [] }
+    const DRUM_BEATS = {
+        simple: {
+            label: 'Simple Kick Pulse (legacy)',
+            kick: [0],
+            snare: [],
+            hihat: [],
+            tom: [],
+            conga: [],
+            cymbal: [],
+            ride: [],
+            clave: []
+        },
+        standard_7piece: {
+            label: 'Standard 7-Piece Groove',
+            kick: [0, 8, 11],
+            snare: [4, 12],
+            hihat: [0, 2, 4, 6, 8, 10, 12, 14],
+            tom: [6, 14],
+            conga: [3, 7, 11, 14],
+            cymbal: [0],
+            ride: [],
+            clave: []
+        },
+        // Backward-compatible key for existing saved settings.
+        standard_5piece: {
+            label: 'Standard 7-Piece Groove',
+            kick: [0, 8, 11],
+            snare: [4, 12],
+            hihat: [0, 2, 4, 6, 8, 10, 12, 14],
+            tom: [6, 14],
+            conga: [3, 7, 11, 14],
+            cymbal: [0],
+            ride: [],
+            clave: []
+        },
+        minimal_jazz: {
+            label: 'Minimal Jazz (7-piece ride-led)',
+            kick: [0, 10],
+            snare: [4, 12],
+            hihat: [],
+            tom: [14],
+            conga: [7, 15],
+            cymbal: [0],
+            ride: [0, 2, 4, 6, 8, 10, 12, 14],
+            clave: []
+        },
+        latin_salsa: {
+            label: 'Latin / Salsa (7-piece conga+clave)',
+            kick: [0, 3, 8, 11],
+            snare: [4, 10, 12, 15],
+            hihat: [0, 2, 4, 6, 8, 10, 12, 14],
+            tom: [6, 14],
+            conga: [0, 2, 4, 6, 8, 10, 12, 14],
+            cymbal: [0, 8],
+            ride: [],
+            clave: [0, 3, 6, 10, 12]
+        },
+        reggaeton_trap: {
+            label: 'Reggaeton / Latin Trap (7-piece)',
+            kick: [0, 6, 8, 11, 14],
+            snare: [4, 12],
+            hihat: [0, 2, 4, 6, 8, 10, 12, 14],
+            tom: [7, 15],
+            conga: [2, 6, 10, 14],
+            cymbal: [0, 8],
+            ride: [],
+            clave: [3, 6, 10, 12]
+        },
+        folk_country: {
+            label: 'Folk-Country Shuffle (7-piece)',
+            kick: [0, 8],
+            snare: [4, 12],
+            hihat: [0, 2, 4, 6, 8, 10, 12, 14],
+            tom: [15],
+            conga: [7, 15],
+            cymbal: [0],
+            ride: [],
+            clave: []
+        },
+        indian_tabla: {
+            label: 'Indian Tabla (7-piece hybrid)',
+            kick: [0, 4, 8, 12],
+            snare: [2, 6, 10, 14],
+            hihat: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            tom: [5, 13],
+            conga: [1, 3, 7, 9, 11, 15],
+            cymbal: [0, 8],
+            ride: [],
+            clave: []
+        },
+        afrobeat: {
+            label: 'Afrobeat / West African (7-piece)',
+            kick: [0, 4, 8, 12],
+            snare: [2, 4, 6, 10, 12, 14],
+            hihat: [0, 2, 4, 5, 6, 8, 10, 12, 13, 14],
+            tom: [7, 15],
+            conga: [0, 3, 6, 8, 10, 14],
+            cymbal: [0],
+            ride: [],
+            clave: [0, 3, 6, 10, 12]
+        },
+        funk_pocket: {
+            label: 'Funk Pocket (7-piece)',
+            kick: [0, 2, 6, 8, 10, 12, 14],
+            snare: [4, 12],
+            hihat: [0, 2, 4, 6, 8, 10, 12, 14],
+            tom: [7],
+            conga: [3, 11, 15],
+            cymbal: [0, 8],
+            ride: [],
+            clave: []
+        },
+        lofi_dilla: {
+            label: 'Lo-Fi / Neo-Soul (7-piece)',
+            kick: [0, 7, 8, 14],
+            snare: [4, 12],
+            hihat: [0, 2, 4, 6, 8, 10, 12, 14],
+            tom: [11],
+            conga: [5, 13],
+            cymbal: [0],
+            ride: [],
+            clave: []
+        },
+        brazilian_samba: {
+            label: 'Brazilian Samba / Bossa Nova (7-piece)',
+            kick: [0, 3, 8, 11],
+            snare: [2, 6, 10, 14],
+            hihat: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            tom: [7, 15],
+            conga: [1, 4, 7, 10, 12, 15],
+            cymbal: [0, 8],
+            ride: [],
+            clave: [0, 4, 7, 10, 12]
+        },
+        electronic_house: {
+            label: 'Electronic House / Techno (7-piece)',
+            kick: [0, 4, 8, 12],
+            snare: [4, 12],
+            hihat: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            tom: [14],
+            conga: [6, 14],
+            cymbal: [0, 8],
+            ride: [],
+            clave: []
+        }
     };
 
     // Local drop-in sample convention (any existing files in each list are used).
     const LOCAL_FILES = {
-        kick: ['static/demo_static/audio/drums/kick/kick.wav', 'static/demo_static/audio/drums/kick/kick_01.wav', 'static/demo_static/audio/drums/kick/kick_02.wav'],
-        snare: ['static/demo_static/audio/drums/snare/snare.wav', 'static/demo_static/audio/drums/snare/snare_01.wav', 'static/demo_static/audio/drums/snare/snare_02.wav'],
-        hihat: ['static/demo_static/audio/drums/hihat/hihat_closed.wav', 'static/demo_static/audio/drums/hihat/hihat.wav', 'static/demo_static/audio/drums/hihat/hihat_01.wav'],
-        tom: ['static/demo_static/audio/drums/tom/tom.wav', 'static/demo_static/audio/drums/tom/tom_01.wav', 'static/demo_static/audio/drums/tom/tom_02.wav'],
-        conga: ['static/demo_static/audio/drums/conga/conga.wav', 'static/demo_static/audio/drums/conga/conga_01.wav', 'static/demo_static/audio/drums/conga/conga_02.wav'],
-        cymbal: ['static/demo_static/audio/drums/cymbal/cymbal.wav', 'static/demo_static/audio/drums/cymbal/crash.wav', 'static/demo_static/audio/drums/cymbal/ride.wav'],
-        clave: ['static/demo_static/audio/drums/clave/clave.wav', 'static/demo_static/audio/drums/clave/clave_01.wav']
+        // Canonical + numbered variants + compatibility aliases for your current folder set.
+        kick: [
+            'static/demo_static/audio/drums/kick/kick.wav',
+            'static/demo_static/audio/drums/kick/kick_01.wav',
+            'static/demo_static/audio/drums/kick/kick_02.wav',
+            'static/demo_static/audio/drums/kick/kick1.wav',
+            'static/demo_static/audio/drums/kick/kick2.wav',
+            'static/demo_static/audio/drums/kick/kick3.wav',
+            'static/demo_static/audio/drums/kick/kick4.wav'
+        ],
+        snare: [
+            'static/demo_static/audio/drums/snare/snare.wav',
+            'static/demo_static/audio/drums/snare/snare_01.wav',
+            'static/demo_static/audio/drums/snare/snare_02.wav',
+            'static/demo_static/audio/drums/snare/snare1.wav',
+            'static/demo_static/audio/drums/snare/snare2.wav',
+            'static/demo_static/audio/drums/snare/snare3.wav',
+            'static/demo_static/audio/drums/snare/snare4.wav'
+        ],
+        hihat: [
+            'static/demo_static/audio/drums/hihat/hihat_closed.wav',
+            'static/demo_static/audio/drums/hihat/hihat.wav',
+            'static/demo_static/audio/drums/hihat/hihat_01.wav',
+            // Folder alias: hat/
+            'static/demo_static/audio/drums/hat/hat.wav',
+            'static/demo_static/audio/drums/hat/hat1.wav',
+            'static/demo_static/audio/drums/hat/hat2.wav',
+            'static/demo_static/audio/drums/hat/hat3.wav'
+        ],
+        tom: [
+            'static/demo_static/audio/drums/tom/tom.wav',
+            'static/demo_static/audio/drums/tom/tom_01.wav',
+            'static/demo_static/audio/drums/tom/tom_02.wav',
+            'static/demo_static/audio/drums/tom/tom1.wav'
+        ],
+        conga: [
+            'static/demo_static/audio/drums/conga/conga.wav',
+            'static/demo_static/audio/drums/conga/conga_01.wav',
+            'static/demo_static/audio/drums/conga/conga_02.wav',
+            // Temporary aliases until dedicated conga folder exists.
+            'static/demo_static/audio/drums/tabla/tabla1.wav',
+            'static/demo_static/audio/drums/tabla/tabla2.wav',
+            'static/demo_static/audio/drums/timbale/timbale1.wav',
+            'static/demo_static/audio/drums/timbale/timbale2.wav',
+            'static/demo_static/audio/drums/cajon/cajon1.wav'
+        ],
+        cymbal: [
+            'static/demo_static/audio/drums/cymbal/cymbal.wav',
+            'static/demo_static/audio/drums/cymbal/crash.wav',
+            'static/demo_static/audio/drums/cymbal/ride.wav',
+            // Folder alias: ride/
+            'static/demo_static/audio/drums/ride/ride1.wav'
+        ],
+        clave: [
+            'static/demo_static/audio/drums/clave/clave.wav',
+            'static/demo_static/audio/drums/clave/clave_01.wav',
+            // Temporary aliases until dedicated clave folder exists.
+            'static/demo_static/audio/drums/log/log1.wav',
+            'static/demo_static/audio/drums/log/log2.wav',
+            'static/demo_static/audio/drums/clap/clap1.wav'
+        ]
     };
 
     // Fallback source files when local files are not present.
@@ -354,6 +550,7 @@
     }
 
     // Override drum exports from drums.js with sample-based implementation.
+    _am.drumEngineMode = 'samples_only';
     _am.DRUM_BEATS = DRUM_BEATS;
     _am.playDrumStep = playDrumStep;
     _am.disposeDrums = disposeDrums;

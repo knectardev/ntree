@@ -31,3 +31,14 @@ Examples:
 - If local files are found for a piece, `drums2.js` uses them (local mode).
 - If local files are not found for a piece, it falls back to remote sample sources for that piece.
 - Multiple local files per piece are round-robined to reduce machine-gun repetition.
+
+## Compatibility aliases (current project)
+
+`drums2.js` also accepts these existing folder patterns so you do not need to rename immediately:
+
+- Hi-hat from `hat/hat1.wav`, `hat/hat2.wav`, `hat/hat3.wav`
+- Cymbal from `ride/ride1.wav`
+- Conga fallback from `tabla/*.wav`, `timbale/*.wav`, `cajon/cajon1.wav`
+- Clave fallback from `log/*.wav`, `clap/clap1.wav`
+
+For best control, still prefer dedicated folders: `hihat/`, `cymbal/`, `conga/`, `clave/`.

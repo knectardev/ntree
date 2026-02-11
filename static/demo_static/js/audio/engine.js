@@ -141,14 +141,17 @@
             audioState._bassSampler.volume.value = Number.isFinite(audioState.lowerWick.volume) ? audioState.lowerWick.volume : -18;
             console.log('[Audio] Bass sampler loaded:', bassInstrument);
 
-            // Create kick drum synth for downbeat
-            audioState._kickSynth = new Tone.MembraneSynth(KICK_CONFIG).toDestination();
-            audioState._kickSynth.volume.value = audioState.drumVolume !== undefined ? audioState.drumVolume : -12;
-            console.log('[Audio] Kick synth initialized');
-            
-            // Play a test note to verify audio is working
-            console.log('[Audio] Playing test note...');
-            audioState._kickSynth.triggerAttackRelease('C2', '8n', Tone.now(), 0.8);
+            // In samples-only drum mode, do not instantiate legacy synthesized kick.
+            if (_am.drumEngineMode !== 'samples_only') {
+                audioState._kickSynth = new Tone.MembraneSynth(KICK_CONFIG).toDestination();
+                audioState._kickSynth.volume.value = audioState.drumVolume !== undefined ? audioState.drumVolume : -12;
+                console.log('[Audio] Kick synth initialized');
+                console.log('[Audio] Playing test note...');
+                audioState._kickSynth.triggerAttackRelease('C2', '8n', Tone.now(), 0.8);
+            } else {
+                audioState._kickSynth = null;
+                console.log('[Audio] Samples-only drum mode active (legacy kick synth disabled)');
+            }
 
             audioState._initialized = true;
             updateStatus('Audio ready');
