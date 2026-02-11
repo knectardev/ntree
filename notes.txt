@@ -1,160 +1,166 @@
-Reviewing your `drums.js` file, the core issue with the cymbals (hi-hats, rides, and crashes) is that they rely on **MetalSynth** and **NoiseSynth** in a very "linear" way. In real life, a cymbal's sound is a complex, chaotic marriage of a metallic strike and a shifting air "wash."
+Since your system already differentiates between **Bullish (Major)** and **Bearish (Minor)** states and utilizes a registry of semitone offsets for the bass, we can create a "Mid-Voice Harmony Registry" that mirrors this architecture.
 
-Here are specific suggestions to refactor the code in Cursor to achieve a more "plausible" sound.
-
----
-
-## 1. The Hi-Hat: "Layered Sizzle"
-
-Currently, your `_hihatSynth` uses a `MetalSynth` for the tick and a `NoiseSynth` for the sizzle, but they are triggered independently. To make them sound like one object:
-
-* **The Problem:** The `hihatDecay` is applied too uniformly.
-* **The Fix:** Use a **Variable High-Pass Filter**. As a hi-hat sustains, it loses its "body" and becomes just "air."
-* **Code Suggestion:** Ask Cursor to:
-
-> *"Wrap the Hi-Hat synths in a Tone.Filter set to HighPass at 8000Hz. Automate the frequency to rise slightly during the decay to simulate the thinning of the metal vibration."*
+The goal is to fill the "Inner Voice" gap using **Candle Body Height** to control harmonic density, while ensuring the notes remain within a specific middle-frequency range ( to ).
 
 ---
 
-## 2. The Ride: "The Elvin Jones Wash"
+## 1. The "Mid-Voice" Harmony Logic
 
-Your ride cymbal implementation (`_rideSynth`) separates the "ping" and the "wash," which is good, but they lack **Harmonic Complexity**.
+I propose a logic structure that uses **Dyads** (two-note intervals) or **Triads** (three-note chords) based on the candle's energy.
 
-* **The Problem:** `harmonicity: 2.4` is too low for a ride. Real rides are much more "consonant-dissonant."
-* **The Fix:** Increase the `harmonicity` to a non-integer value (like **3.14** or **4.7**) to create more complex overtones.
-* **Code Suggestion:**
+### Harmonic Selection based on Candle State
+
+* **Bullish Candles:** Focus on the **Major 3rd** and **Major 7th** to provide that bright, "Jazz Major" feel seen in your UI settings.
+* **Bearish Candles:** Focus on the **Minor 3rd** and **Perfect 5th** (or Minor 6th) to provide a darker, grounded texture.
+* **Doji (Small Body):** Play only the **Root** or **5th** to minimize harmonic clutter during low-volatility periods.
+
+### The "Body Height" Velocity Multiplier
+
+The candle body height should map to the **MIDI Velocity** (volume) and **Density**:
+
+* **Tiny Body:** 1 note (The "Shell" voicing).
+* **Average Body:** 2 notes (The "Interval" voicing).
+* **Large Body (Marubozu):** 3-4 notes (The "Full" voicing).
+
+---
+
+## 2. Proposed Registry Structure (`harmony_styles.js`)
+
+Following the pattern in your `bass_styles.js`, here is how you can implement the inner voice accompaniment:
 
 ```javascript
-// Change these in ensurePercussionSynths()
-_rideSynth.set({
-    harmonicity: 4.7, // More chaotic overtones
-    modulationIndex: 20, // Richer metallic texture
-    resonance: 3500
-});
+/**
+ * audio/harmony_styles.js — Inner Voice / Accompaniment Registry
+ */
+(function() {
+    'use strict';
+    const _am = window._audioModule;
+
+    const HARMONY_STYLES = {
+        jazz_shell_voicings: {
+            label: 'Jazz Shell (3rds & 7ths)',
+            range: ['C3', 'C5'],
+            // Offsets from Chord Root
+            bullish: [4, 11], // Major 3rd, Major 7th
+            bearish: [3, 10]  // Minor 3rd, Minor 7th
+        },
+        power_chords_thick: {
+            label: 'Rock Power Stacks',
+            range: ['G2', 'G4'],
+            bullish: [0, 7, 12], // Root, 5th, Octave
+            bearish: [0, 7, 12]  // Consistent "thick" feel
+        },
+        ambient_sustained_pad: {
+            label: 'Ambient Tension',
+            range: ['C4', 'C5'],
+            bullish: [4, 7, 9],  // Major 3rd, 5th, 6th (add6)
+            bearish: [3, 7, 8]   // Minor 3rd, 5th, Minor 6th
+        },
+        orchestral_strings: {
+            label: 'Orchestral Fill',
+            range: ['C3', 'A4'],
+            bullish: [0, 4, 7],  // Basic Major Triad
+            bearish: [0, 3, 7]   // Basic Minor Triad
+        }
+    };
+
+    _am.HARMONY_STYLES = HARMONY_STYLES;
+})();
 
 ```
 
 ---
 
-## 3. The Crash: "Non-Linear Energy"
+## 3. Algorithm: The "Inner Voice" Selector
 
-A real crash cymbal doesn't just fade out; it "blooms" before it dies. Your current crash (`_cymbalSynth`) has a very standard exponential decay.
+When a new candle forms, the `pathfinder.js` logic can trigger the harmony:
 
-* **The Problem:** The attack is too immediate, sounding like a digital "click."
-* **The Fix:** Soften the attack slightly (**0.01s to 0.02s**) and add a **Saturator** specifically to the cymbal bus to mimic the "compression" that happens when metal is struck hard.
-* **Code Suggestion:** Ask Cursor to:
+1. **Check Body Size:** Calculate .
+2. **Determine Chord:** Fetch current chord from your **Jazz (ii-V-I)** engine.
+3. **Apply Transposition:** Use the `HARMONY_STYLES` offsets relative to the **Root Key**.
+4. **Stay in Bounds:** If the price-driven note exceeds the defined `range` (e.g., ), use a modulo operator to "wrap" the note back down an octave, ensuring it never clashes with the Soprano/Upper Wick instrument.
 
-> *"Add a Subtle Tone.Distortion (wet: 0.1) to the cymbal bus. This will 'glue' the metallic synth and the noise wash together, making them sound like a single crashing instrument."*
+To implement the inner voice harmony, we can leverage the candle body's "displacement" (the distance between Open and Close) to control the **voicing density** and **velocity**.
 
----
-
-## 4. The "Room" Logic (The Realism Killer)
-
-Your `_drumRoomVerb` is a `Freeverb`. While efficient, `Freeverb` often sounds "metallic" on cymbals, which is the last thing you want.
-
-* **The Fix:** Switch the room reverb to a **Tone.Reverb (Convolution)** or significantly increase the **dampening** on the `Freeverb` to above **5000Hz**. This allows the cymbals to "breathe" without echoing like they're in a tin can.
+Since your system already handles root keys and progressions like **Jazz (ii-V-I)**, the following logic will ensure the inner voice stays musically relevant while reacting to price volatility.
 
 ---
 
-## Summary of Prompt for Cursor
+## 1. Defining the Mid-Voice Registry
 
-To get the best results, highlight your `ensurePercussionSynths` function and give Cursor this prompt:
-
-> *"Refactor the cymbal synths. 1. Increase Ride harmonicity to 4.7 for more realistic overtones. 2. Chain the Hi-Hat noise and metal synths through a shared High-Pass filter at 7kHz to remove 'boxiness.' 3. For the Crash, implement a two-stage decay: a sharp metallic transient followed by a noise wash that is 10ms delayed to simulate the 'bloom' of a real cymbal."*
-
-
-Here is the refactored `ensurePercussionSynths` block. These changes focus on shifting the cymbal logic from "pure tones" to "harmonic textures" by introducing complexity in the overtones and better filtering to remove that "plastic" digital quality.
-
-### Refactored Percussion Synths
+Using the structure of your `bass_styles.js`, we can define "Voicing Templates" that respond to the Bullish or Bearish state of the candle.
 
 ```javascript
-function ensurePercussionSynths() {
-    if (typeof Tone === 'undefined') return;
-    const out = ensureDrumBus();
-    if (!out) return;
-    const vol = drumVol();
-
-    // ... (Kick and Snare logic remains same) ...
-
-    if (!_hihatSynth) {
-        // High-shelf/High-pass filtering to remove "boxy" mid-frequencies
-        const hihatFilter = new Tone.Filter(7500, "highpass").connect(out);
-        
-        _hihatSynth = new Tone.MetalSynth({
-            frequency: 450, // Higher fundamental for "crispness"
-            envelope: { attack: 0.001, decay: 0.05, release: 0.05 },
-            harmonicity: 5.1, // Dissonant, non-integer overtones
-            modulationIndex: 32, // Increase "sizzle"
-            resonance: 3000,
-            octaves: 1.2
-        }).connect(hihatFilter);
+/**
+ * audio/harmony_styles.js 
+ * Logic: Body Height -> Chord Density | Body State -> Chord Quality
+ */
+const HARMONY_MODES = {
+    jazz_voicing: {
+        label: 'Jazz Mid-range (3rds & 7ths)',
+        // Semitone offsets from chord root
+        bullish: [4, 7, 11], // Major Triad + Maj7
+        bearish: [3, 7, 10], // Minor Triad + m7
+        instrument_suggestions: ['Rhodes', 'Warm Pad']
+    },
+    classical_trio: {
+        label: 'Classical Trio',
+        bullish: [0, 4, 7],  // Major Triad
+        bearish: [0, 3, 7],  // Minor Triad
+        instrument_suggestions: ['Strings', 'Organ']
     }
+};
 
-    if (!_hihatNoiseSynth) {
-        // Shared filter for noise to ensure they blend as one object
-        const hihatFilter = new Tone.Filter(8000, "highpass").connect(out);
-        _hihatNoiseSynth = new Tone.NoiseSynth({
-            noise: { type: 'white' }, // White noise is better for "air"
-            envelope: { attack: 0.005, decay: 0.15, sustain: 0 }
-        }).connect(hihatFilter);
-    }
+```
 
-    if (!_rideSynth) {
-        _rideSynth = new Tone.MetalSynth({
-            frequency: 380,
-            envelope: { attack: 0.002, decay: 0.2, release: 0.3 },
-            harmonicity: 4.7, // "Elvin Jones" style chaotic overtones
-            modulationIndex: 24, 
-            resonance: 4000,
-            octaves: 0.8
-        });
-        connectDrumVoice(_rideSynth, out);
-    }
+---
 
-    if (!_rideWashSynth) {
-        // Ride wash needs a slower attack to mimic the "bloom" of the metal
-        _rideWashSynth = new Tone.NoiseSynth({
-            noise: { type: 'pink' },
-            envelope: { attack: 0.02, decay: 0.6, sustain: 0 }
-        });
-        connectDrumVoice(_rideWashSynth, out);
-    }
+## 2. The Harmonic Calculation Algorithm
 
-    if (!_cymbalSynth) {
-        // The Crash: Split into a 'Strike' and a 'Bloom'
-        _cymbalSynth = new Tone.MetalSynth({
-            frequency: 520,
-            envelope: { attack: 0.001, decay: 0.15, release: 1.2 },
-            harmonicity: 6.2, // Extremely complex overtone series
-            modulationIndex: 40,
-            resonance: 2500,
-            octaves: 1.5
-        });
-        connectDrumVoice(_cymbalSynth, out);
-    }
+The "Inner Voice" should reside in the mid-frequency range ( to ) to avoid clashing with your high-pitched **Harmonica** (Upper Wick) or low **Acoustic Bass** (Lower Wick).
 
-    if (!_cymbalNoiseSynth) {
-        _cymbalNoiseSynth = new Tone.NoiseSynth({
-            noise: { type: 'white' },
-            envelope: { 
-                attack: 0.03, // Slight delay allows the 'ping' to hit first
-                decay: 0.9, 
-                sustain: 0 
-            }
-        });
-        connectDrumVoice(_cymbalNoiseSynth, out);
-    }
+### Step A: Determine Density from Body Height
 
-    // ... (Tom and Clave logic) ...
-    applyDrumVoiceVolumes(vol);
+The algorithm calculates the pixel height of the candle body.
+
+* **Small Body (Doji/Consolidation):** Play only the **3rd** of the chord (The "Color" note).
+* **Medium Body:** Play the **3rd and 7th** (The "Shell" voicing).
+* **Large Body (Expansion):** Play the full **Triad (1, 3, 5, 7)**.
+
+### Step B: Coordinate with the Bass Line
+
+Your `bass_styles.js` uses semitone offsets to create movement. To keep the mid-voice stable, we use **Inversion Logic**:
+
+1. Identify the note currently being played by the **Acoustic Bass**.
+2. Select the mid-voice notes that are furthest from the bass note to prevent "muddiness."
+3. **Bullish State:** Map to the **Major/Natural Minor** scale setting.
+4. **Bearish State:** Map to the parallel minor or diminished tones if the price drop is significant.
+
+---
+
+## 3. Implementation Logic (Pseudo-code)
+
+You can drop this logic into your `pathfinder.js` or equivalent playback engine:
+
+```javascript
+function triggerInnerVoice(candle, currentChord) {
+    const bodyHeight = Math.abs(candle.open - candle.close);
+    const isBullish = candle.close > candle.open;
+    
+    // 1. Get offsets based on Bullish (Major) or Bearish (Minor) state
+    const style = HARMONY_MODES.jazz_voicing;
+    const offsets = isBullish ? style.bullish : style.bearish;
+
+    // 2. Determine how many notes to play based on "Pattern Density"
+    // (Referencing your UI 'Pattern Density' slider)
+    const densityLimit = bodyHeight > averageHeight ? offsets.length : 2;
+    const activeNotes = offsets.slice(0, densityLimit);
+
+    // 3. Map to MIDI Notes (keeping it between C3 and C4)
+    activeNotes.forEach(offset => {
+        const midiNote = currentChord.root + offset + 48; // +48 for mid-octave
+        playInstrument('Piano/Organ', midiNote, velocity = bodyHeight * 0.8);
+    });
 }
 
 ```
-
----
-
-### Key Improvements for Cursor to Note:
-
-* **High-Pass Filtering:** By filtering the hi-hats at **7.5kHz - 8kHz**, we remove the "clunky" mid-tones that make MIDI sound like an 80s drum machine.
-* **Non-Integer Harmonicity:** Using values like `4.7` or `5.1` instead of `2.0` prevents the cymbals from sounding like a bell or a tuned triangle.
-* **The "Bloom" Attack:** Setting a slightly longer attack (`0.02s` to `0.03s`) on the **NoiseSynth** layers allows the metallic "strike" to happen first, followed by the air rushing off the cymbal, which is how they behave in real life.
