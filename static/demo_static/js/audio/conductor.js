@@ -722,7 +722,7 @@
         
         // Drum beat (every sub-step; pattern decides what to play)
         if (playDrumStep) {
-            const drumBeat = audioState.drumBeat || 'simple';
+            const drumBeat = audioState.drumBeat || 'standard_7piece';
             const drumHits = playDrumStep(drumBeat, subStepInBar, now);
             if (drumHits) {
                 emitDrumStepEvent(barIndex, subStepInBar, drumHits, perfNow);
@@ -1134,6 +1134,9 @@
                 snare: !!hits.snare,
                 hihat: !!hits.hihat,
                 ride: !!hits.ride,
+                tom: !!hits.tom,
+                conga: !!hits.conga,
+                cymbal: !!hits.cymbal,
                 clave: !!hits.clave
             },
             time: startTime,

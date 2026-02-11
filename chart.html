@@ -274,6 +274,119 @@
             </div>
           </details>
 
+          <details class="subCard subCard--collapsible" id="audioPanelDrumKit" aria-label="Drum kit controls" style="margin-top:10px;" open>
+            <summary class="subCardTitle">Drum Kit (7-Piece)</summary>
+            <div class="sideList">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;">
+                <input id="audioDrumNaturalRoom" type="checkbox" checked />
+                <span class="hint" style="opacity:0.85;font-size:11px;">Natural Drum Room</span>
+              </label>
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
+                <span class="hint" style="min-width:86px;">Glow Intensity:</span>
+                <input id="audioDrumGlowIntensity" type="range" min="0.4" max="2.5" step="0.1" value="1.0" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioDrumGlowIntensityLabel" style="min-width:48px;text-align:right;">1.0x</span>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;display:flex;align-items:center;gap:6px;">
+                  <input id="audioKickOn" type="checkbox" checked />
+                  <span>Kick Level:</span>
+                </span>
+                <input id="audioKickLevel" type="range" min="-18" max="12" step="1" value="0" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioKickLevelLabel" style="min-width:48px;text-align:right;">0 dB</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;">Kick Decay:</span>
+                <input id="audioKickDecay" type="range" min="0.08" max="0.7" step="0.01" value="0.28" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioKickDecayLabel" style="min-width:48px;text-align:right;">0.28s</span>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;display:flex;align-items:center;gap:6px;">
+                  <input id="audioSnareOn" type="checkbox" checked />
+                  <span>Snare Level:</span>
+                </span>
+                <input id="audioSnareLevel" type="range" min="-18" max="12" step="1" value="0" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioSnareLevelLabel" style="min-width:48px;text-align:right;">0 dB</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;">Snare Decay:</span>
+                <input id="audioSnareDecay" type="range" min="0.06" max="0.45" step="0.01" value="0.14" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioSnareDecayLabel" style="min-width:48px;text-align:right;">0.14s</span>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;display:flex;align-items:center;gap:6px;">
+                  <input id="audioHihatOn" type="checkbox" checked />
+                  <span>Hi-Hat Level:</span>
+                </span>
+                <input id="audioHihatLevel" type="range" min="-18" max="12" step="1" value="0" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioHihatLevelLabel" style="min-width:48px;text-align:right;">0 dB</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;">Hi-Hat Decay:</span>
+                <input id="audioHihatDecay" type="range" min="0.03" max="0.22" step="0.01" value="0.06" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioHihatDecayLabel" style="min-width:48px;text-align:right;">0.06s</span>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;display:flex;align-items:center;gap:6px;">
+                  <input id="audioTomOn" type="checkbox" checked />
+                  <span>Tom Level:</span>
+                </span>
+                <input id="audioTomLevel" type="range" min="-18" max="12" step="1" value="-2" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioTomLevelLabel" style="min-width:48px;text-align:right;">-2 dB</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;">Tom Decay:</span>
+                <input id="audioTomDecay" type="range" min="0.08" max="0.6" step="0.01" value="0.2" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioTomDecayLabel" style="min-width:48px;text-align:right;">0.20s</span>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;display:flex;align-items:center;gap:6px;">
+                  <input id="audioCongaOn" type="checkbox" checked />
+                  <span>Conga Level:</span>
+                </span>
+                <input id="audioCongaLevel" type="range" min="-18" max="12" step="1" value="-1" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioCongaLevelLabel" style="min-width:48px;text-align:right;">-1 dB</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;">Conga Decay:</span>
+                <input id="audioCongaDecay" type="range" min="0.08" max="0.9" step="0.01" value="0.26" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioCongaDecayLabel" style="min-width:48px;text-align:right;">0.26s</span>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;display:flex;align-items:center;gap:6px;">
+                  <input id="audioCymbalOn" type="checkbox" checked />
+                  <span>Cymbal Level:</span>
+                </span>
+                <input id="audioCymbalLevel" type="range" min="-18" max="12" step="1" value="-1" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioCymbalLevelLabel" style="min-width:48px;text-align:right;">-1 dB</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;">Cymbal Decay:</span>
+                <input id="audioCymbalDecay" type="range" min="0.08" max="0.9" step="0.01" value="0.28" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioCymbalDecayLabel" style="min-width:48px;text-align:right;">0.28s</span>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;display:flex;align-items:center;gap:6px;">
+                  <input id="audioClaveOn" type="checkbox" checked />
+                  <span>Clave Level:</span>
+                </span>
+                <input id="audioClaveLevel" type="range" min="-18" max="12" step="1" value="-4" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioClaveLevelLabel" style="min-width:48px;text-align:right;">-4 dB</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="hint" style="min-width:86px;">Clave Decay:</span>
+                <input id="audioClaveDecay" type="range" min="0.03" max="0.25" step="0.01" value="0.09" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioClaveDecayLabel" style="min-width:48px;text-align:right;">0.09s</span>
+              </div>
+            </div>
+          </details>
+
           <div class="sideDivider"></div>
 
           <!-- Music and Scale Settings -->
@@ -365,21 +478,22 @@
                 <span class="hint" style="min-width:110px;">Drum Beat:</span>
                 <div class="dd" id="audioDrumBeatDD" style="flex:1;">
                   <button class="ddBtn" id="audioDrumBeatBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
-                    <span id="audioDrumBeatLabel">Simple (downbeat only)</span>
+                    <span id="audioDrumBeatLabel">Standard 7-Piece Groove</span>
                     <span class="ddChevron">▾</span>
                   </button>
                   <div class="ddMenu" id="audioDrumBeatMenu" role="listbox">
-                    <div class="ddItem sel" role="option" data-value="simple">Simple (downbeat only)</div>
-                    <div class="ddItem" role="option" data-value="minimal_jazz">Minimal Jazz (sticks on rim/cymbal)</div>
-                    <div class="ddItem" role="option" data-value="latin_salsa">Latin / Salsa (Palmieri, Puente)</div>
-                    <div class="ddItem" role="option" data-value="reggaeton_trap">Reggaeton / Latin Trap (Bad Bunny)</div>
-                    <div class="ddItem" role="option" data-value="folk_country">Folk-Country Shuffle (Grateful Dead)</div>
-                    <div class="ddItem" role="option" data-value="indian_tabla">Indian Tabla</div>
-                    <div class="ddItem" role="option" data-value="afrobeat">Afrobeat / West African (Fela Kuti)</div>
-                    <div class="ddItem" role="option" data-value="funk_pocket">Funk Pocket (James Brown)</div>
-                    <div class="ddItem" role="option" data-value="lofi_dilla">Lo-Fi / Neo-Soul / Dilla Feel</div>
-                    <div class="ddItem" role="option" data-value="brazilian_samba">Brazilian Samba / Bossa Nova</div>
-                    <div class="ddItem" role="option" data-value="electronic_house">Electronic House / Minimal Techno</div>
+                    <div class="ddItem" role="option" data-value="simple">Simple Kick Pulse (legacy)</div>
+                    <div class="ddItem sel" role="option" data-value="standard_7piece">Standard 7-Piece Groove</div>
+                    <div class="ddItem" role="option" data-value="minimal_jazz">Minimal Jazz (7-piece ride-led)</div>
+                    <div class="ddItem" role="option" data-value="latin_salsa">Latin / Salsa (7-piece conga+clave)</div>
+                    <div class="ddItem" role="option" data-value="reggaeton_trap">Reggaeton / Latin Trap (7-piece)</div>
+                    <div class="ddItem" role="option" data-value="folk_country">Folk-Country Shuffle (7-piece)</div>
+                    <div class="ddItem" role="option" data-value="indian_tabla">Indian Tabla (7-piece hybrid)</div>
+                    <div class="ddItem" role="option" data-value="afrobeat">Afrobeat / West African (7-piece)</div>
+                    <div class="ddItem" role="option" data-value="funk_pocket">Funk Pocket (7-piece)</div>
+                    <div class="ddItem" role="option" data-value="lofi_dilla">Lo-Fi / Neo-Soul (7-piece)</div>
+                    <div class="ddItem" role="option" data-value="brazilian_samba">Brazilian Samba / Bossa Nova (7-piece)</div>
+                    <div class="ddItem" role="option" data-value="electronic_house">Electronic House / Techno (7-piece)</div>
                   </div>
                 </div>
               </div>
@@ -887,6 +1001,7 @@
   <script src="static/demo_static/js/audio/bass_styles.js"></script>
   <script src="static/demo_static/js/audio/state.js"></script>
   <script src="static/demo_static/js/audio/drums.js"></script>
+  <script src="static/demo_static/js/audio/drums2.js"></script>
   <script src="static/demo_static/js/audio/theory.js"></script>
   <script src="static/demo_static/js/audio/pathfinder.js"></script>
   <script src="static/demo_static/js/audio/engine.js"></script>

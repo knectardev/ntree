@@ -571,26 +571,30 @@
     }
 
     // ── DRUM PULSE STRIP ──
-    // 25px strip above chord labels: 16 steps per bar, kick/snare/hat ticks; active step glows
+    // Multi-lane strip above chord labels: 16 steps/bar with distinct 7-piece lanes.
     (function drawDrumPulseStrip(){
       try {
         if (!audioActive) return;
         var drumBeats = window._audioModule && window._audioModule.DRUM_BEATS;
         if (!drumBeats) return;
-        var drumBeat = (window.audioState && window.audioState.drumBeat) || 'simple';
+        var drumBeat = (window.audioState && window.audioState.drumBeat) || 'standard_7piece';
         var pattern = drumBeats[drumBeat];
         if (!pattern) return;
 
-        var drumStripH = 25;
+        var drumStripH = 52;
         var labelBandH = 22;
         var drumStripY = pricePlot.y + pricePlot.h - labelBandH - drumStripH - 2;
         var stripBottom = drumStripY + drumStripH;
         var barWidth = plot.w / barsVisible;
         var stepWidth = barWidth / 16;
-        var tickW = Math.max(2, Math.min(4, Math.floor(stepWidth * 0.6)));
+        var tickW = Math.max(2, Math.min(5, Math.floor(stepWidth * 0.65)));
         var nowMs = (window.performance && performance.now) ? performance.now() : Date.now();
         var drumEvents = window._audioDrumEvents || [];
         var activeByStep = {};
+        var drumGlowScale = 1;
+        if (window.audioState && Number.isFinite(Number(window.audioState.drumGlowIntensity))) {
+          drumGlowScale = Math.max(0.4, Math.min(2.5, Number(window.audioState.drumGlowIntensity)));
+        }
 
         ctx.save();
         ctx.fillStyle = 'rgba(15, 22, 32, 0.4)';
@@ -598,11 +602,41 @@
 
         var kickList = pattern.kick || [];
         var snareList = pattern.snare || [];
-        var hatList = [];
-        if (pattern.hihat && pattern.hihat.length) hatList = pattern.hihat;
-        else if (pattern.ride && pattern.ride.length) hatList = pattern.ride;
+        var tomList = (pattern.tom && pattern.tom.length) ? pattern.tom : [6, 14];
+        var congaList = pattern.conga || [];
+        var hatList = (pattern.hihat && pattern.hihat.length) ? pattern.hihat : ((pattern.ride && pattern.ride.length) ? pattern.ride : [0,2,4,6,8,10,12,14]);
+        var rideList = pattern.ride || [];
+        var cymbalList = (pattern.cymbal && pattern.cymbal.length) ? pattern.cymbal : [0, 8];
         var claveList = pattern.clave || [];
-        var hatInstKey = (pattern.hihat && pattern.hihat.length) ? 'hihat' : 'ride';
+        var drumKitUi = (window.audioState && window.audioState.drumKit) ? window.audioState.drumKit : {};
+        var kickOn = (drumKitUi.kickOn !== false);
+        var snareOn = (drumKitUi.snareOn !== false);
+        var hihatOn = (drumKitUi.hihatOn !== false);
+        var tomOn = (drumKitUi.tomOn !== false);
+        var congaOn = (drumKitUi.congaOn !== false);
+        var cymbalOn = (drumKitUi.cymbalOn !== false);
+        var claveOn = (drumKitUi.claveOn !== false);
+        var laneCymbalY = drumStripY + 3;
+        var laneHatY = drumStripY + 9;
+        var laneCongaY = drumStripY + 15;
+        var laneTomY = drumStripY + 22;
+        var laneSnareY = drumStripY + 29;
+        var laneKickY = drumStripY + 36;
+        var laneClaveY = drumStripY + 43;
+
+        if (pricePlot.w > 220) {
+          ctx.fillStyle = 'rgba(150, 170, 205, 0.45)';
+          ctx.font = '8px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('CY', pricePlot.x + 2, laneCymbalY + 1);
+          ctx.fillText('HH', pricePlot.x + 2, laneHatY + 1);
+          ctx.fillText('CG', pricePlot.x + 2, laneCongaY + 1);
+          ctx.fillText('TM', pricePlot.x + 2, laneTomY + 1);
+          ctx.fillText('SN', pricePlot.x + 2, laneSnareY + 1);
+          ctx.fillText('KK', pricePlot.x + 2, laneKickY + 1);
+          ctx.fillText('CL', pricePlot.x + 2, laneClaveY + 1);
+        }
 
         for (var di = 0; di < drumEvents.length; di++) {
           var dev = drumEvents[di];
@@ -618,6 +652,9 @@
           if (dev.hits.snare) activeByStep[k].snare = Math.max(activeByStep[k].snare || 0, intensity);
           if (dev.hits.hihat) activeByStep[k].hihat = Math.max(activeByStep[k].hihat || 0, intensity);
           if (dev.hits.ride) activeByStep[k].ride = Math.max(activeByStep[k].ride || 0, intensity);
+          if (dev.hits.tom) activeByStep[k].tom = Math.max(activeByStep[k].tom || 0, intensity);
+          if (dev.hits.conga) activeByStep[k].conga = Math.max(activeByStep[k].conga || 0, intensity);
+          if (dev.hits.cymbal) activeByStep[k].cymbal = Math.max(activeByStep[k].cymbal || 0, intensity);
           if (dev.hits.clave) activeByStep[k].clave = Math.max(activeByStep[k].clave || 0, intensity);
         }
 
@@ -630,52 +667,108 @@
             var active = activeByStep[stepKey] || null;
             var kickGlow = active && active.kick ? active.kick : 0;
             var snareGlow = active && active.snare ? active.snare : 0;
-            var hatGlow = active && active[hatInstKey] ? active[hatInstKey] : 0;
+            var hatGlow = active && active.hihat ? active.hihat : 0;
+            var rideGlow = active && active.ride ? active.ride : 0;
+            var tomGlow = active && active.tom ? active.tom : 0;
+            var congaGlow = active && active.conga ? active.conga : 0;
+            var cymbalGlow = active && active.cymbal ? active.cymbal : 0;
             var claveGlow = active && active.clave ? active.clave : 0;
+            var kickG = Math.min(1, kickGlow * drumGlowScale);
+            var snareG = Math.min(1, snareGlow * drumGlowScale);
+            var tomG = Math.min(1, tomGlow * drumGlowScale);
+            var congaG = Math.min(1, congaGlow * drumGlowScale);
+            var hatG = Math.min(1, hatGlow * drumGlowScale);
+            var rideG = Math.min(1, rideGlow * drumGlowScale);
+            var cymG = Math.min(1, cymbalGlow * drumGlowScale);
+            var claveG = Math.min(1, claveGlow * drumGlowScale);
 
-            if (kickList.indexOf(s) >= 0) {
-              var kickOp = 0.28 + (kickGlow * 0.72);
-              if (kickGlow > 0.02) {
+            if (kickOn && kickList.indexOf(s) >= 0) {
+              var kickOp = 0.36 + (kickG * 0.84);
+              if (kickG > 0.02) {
                 ctx.save();
-                ctx.shadowBlur = 8 + (kickGlow * 10);
-                ctx.shadowColor = 'rgba(100, 180, 255, ' + (0.5 + kickGlow * 0.1) + ')';
+                ctx.shadowBlur = 12 + (kickG * 14);
+                ctx.shadowColor = 'rgba(120, 205, 255, ' + (0.62 + kickG * 0.25) + ')';
               }
               ctx.fillStyle = 'rgba(100, 180, 255, ' + kickOp + ')';
-              ctx.fillRect(cx - tickW / 2, stripBottom - 10, tickW, 10);
-              if (kickGlow > 0.02) ctx.restore();
+              ctx.fillRect(cx - tickW / 2, laneKickY - 1, tickW, 7);
+              if (kickG > 0.02) ctx.restore();
             }
-            if (snareList.indexOf(s) >= 0) {
-              var snareOp = 0.28 + (snareGlow * 0.72);
-              if (snareGlow > 0.02) {
+            if (snareOn && snareList.indexOf(s) >= 0) {
+              var snareOp = 0.36 + (snareG * 0.84);
+              if (snareG > 0.02) {
                 ctx.save();
-                ctx.shadowBlur = 7 + (snareGlow * 8);
-                ctx.shadowColor = 'rgba(220, 220, 240, ' + (0.45 + snareGlow * 0.4) + ')';
+                ctx.shadowBlur = 11 + (snareG * 12);
+                ctx.shadowColor = 'rgba(235, 235, 255, ' + (0.58 + snareG * 0.32) + ')';
               }
               ctx.fillStyle = 'rgba(200, 200, 220, ' + snareOp + ')';
-              ctx.fillRect(cx - tickW / 2, stripBottom - 10 - 6 - 2, tickW, 6);
-              if (snareGlow > 0.02) ctx.restore();
+              ctx.fillRect(cx - tickW / 2, laneSnareY - 1, tickW, 5);
+              if (snareG > 0.02) ctx.restore();
             }
-            if (hatList.indexOf(s) >= 0) {
-              var hatOp = 0.22 + (hatGlow * 0.78);
-              if (hatGlow > 0.02) {
+            if (tomOn && tomList.indexOf(s) >= 0) {
+              var tomOp = 0.34 + (tomG * 0.86);
+              if (tomG > 0.02) {
                 ctx.save();
-                ctx.shadowBlur = 5 + (hatGlow * 6);
-                ctx.shadowColor = 'rgba(185, 200, 230, ' + (0.35 + hatGlow * 0.4) + ')';
+                ctx.shadowBlur = 11 + (tomG * 12);
+                ctx.shadowColor = 'rgba(150, 245, 190, ' + (0.58 + tomG * 0.32) + ')';
+              }
+              ctx.fillStyle = 'rgba(120, 210, 160, ' + tomOp + ')';
+              ctx.fillRect(cx - tickW / 2, laneTomY - 1, tickW, 4);
+              if (tomG > 0.02) ctx.restore();
+            }
+            if (congaOn && congaList.indexOf(s) >= 0) {
+              var congaOp = 0.32 + (congaG * 0.86);
+              if (congaG > 0.02) {
+                ctx.save();
+                ctx.shadowBlur = 10 + (congaG * 11);
+                ctx.shadowColor = 'rgba(255, 165, 110, ' + (0.54 + congaG * 0.33) + ')';
+              }
+              ctx.fillStyle = 'rgba(240, 142, 90, ' + congaOp + ')';
+              ctx.fillRect(cx - 2, laneCongaY - 1, 4, 3);
+              if (congaG > 0.02) ctx.restore();
+            }
+            if (hihatOn && hatList.indexOf(s) >= 0) {
+              var hatOp = 0.32 + (hatG * 0.86);
+              if (hatG > 0.02) {
+                ctx.save();
+                ctx.shadowBlur = 9 + (hatG * 10);
+                ctx.shadowColor = 'rgba(205, 220, 255, ' + (0.5 + hatG * 0.36) + ')';
               }
               ctx.fillStyle = 'rgba(180, 180, 200, ' + hatOp + ')';
-              ctx.fillRect(cx - 1, drumStripY, 2, 2);
-              if (hatGlow > 0.02) ctx.restore();
+              ctx.fillRect(cx - 1, laneHatY, 2, 2);
+              if (hatG > 0.02) ctx.restore();
             }
-            if (claveList.indexOf(s) >= 0) {
-              var claveOp = 0.22 + (claveGlow * 0.78);
-              if (claveGlow > 0.02) {
+            if (cymbalOn && rideList.indexOf(s) >= 0) {
+              var rideOp = 0.3 + (rideG * 0.88);
+              if (rideG > 0.02) {
                 ctx.save();
-                ctx.shadowBlur = 7 + (claveGlow * 8);
-                ctx.shadowColor = 'rgba(255, 200, 120, ' + (0.45 + claveGlow * 0.4) + ')';
+                ctx.shadowBlur = 10 + (rideG * 10);
+                ctx.shadowColor = 'rgba(228, 205, 255, ' + (0.5 + rideG * 0.36) + ')';
+              }
+              ctx.fillStyle = 'rgba(205, 175, 245, ' + rideOp + ')';
+              ctx.fillRect(cx - 1, laneHatY + 3, 2, 2);
+              if (rideG > 0.02) ctx.restore();
+            }
+            if (cymbalOn && cymbalList.indexOf(s) >= 0) {
+              var cymOp = 0.34 + (cymG * 0.84);
+              if (cymG > 0.02) {
+                ctx.save();
+                ctx.shadowBlur = 10 + (cymG * 11);
+                ctx.shadowColor = 'rgba(255, 236, 145, ' + (0.55 + cymG * 0.34) + ')';
+              }
+              ctx.fillStyle = 'rgba(255, 220, 120, ' + cymOp + ')';
+              ctx.fillRect(cx - 2, laneCymbalY, 4, 2);
+              if (cymG > 0.02) ctx.restore();
+            }
+            if (claveOn && claveList.indexOf(s) >= 0) {
+              var claveOp = 0.32 + (claveG * 0.84);
+              if (claveG > 0.02) {
+                ctx.save();
+                ctx.shadowBlur = 10 + (claveG * 11);
+                ctx.shadowColor = 'rgba(255, 210, 125, ' + (0.56 + claveG * 0.32) + ')';
               }
               ctx.fillStyle = 'rgba(255, 200, 120, ' + claveOp + ')';
-              ctx.fillRect(cx - 1, drumStripY + 4, 2, 2);
-              if (claveGlow > 0.02) ctx.restore();
+              ctx.fillRect(cx - 1, laneClaveY, 2, 2);
+              if (claveG > 0.02) ctx.restore();
             }
           }
         }
