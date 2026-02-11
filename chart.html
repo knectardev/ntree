@@ -274,6 +274,83 @@
             </div>
           </details>
 
+          <details class="subCard subCard--collapsible" id="audioPanelHarmony" aria-label="Inner voice harmony controls" style="margin-top:10px;" open>
+            <summary class="subCardTitle">Inner Voices / Harmony</summary>
+            <div class="sideList">
+              <label class="chkRow">
+                <input id="audioHarmonyOn" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Enable inner harmony</span>
+                </span>
+              </label>
+              <div style="display:flex;gap:8px;align-items:center;margin:6px 0 10px 24px;">
+                <input id="audioHarmonyVolume" type="range" min="-36" max="6" step="1" value="-16" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioHarmonyVolumeLabel" style="min-width:42px;text-align:right;">-16 dB</span>
+              </div>
+
+              <div style="display:flex;gap:8px;margin:0 0 8px 24px;">
+                <div class="dd" id="audioHarmonyInstrumentDD" style="flex:1;">
+                  <button class="ddBtn" id="audioHarmonyInstrumentBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioHarmonyInstrumentLabel">Electric Piano</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioHarmonyInstrumentMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="electric_piano">Electric Piano</div>
+                    <div class="ddItem" role="option" data-value="acoustic_grand_piano">Piano</div>
+                    <div class="ddItem" role="option" data-value="harpsichord">Harpsichord</div>
+                    <div class="ddItem" role="option" data-value="strings">Strings</div>
+                    <div class="ddItem" role="option" data-value="cello">Cello</div>
+                    <div class="ddItem" role="option" data-value="pipe_organ">Pipe Organ</div>
+                    <div class="ddItem" role="option" data-value="synth_pad">Synth Pad</div>
+                    <div class="ddItem" role="option" data-value="synth_brass">Synth Brass</div>
+                  </div>
+                </div>
+                <div class="dd" id="audioHarmonyRhythmDD" style="flex:1;">
+                  <button class="ddBtn" id="audioHarmonyRhythmBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioHarmonyRhythmLabel">Quarter (1/4)</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioHarmonyRhythmMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="4">Quarter (1/4)</div>
+                    <div class="ddItem" role="option" data-value="8">Eighth (1/8)</div>
+                    <div class="ddItem" role="option" data-value="2">Half (1/2)</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:8px;margin:0 0 8px 24px;">
+                <div class="dd" id="audioHarmonyStyleDD" style="flex:1;">
+                  <button class="ddBtn" id="audioHarmonyStyleBtn" type="button" aria-haspopup="listbox" aria-expanded="false" style="width:100%;">
+                    <span id="audioHarmonyStyleLabel">Jazz Shell (3rds &amp; 7ths)</span>
+                    <span class="ddChevron">▾</span>
+                  </button>
+                  <div class="ddMenu" id="audioHarmonyStyleMenu" role="listbox">
+                    <div class="ddItem sel" role="option" data-value="jazz_shell_voicings">Jazz Shell (3rds &amp; 7ths)</div>
+                    <div class="ddItem" role="option" data-value="power_chords_thick">Power Stacks (Root + 5th)</div>
+                    <div class="ddItem" role="option" data-value="ambient_sustained_pad">Ambient Tension</div>
+                    <div class="ddItem" role="option" data-value="orchestral_strings">Orchestral Fill</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;margin:0 0 6px 24px;">
+                <span class="hint" style="min-width:110px;">Body Sensitivity:</span>
+                <input id="audioHarmonyBodySensitivity" type="range" min="0.2" max="2.0" step="0.1" value="1.0" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioHarmonyBodySensitivityLabel" style="min-width:48px;text-align:right;">1.0x</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;margin:0 0 6px 24px;">
+                <span class="hint" style="min-width:110px;">Doji Threshold:</span>
+                <input id="audioHarmonyDojiThreshold" type="range" min="0.05" max="0.40" step="0.01" value="0.14" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioHarmonyDojiThresholdLabel" style="min-width:48px;text-align:right;">0.14</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;margin:0 0 0 24px;">
+                <span class="hint" style="min-width:110px;">Max Voices:</span>
+                <input id="audioHarmonyMaxVoices" type="range" min="1" max="4" step="1" value="3" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioHarmonyMaxVoicesLabel" style="min-width:48px;text-align:right;">3</span>
+              </div>
+            </div>
+          </details>
+
           <details class="subCard subCard--collapsible" id="audioPanelDrumKit" aria-label="Drum kit controls" style="margin-top:10px;" open>
             <summary class="subCardTitle">Drum Kit (11 Instruments)</summary>
             <div class="sideList">
@@ -1055,6 +1132,7 @@
   <!-- Audio Visual Settings module (refactored from 13_audio_controls.js) -->
   <script src="static/demo_static/js/audio/config.js"></script>
   <script src="static/demo_static/js/audio/bass_styles.js"></script>
+  <script src="static/demo_static/js/audio/harmony_styles.js"></script>
   <script src="static/demo_static/js/audio/state.js"></script>
   <script src="static/demo_static/js/audio/drums2.js"></script>
   <script src="static/demo_static/js/audio/theory.js"></script>

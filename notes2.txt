@@ -1,177 +1,60 @@
-To get a realistic Latin percussion sound out of MIDI, you have to move away from "grid-perfect" timing and focus on the **tonality of the hand strike**. Unlike drum sticks, congas are all about skin-on-skin contact, which creates a much warmer, "thuddy" resonance.
+After reviewing your `requirements.md` and comparing it to the current codebase logic, your approach is remarkably consistent. The app's architecture is well-suited for a mid-voice "harmonizer," but there are three specific areas where the requirements might create a conflict with the "inner voice" implementation.
+
+### 1. The "Velocity vs. Density" Conflict
+
+* **The Requirement:** You specify that **Candle Body Height** should determine the "energy" and "complexity" of the melody.
+* **The Flag:** In the current **Drum Kit** settings, "Glow Intensity" and levels are handled via a slider. If the mid-voice uses body height to determine *how many* notes are played (density) AND the *volume* (velocity), a very tall candle could create a "sonic wall" that masks the Soprano (Upper Wick).
+* **Recommendation:** Use a **non-linear mapping** for the mid-voice. As body height increases, increase the velocity (volume) first, and only add a third or fourth chord tone once a specific "volatility threshold" is crossed.
+
+### 2. Sustain/Flow Overlap
+
+* **The Requirement:** The "Flow / Sustain" is currently set at  in your Audio Visual Sync Tuning.
+* **The Flag:** A high sustain works beautifully for "Strings" or "Vocal Backing," but if the **Chord Progression** (Jazz ii-V-I) changes while the previous mid-voice notes are still sustaining, you will get "harmonic mud" (dissonance between the old chord and the new one).
+* **Recommendation:** Ensure your algorithm includes a **"Kill Signal"** or a rapid fade-out for mid-voice notes specifically upon a `chord_change` event, regardless of the global sustain setting.
+
+### 3. Musical "Collision" with Bass Styles
+
+* **The Requirement:** You are using complex bass styles like **Latin / Afro-Cuban Tumbao**.
+* **The Flag:** In the `bass_styles.js` file, styles like `latin_afrocuban` use semitone offsets like `[0, 7, 10, 12]`. This means the bass is already jumping into the "Tenor" range (the 7th and 10th intervals).
+* **Recommendation:** To avoid "frequency masking," the mid-voice should be "Bass-Aware."
+* If the `Bass Line Style` is **Minimal/Pedal Drone**, the mid-voice can be complex.
+* If the `Bass Line Style` is **Afrobeat/Polyrhythmic**, the mid-voice should be strictly rhythmic and limited to 1-2 notes to avoid clashing with the bass's melodic movement.
+
+
 
 ---
 
-## 1. The Congas: The "Heartbeat"
+### Summary of Compatibility
 
-A standard conga set (usually a *Quinto* and a *Conga*) relies on four distinct hand techniques. If you describe these to an AI, it can better approximate the velocity and pitch shifts needed.
-
-* **The Open Tone (Abierto):** Describe this as a **resonant, clear "ring"** with a distinct pitch. It should have a warm sustain that mimics the vibration of the drum's wooden shell.
-* **The Slap (Seco):** This is the loudest, sharpest sound. Describe it as a **high-pitched "crack"** with a very fast decay. It should sound like a whip or a sharp pop.
-* **The Bass Tone (Bajo):** This is the palm hitting the center. Describe it as a **low-frequency "thump"** with a muted, muffled quality. It lacks high-end "shimmer."
-* **The Muffled/Touch Tone (Manoteo):** These are the quiet "filler" notes. Describe them as **ghost notes**—subtle, mid-range taps with very low MIDI velocity (around 20–40).
-
----
-
-## 2. The Clave: The "Anchor"
-
-The clave is the rhythmic foundation of Latin music. While it seems simple, a "real" clave sound isn't just a woodblock hit; it’s two wooden pegs striking each other.
-
-* **The Striking Wood (The "Male" Clave):** Describe this as a **short, focused impulse** with a very high "Q" (narrow frequency band).
-* **The Resonating Chamber (The "Female" Clave):** The other hand forms a cupped chamber. Describe the sound as having a **hollow, "woody" resonance** around 2kHz.
-* **Texture:** Use the term **"dense hardwood"** to avoid a "plastic" or "electronic" click sound. It should be dry, with almost zero reverb unless specified.
-
----
-
-## Technical Descriptors for AI/MIDI Generation
-
-to generate these patterns (like a Tumbao or a 3-2 Clave), use this table to define the "physics" of the MIDI:
-
-| Instrument | MIDI Command / Descriptor | Frequency Range |
+| Feature | Compatibility | Risk Level |
 | --- | --- | --- |
-| **Quinto (Slap)** | "Instant attack, high-pass filter at 1kHz, 50ms decay." | 1kHz - 5kHz |
-| **Tumba (Open)** | "Fundamental pitch focus, sine-like sustain, soft knee." | 150Hz - 400Hz |
-| **Clave** | "Absolute dry signal, zero sustain, peak resonance at 2.5kHz." | 2kHz - 3kHz |
-| **Heel-Toe** | "Low-velocity 'muffle,' high damping, 'leathery' texture." | 400Hz - 800Hz |
+| **Root Key/Scale Sync** | **High** | Low - Already handled by `Music and Scale Settings`. |
+| **Jazz ii-V-I Integration** | **High** | Low - Easily mapped to the 3rd and 7th offsets. |
+| **Body Height Mapping** | **Moderate** | Medium - Needs a "Density Cap" to prevent audio clipping. |
+
+
+To mitigate the **Velocity vs. Density** and **Frequency Collision** risks, keep these three implementation tips in mind as you review the code:
+
+### 1. The "Velocity Ceiling"
+
+Ensure that the cumulative gain of the Mid-Voice doesn't hit  when all three voices (Soprano, Mid, Bass) trigger simultaneously.
+
+* **The Fix:** Implement a simple `Math.min()` cap on velocity. Even for a Marubozu (giant candle), the mid-voice velocity should likely max out at  of the Soprano's current volume to maintain the "Lead" hierarchy.
+
+### 2. Frequency "Slotting"
+
+Since your `bass_styles.js` includes styles like **Latin / Afro-Cuban Tumbao** that use high offsets (e.g., `+10, +12`), there is a risk of the bass note literally being higher than the mid-voice root.
+
+* **The Fix:** Use a "transposition check." If `MidVoiceNote <= BassNote`, transpose the Mid-Voice up one octave ( semitones) instantly. This preserves the "Inner Voice" role regardless of how active the bass line gets.
+
+### 3. The Chord-Change "Dampener"
+
+Because your **Jazz (ii-V-I)** progression is the backbone, the mid-voice needs to be the most "stable" element.
+
+* **The Fix:** If Cursor is building the "Restart on chord change" logic (which I see in your UI for Upper/Lower wicks), make sure the mid-voice uses a **Crossfade** rather than a hard restart. This will stop the  sustain from creating dissonant "ghost chords" during a transition from the `ii` to the `V`.
 
 ---
 
-### The Secret to Latin "Feel": Micro-Timing
+If the first draft feels too cluttered, we can always look at a **"Velocity Scaling"** function that lowers the volume of the mid-notes as you add more of them (Density-compensated Gain).
 
-Latin percussion "swings" differently than jazz or hip-hop. To make it sound real in code:
-
-1. **Anticipation:** Tell the AI to "push" the open tones (make them slightly early by 2-5ms).
-2. **Velocity Ghosting:** Ensure the "heel-toe" movements are 40% quieter than the "slaps."
-
-
-To get this into a MIDI format that actually carries the "soul" of these instruments, we’ll focus on a **Python script** using the `mido` library. This script won't just place notes on a grid; it will programmatically apply the "human" physics we discussed: **velocity layering** and **micro-timing offsets**.
-
-Here is a script you can ask Cursor to run or adapt. It generates a standard **3-2 Son Clave** and a **Basic Tumbao** (the standard conga rhythm).
-
-```python
-import mido
-from mido import Message, MidiFile, MidiTrack
-import random
-
-# Create MIDI file and track
-mid = MidiFile()
-track = MidiTrack()
-mid.tracks.append(track)
-
-def add_note(note, velocity, time, duration=120):
-    # Humanize velocity (+/- 10%) and timing (+/- 5 ticks)
-    v = max(0, min(127, int(velocity + random.uniform(-10, 10))))
-    t = max(0, int(time + random.uniform(-5, 5)))
-    track.append(Message('note_on', note=note, velocity=v, time=t))
-    track.append(Message('note_off', note=note, velocity=0, time=duration))
-
-# MIDI Mapping (Standard GM Percussion)
-CLAVE = 75
-CONGA_SLAP = 62
-CONGA_OPEN = 63
-CONGA_BASS = 64
-
-# 3-2 SON CLAVE PATTERN (Measured in ticks; 480 per quarter note)
-# Beats: 1, 1.5, 2.5, 3, 4
-clave_times = [0, 240, 480, 480, 480] 
-for time in clave_times:
-    add_note(CLAVE, 110, time)
-
-# BASIC TUMBAO CONGA PATTERN (Starts at 0)
-# Tumbao is: Heel(1) Toe(+) Slap(2) Toe(+) Heel(3) Toe(+) Open(4) Open(+)
-conga_pattern = [
-    (CONGA_BASS, 50, 0),    # Beat 1 (Heel)
-    (CONGA_BASS, 40, 240),  # Beat 1+ (Toe)
-    (CONGA_SLAP, 120, 240), # Beat 2 (Sharp Slap)
-    (CONGA_BASS, 40, 240),  # Beat 2+ (Toe)
-    (CONGA_BASS, 50, 240),  # Beat 3 (Heel)
-    (CONGA_BASS, 40, 240),  # Beat 3+ (Toe)
-    (CONGA_OPEN, 100, 240), # Beat 4 (Resonant Open)
-    (CONGA_OPEN, 105, 240)  # Beat 4+ (Resonant Open)
-]
-
-for note, vel, time in conga_pattern:
-    add_note(note, vel, time)
-
-mid.save('latin_rhythm.mid')
-
-```
-
-### Why this works for Cursor:
-
-1. **Velocity Contrast:** Notice the `CONGA_SLAP` is set to **120**, while the `Toe` (ghost notes) are at **40**. This creates the "rolling" hand feel.
-2. **Frequency Separation:** By using different MIDI notes (62, 63, 64), you tell the sampler to trigger different "zones" of the drum, mimicking the hand positions shown below.
-3. **The "Human" Randomizer:** The `random.uniform` functions prevent the "machine gun" effect where every hit sounds identical.
-
-### Next Step for Cursor
-
-To take this further, you can tell Cursor:
-
-> *"Modify this script to implement a **swing factor** where the 'off-beats' (the '+' counts) are delayed by an additional 10-15 ticks to simulate a 'laid-back' Latin groove."*
-
-**Would you like me to adjust the code to include that "laid-back" swing logic?**
-
-
-To give this rhythm that authentic "laid-back" feel, we need to introduce a **swing factor**. In Latin music, the "off-beats" (the "and" of the beat) are often played with a tiny micro-delay. This prevents the rhythm from sounding stiff or "robotic."
-
-Here is the updated logic. I’ve added a `swing_offset` variable that specifically targets the syncopated notes to give them that "pocket" feel.
-
-```python
-import mido
-from mido import Message, MidiFile, MidiTrack
-import random
-
-mid = MidiFile()
-track = MidiTrack()
-mid.tracks.append(track)
-
-def add_note(note, velocity, time, duration=120):
-    # Standard randomization for human feel
-    v = max(0, min(127, int(velocity + random.uniform(-8, 8))))
-    # Applying the time offset
-    t = max(0, int(time + random.uniform(-3, 3)))
-    track.append(Message('note_on', note=note, velocity=v, time=t))
-    track.append(Message('note_off', note=note, velocity=0, time=duration))
-
-# SETTINGS
-TICKS_PER_BEAT = 480
-SWING = 15  # The "Laid-back" delay in ticks (approx 3% shift)
-
-# MIDI Mapping
-CLAVE = 75
-CONGA_SLAP = 62
-CONGA_OPEN = 63
-CONGA_BASS = 64
-
-# RHYTHM DEFINITION (note, velocity, timing_in_ticks, is_offbeat)
-# We delay the 'is_offbeat' notes by the SWING factor
-tumbao_pattern = [
-    (CONGA_BASS, 55, 0, False),               # 1
-    (CONGA_BASS, 40, 240 + SWING, True),      # 1+
-    (CONGA_SLAP, 125, 240 - SWING, False),     # 2
-    (CONGA_BASS, 40, 240 + SWING, True),      # 2+
-    (CONGA_BASS, 55, 240 - SWING, False),     # 3
-    (CONGA_BASS, 40, 240 + SWING, True),      # 3+
-    (CONGA_OPEN, 105, 240 - SWING, False),    # 4
-    (CONGA_OPEN, 110, 240 + SWING, True)      # 4+
-]
-
-# Write the track
-for note, vel, time, is_offbeat in tumbao_pattern:
-    add_note(note, vel, time)
-
-mid.save('swinging_tumbao.mid')
-print("MIDI file 'swinging_tumbao.mid' generated with laid-back swing.")
-
-```
-
----
-
-### Why this creates a "Real" sound
-
-* **The Swing Shift:** By adding `SWING` to the off-beats and subtracting it from the following down-beat, the notes "lean" into each other. It mimics a drummer’s natural tendency to let their hand linger a millisecond longer on the drum head.
-* **Velocity Scaling:** Notice the **Slap** is the strongest note (125). In real conga playing, the slap is the "exclamation point" of the phrase.
-* **The Tumbao Geometry:** The pattern follows the physical movement of the "Heel-Toe" technique, where the palm stays close to the skin for the quiet notes and lifts high for the open tones.
-
-### Next Step
-
+How is the generated code looking so far—is it successfully pulling the `bullish` vs `bearish` states from your price engine?

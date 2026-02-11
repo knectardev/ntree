@@ -87,6 +87,16 @@
             patternOverride: false,      // When true, pattern overrides the deep pathfinder algorithm
             restartOnChord: true         // When true, pattern resets to chord root on chord change
         },
+        harmony: {
+            enabled: true,
+            volume: -16,
+            instrument: 'electric_piano',
+            rhythm: '4', // Quarter notes
+            style: 'jazz_shell_voicings',
+            bodySensitivity: 1.0,
+            dojiThreshold: 0.14,
+            maxVoices: 3
+        },
         drumVolume: -12,
         drumNaturalRoom: true, // Enable room/transient realism layer on drums
         drumGlowIntensity: 1.0, // Visual multiplier for drum-strip glow brightness
@@ -151,6 +161,7 @@
         displayMode: 'bars',    // 'bars' (horizontal bars) or 'circles' (radius = note duration)
         panels: {               // Sub-panel open/closed state
             channels: true,
+            harmony: true,
             drumKit: true,
             genre: true,
             tuning: true,
@@ -162,12 +173,14 @@
         // Internal Tone.js state
         _initialized: false,
         _sopranoSampler: null,
+        _harmonySampler: null,
         _bassSampler: null,
         _kickSynth: null,
         _transportStarted: false,
         _lastBarIndex: -1,
         _priceRange: { min: 0, max: 100 },  // Updated from data
         _lastSopranoMidi: null,
+        _lastHarmonyMidi: null,
         _lastBassMidi: null,
         
         // Animation state
@@ -203,6 +216,27 @@
         sopranoPatternBtn: document.getElementById('audioSopranoPatternBtn'),
         sopranoPatternMenu: document.getElementById('audioSopranoPatternMenu'),
         sopranoPatternLabel: document.getElementById('audioSopranoPatternLabel'),
+        harmonyChk: document.getElementById('audioHarmonyOn'),
+        harmonyVolume: document.getElementById('audioHarmonyVolume'),
+        harmonyVolumeLabel: document.getElementById('audioHarmonyVolumeLabel'),
+        harmonyInstrumentDD: document.getElementById('audioHarmonyInstrumentDD'),
+        harmonyInstrumentBtn: document.getElementById('audioHarmonyInstrumentBtn'),
+        harmonyInstrumentMenu: document.getElementById('audioHarmonyInstrumentMenu'),
+        harmonyInstrumentLabel: document.getElementById('audioHarmonyInstrumentLabel'),
+        harmonyRhythmDD: document.getElementById('audioHarmonyRhythmDD'),
+        harmonyRhythmBtn: document.getElementById('audioHarmonyRhythmBtn'),
+        harmonyRhythmMenu: document.getElementById('audioHarmonyRhythmMenu'),
+        harmonyRhythmLabel: document.getElementById('audioHarmonyRhythmLabel'),
+        harmonyStyleDD: document.getElementById('audioHarmonyStyleDD'),
+        harmonyStyleBtn: document.getElementById('audioHarmonyStyleBtn'),
+        harmonyStyleMenu: document.getElementById('audioHarmonyStyleMenu'),
+        harmonyStyleLabel: document.getElementById('audioHarmonyStyleLabel'),
+        harmonyBodySensitivity: document.getElementById('audioHarmonyBodySensitivity'),
+        harmonyBodySensitivityLabel: document.getElementById('audioHarmonyBodySensitivityLabel'),
+        harmonyDojiThreshold: document.getElementById('audioHarmonyDojiThreshold'),
+        harmonyDojiThresholdLabel: document.getElementById('audioHarmonyDojiThresholdLabel'),
+        harmonyMaxVoices: document.getElementById('audioHarmonyMaxVoices'),
+        harmonyMaxVoicesLabel: document.getElementById('audioHarmonyMaxVoicesLabel'),
 
         // Lower wick
         lowerWickChk: document.getElementById('audioLowerWick'),
@@ -334,6 +368,7 @@
 
         // Collapsible sub-panels
         panelChannels: document.getElementById('audioPanelChannels'),
+        panelHarmony: document.getElementById('audioPanelHarmony'),
         panelDrumKit: document.getElementById('audioPanelDrumKit'),
         panelGenre: document.getElementById('audioPanelGenre'),
         panelTuning: document.getElementById('audioPanelTuning'),

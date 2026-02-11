@@ -39,6 +39,7 @@
     const updateSopranoHistory = _am.updateSopranoHistory;
     const updateBassHistory = _am.updateBassHistory;
     const playDrumStep = _am.playDrumStep;
+    const HARMONY_STYLES = _am.HARMONY_STYLES || {};
 
     // ========================================================================
     // CONSTANTS
@@ -177,6 +178,41 @@
             case '16': return 0.5;
             default: return 1.0;
         }
+    }
+
+    function clampToRange(v, lo, hi, fb) {
+        const n = Number(v);
+        const d = Number.isFinite(fb) ? fb : lo;
+        if (!Number.isFinite(n)) return d;
+        return Math.max(lo, Math.min(hi, n));
+    }
+
+    function pickMidiForPcInRange(pc, minMidi, maxMidi, pivotMidi) {
+        let best = null;
+        let bestDist = Infinity;
+        const lo = Math.floor(minMidi);
+        const hi = Math.floor(maxMidi);
+        for (let m = lo; m <= hi; m++) {
+            if ((m % 12) !== pc) continue;
+            const dist = Math.abs(m - pivotMidi);
+            if (dist < bestDist) {
+                best = m;
+                bestDist = dist;
+            }
+        }
+        if (best === null) return clampToRange(pivotMidi, minMidi, maxMidi, minMidi);
+        return best;
+    }
+
+    function wrapMidiToRange(midi, minMidi, maxMidi) {
+        if (!Number.isFinite(midi)) return minMidi;
+        const lo = Math.floor(minMidi);
+        const hi = Math.floor(maxMidi);
+        if (hi <= lo) return lo;
+        let m = Math.round(midi);
+        while (m < lo) m += 12;
+        while (m > hi) m -= 12;
+        return clampToRange(m, lo, hi, lo);
     }
 
     // ========================================================================
@@ -1024,6 +1060,62 @@
             _phrasingState.bass.lastPrice = Number(barData.l);
             musicState.prevBass = bassMidi;
         }
+
+        // ── INNER HARMONY (body-size driven dyads/triads) ──
+        const harmonyCfg = audioState.harmony || {};
+        if (harmonyCfg.enabled && audioState._harmonySampler) {
+            const rhythm = String(harmonyCfg.rhythm || '4');
+            const rhythmDiv = Math.max(1, parseInt(rhythm, 10) || 4);
+            const harmonyInterval = Math.max(1, Math.round(SUB_STEP_COUNT / rhythmDiv));
+            const shouldPlayHarmony = (subStepInBar % harmonyInterval === 0);
+            if (shouldPlayHarmony) {
+                const styleKey = String(harmonyCfg.style || 'jazz_shell_voicings');
+                const style = HARMONY_STYLES[styleKey] || HARMONY_STYLES.jazz_shell_voicings || null;
+                if (style) {
+                    const minMidi = clampToRange(style.minMidi, 36, 84, 48);
+                    const maxMidi = clampToRange(style.maxMidi, minMidi + 7, 96, 72);
+
+                    const openP = Number(barData.o);
+                    const closeP = Number(barData.c);
+                    const highP = Number(barData.h);
+                    const lowP = Number(barData.l);
+                    const bodyAbs = Math.abs(closeP - openP);
+                    const rangeAbs = Math.max(0.000001, Math.abs(highP - lowP));
+                    const sens = clampToRange(harmonyCfg.bodySensitivity, 0.2, 2.0, 1.0);
+                    const bodyNorm = clampToRange((bodyAbs / rangeAbs) * sens, 0, 1.25, 0);
+                    const dojiThreshold = clampToRange(harmonyCfg.dojiThreshold, 0.05, 0.40, 0.14);
+                    const isBullish = Number.isFinite(closeP) && Number.isFinite(openP) && closeP >= openP;
+                    const baseOffsets = bodyNorm < dojiThreshold
+                        ? (Array.isArray(style.doji) && style.doji.length ? style.doji : [0, 7])
+                        : (isBullish ? style.bullish : style.bearish);
+
+                    const maxVoices = clampToRange(harmonyCfg.maxVoices, 1, 4, 3);
+                    let targetVoices = 1;
+                    if (bodyNorm >= Math.min(1.0, dojiThreshold + 0.45)) targetVoices = 4;
+                    else if (bodyNorm >= Math.min(0.7, dojiThreshold + 0.25)) targetVoices = 3;
+                    else if (bodyNorm >= Math.min(0.4, dojiThreshold + 0.12)) targetVoices = 2;
+                    targetVoices = Math.max(1, Math.min(maxVoices, targetVoices));
+
+                    const offsets = (Array.isArray(baseOffsets) ? baseOffsets : [0, 7]).slice(0, targetVoices);
+                    const pcs = getChordComponentPCs();
+                    const rootPc = ((pcs && Number.isFinite(pcs.root)) ? pcs.root : (musicState.rootMidi % 12));
+                    const baseMidi = pickMidiForPcInRange(rootPc, minMidi, maxMidi, 60);
+                    const nowVel = clampToRange(0.35 + (bodyNorm * 0.5), 0.25, 0.9, 0.55);
+                    const durMul = rhythmDurationScale(rhythm);
+                    const toneDuration = Math.max(0.06, Math.min(1.8, rhythmToDuration(rhythm) * (0.6 + durMul * 0.45)));
+                    const midPrice = Number.isFinite(openP) && Number.isFinite(closeP) ? ((openP + closeP) / 2) : barData.c;
+
+                    for (let i = 0; i < offsets.length; i++) {
+                        const midi = wrapMidiToRange(baseMidi + Number(offsets[i] || 0), minMidi, maxMidi);
+                        try {
+                            audioState._harmonySampler.triggerAttackRelease(Tone.Frequency(midi, 'midi').toNote(), toneDuration, now + (i * 0.004), nowVel);
+                            emitSubStepNote('harmony', midi, midPrice, preciseBarIndex, toneDuration * 1000, perfNow, rhythm);
+                            audioState._lastHarmonyMidi = midi;
+                        } catch (_e) {}
+                    }
+                }
+            }
+        }
         
         // ── VOICE SEPARATION CHECK ──
         if (audioState.upperWick.enabled && audioState.lowerWick.enabled) {
@@ -1064,7 +1156,11 @@
         const glowMs = (audioState.glowDuration || 3) * 200;
         
         // Store rhythm for circle display mode
-        const rhythm = rhythmOverride || (voice === 'soprano' ? audioState.upperWick.rhythm : audioState.lowerWick.rhythm);
+        const rhythm = rhythmOverride || (
+            voice === 'soprano'
+                ? audioState.upperWick.rhythm
+                : (voice === 'harmony' ? (audioState.harmony && audioState.harmony.rhythm) : audioState.lowerWick.rhythm)
+        );
         
         window._audioNoteEvents.push({
             voice: voice,
@@ -1094,7 +1190,9 @@
         if (!window._audioNoteEvents) window._audioNoteEvents = [];
         
         // Get rhythm-based duration in ms
-        const rhythm = voice === 'soprano' ? audioState.upperWick.rhythm : audioState.lowerWick.rhythm;
+        const rhythm = voice === 'soprano'
+            ? audioState.upperWick.rhythm
+            : (voice === 'harmony' ? (audioState.harmony && audioState.harmony.rhythm) : audioState.lowerWick.rhythm);
         const durationMs = rhythmToDurationMs(rhythm);
         
         const now = performance.now();

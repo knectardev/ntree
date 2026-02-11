@@ -1775,12 +1775,15 @@
           // Determine if note is "active" (glowing)
           var isActive = now < noteEv.glowUntil;
           
-          // Colors: soprano = green (major/uptrend) or red (minor/downtrend), bass = blue
+          // Colors: soprano = green/red, harmony = amber/rose, bass = blue/purple
           var isMinor = (noteEv.regime === 'DOWNTREND' || noteEv.regime === 'MINOR');
           var baseColor, rgbaBase;
           if (noteEv.voice === 'soprano') {
             baseColor = isMinor ? '#ff6b8a' : '#7cffc2';
             rgbaBase  = isMinor ? 'rgba(255, 107, 138,' : 'rgba(124, 255, 194,';
+          } else if (noteEv.voice === 'harmony') {
+            baseColor = isMinor ? '#ff9fb7' : '#ffd680';
+            rgbaBase  = isMinor ? 'rgba(255, 159, 183,' : 'rgba(255, 214, 128,';
           } else {
             baseColor = isMinor ? '#b07aff' : '#7aa7ff';
             rgbaBase  = isMinor ? 'rgba(176, 122, 255,' : 'rgba(122, 167, 255,';
@@ -1834,6 +1837,8 @@
             var noteName = window._midiToNoteName(noteEv.midi);
             if (noteEv.voice === 'soprano') {
               ctx.fillStyle = isMinor ? 'rgba(255, 107, 138, 0.9)' : 'rgba(124, 255, 194, 0.9)';
+            } else if (noteEv.voice === 'harmony') {
+              ctx.fillStyle = isMinor ? 'rgba(255, 159, 183, 0.92)' : 'rgba(255, 214, 128, 0.92)';
             } else {
               ctx.fillStyle = isMinor ? 'rgba(176, 122, 255, 0.9)' : 'rgba(122, 167, 255, 0.9)';
             }

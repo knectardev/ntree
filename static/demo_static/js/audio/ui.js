@@ -17,6 +17,7 @@
     const allAudioDropdowns = _am.allAudioDropdowns;
     const GENRES = _am.GENRES;
     const BASS_LINE_STYLES = _am.BASS_LINE_STYLES || {};
+    const HARMONY_STYLES = _am.HARMONY_STYLES || {};
     const DEFAULT_BASS_LINE_STYLE = _am.DEFAULT_BASS_LINE_STYLE || 'walking_bass_jazz';
     const ROOT_KEY_OFFSETS = _am.ROOT_KEY_OFFSETS;
     const updateStatus = _am.updateStatus;
@@ -172,6 +173,16 @@
                     patternOverride: audioState.lowerWick.patternOverride,
                     restartOnChord: audioState.lowerWick.restartOnChord
                 },
+                harmony: {
+                    enabled: !!(audioState.harmony && audioState.harmony.enabled),
+                    volume: audioState.harmony && audioState.harmony.volume,
+                    instrument: audioState.harmony && audioState.harmony.instrument,
+                    rhythm: audioState.harmony && audioState.harmony.rhythm,
+                    style: audioState.harmony && audioState.harmony.style,
+                    bodySensitivity: audioState.harmony && audioState.harmony.bodySensitivity,
+                    dojiThreshold: audioState.harmony && audioState.harmony.dojiThreshold,
+                    maxVoices: audioState.harmony && audioState.harmony.maxVoices
+                },
                 genre: audioState.genre,
                 rootKey: audioState.rootKey,
                 chordProgression: audioState.chordProgression,
@@ -231,6 +242,16 @@
                 audioState.lowerWick.patternOverride = settings.lowerWick.patternOverride ?? false;
                 audioState.lowerWick.restartOnChord = settings.lowerWick.restartOnChord ?? true;
             }
+            const hs = settings.harmony || {};
+            if (!audioState.harmony) audioState.harmony = {};
+            audioState.harmony.enabled = hs.enabled ?? true;
+            audioState.harmony.volume = clampDb(hs.volume, -16);
+            audioState.harmony.instrument = hs.instrument || 'electric_piano';
+            audioState.harmony.rhythm = (hs.rhythm === '2' || hs.rhythm === '4' || hs.rhythm === '8') ? hs.rhythm : '4';
+            audioState.harmony.style = (hs.style && HARMONY_STYLES[hs.style]) ? hs.style : 'jazz_shell_voicings';
+            audioState.harmony.bodySensitivity = clampRange(hs.bodySensitivity, 0.2, 2.0, 1.0);
+            audioState.harmony.dojiThreshold = clampRange(hs.dojiThreshold, 0.05, 0.40, 0.14);
+            audioState.harmony.maxVoices = Math.max(1, Math.min(4, Math.round(Number(hs.maxVoices ?? 3))));
             audioState.genre = settings.genre || 'classical';
             musicState.currentGenre = audioState.genre;  // Sync with musicState
             audioState.rootKey = settings.rootKey || 'C';
@@ -289,6 +310,7 @@
             audioState.displayMode = settings.displayMode || 'bars';
             if (settings.panels) {
                 audioState.panels.channels = settings.panels.channels ?? true;
+                audioState.panels.harmony = settings.panels.harmony ?? true;
                 audioState.panels.drumKit = settings.panels.drumKit ?? true;
                 audioState.panels.genre = settings.panels.genre ?? true;
                 audioState.panels.tuning = settings.panels.tuning ?? true;
@@ -334,6 +356,31 @@
         if (ui.bassPatternDD) ui.bassPatternDD.style.opacity = audioState.lowerWick.patternOverride ? '1' : '0.35';
         if (ui.bassPatternDD) ui.bassPatternDD.style.pointerEvents = audioState.lowerWick.patternOverride ? 'auto' : 'none';
         if (ui.bassRestartOnChordChk) ui.bassRestartOnChordChk.checked = audioState.lowerWick.restartOnChord;
+
+        // Inner harmony
+        if (ui.harmonyChk) ui.harmonyChk.checked = !!(audioState.harmony && audioState.harmony.enabled);
+        if (ui.harmonyVolume) {
+            ui.harmonyVolume.value = String(audioState.harmony.volume);
+            if (ui.harmonyVolumeLabel) ui.harmonyVolumeLabel.textContent = Math.round(audioState.harmony.volume) + ' dB';
+            if (audioState._harmonySampler) {
+                audioState._harmonySampler.volume.value = Number(audioState.harmony.volume);
+            }
+        }
+        applyDropdownSelection(ui.harmonyInstrumentMenu, ui.harmonyInstrumentLabel, audioState.harmony.instrument);
+        applyDropdownSelection(ui.harmonyRhythmMenu, ui.harmonyRhythmLabel, audioState.harmony.rhythm);
+        applyDropdownSelection(ui.harmonyStyleMenu, ui.harmonyStyleLabel, audioState.harmony.style);
+        if (ui.harmonyBodySensitivity) {
+            ui.harmonyBodySensitivity.value = String(audioState.harmony.bodySensitivity);
+            if (ui.harmonyBodySensitivityLabel) ui.harmonyBodySensitivityLabel.textContent = Number(audioState.harmony.bodySensitivity).toFixed(1) + 'x';
+        }
+        if (ui.harmonyDojiThreshold) {
+            ui.harmonyDojiThreshold.value = String(audioState.harmony.dojiThreshold);
+            if (ui.harmonyDojiThresholdLabel) ui.harmonyDojiThresholdLabel.textContent = Number(audioState.harmony.dojiThreshold).toFixed(2);
+        }
+        if (ui.harmonyMaxVoices) {
+            ui.harmonyMaxVoices.value = String(audioState.harmony.maxVoices);
+            if (ui.harmonyMaxVoicesLabel) ui.harmonyMaxVoicesLabel.textContent = String(Math.round(audioState.harmony.maxVoices));
+        }
         
         // Genre
         applyDropdownSelection(ui.genreMenu, ui.genreLabel, audioState.genre);
@@ -475,6 +522,7 @@
         
         // Sub-panel open/closed state
         if (ui.panelChannels) ui.panelChannels.open = audioState.panels.channels;
+        if (ui.panelHarmony) ui.panelHarmony.open = (audioState.panels.harmony ?? true);
         if (ui.panelDrumKit) ui.panelDrumKit.open = (audioState.panels.drumKit ?? true);
         if (ui.panelGenre) ui.panelGenre.open = audioState.panels.genre;
         if (ui.panelTuning) ui.panelTuning.open = audioState.panels.tuning;
@@ -711,6 +759,82 @@
             });
         }
 
+        // Inner Harmony controls
+        if (ui.harmonyChk) {
+            if (!hasSettings) audioState.harmony.enabled = ui.harmonyChk.checked;
+            ui.harmonyChk.addEventListener('change', () => {
+                audioState.harmony.enabled = !!ui.harmonyChk.checked;
+                saveSettings();
+            });
+        }
+        if (ui.harmonyVolume && ui.harmonyVolumeLabel) {
+            const updateHarmonyVolume = (shouldSave) => {
+                if (shouldSave === undefined) shouldSave = false;
+                const val = clampDb(parseInt(ui.harmonyVolume.value, 10), audioState.harmony.volume);
+                ui.harmonyVolume.value = String(val);
+                audioState.harmony.volume = val;
+                ui.harmonyVolumeLabel.textContent = val + ' dB';
+                if (audioState._harmonySampler) audioState._harmonySampler.volume.value = val;
+                if (shouldSave) saveSettings();
+            };
+            ui.harmonyVolume.addEventListener('input', () => updateHarmonyVolume(true));
+            updateHarmonyVolume(false);
+        }
+        setupDropdown(ui.harmonyInstrumentDD, ui.harmonyInstrumentBtn, ui.harmonyInstrumentMenu, ui.harmonyInstrumentLabel,
+            (val) => {
+                audioState.harmony.instrument = val || 'electric_piano';
+                saveSettings();
+                if (audioState.playing && audioState._initialized) {
+                    reloadSampler('harmony', audioState.harmony.instrument);
+                }
+            });
+        setupDropdown(ui.harmonyRhythmDD, ui.harmonyRhythmBtn, ui.harmonyRhythmMenu, ui.harmonyRhythmLabel,
+            (val) => {
+                audioState.harmony.rhythm = (val === '2' || val === '4' || val === '8') ? val : '4';
+                saveSettings();
+            });
+        setupDropdown(ui.harmonyStyleDD, ui.harmonyStyleBtn, ui.harmonyStyleMenu, ui.harmonyStyleLabel,
+            (val) => {
+                audioState.harmony.style = (val && HARMONY_STYLES[val]) ? val : 'jazz_shell_voicings';
+                saveSettings();
+            });
+        if (ui.harmonyBodySensitivity && ui.harmonyBodySensitivityLabel) {
+            const updateBodySensitivity = (shouldSave) => {
+                if (shouldSave === undefined) shouldSave = false;
+                const v = Number(clampRange(ui.harmonyBodySensitivity.value, 0.2, 2.0, audioState.harmony.bodySensitivity).toFixed(1));
+                ui.harmonyBodySensitivity.value = String(v);
+                audioState.harmony.bodySensitivity = v;
+                ui.harmonyBodySensitivityLabel.textContent = v.toFixed(1) + 'x';
+                if (shouldSave) saveSettings();
+            };
+            ui.harmonyBodySensitivity.addEventListener('input', () => updateBodySensitivity(true));
+            updateBodySensitivity(false);
+        }
+        if (ui.harmonyDojiThreshold && ui.harmonyDojiThresholdLabel) {
+            const updateDojiThreshold = (shouldSave) => {
+                if (shouldSave === undefined) shouldSave = false;
+                const v = Number(clampRange(ui.harmonyDojiThreshold.value, 0.05, 0.40, audioState.harmony.dojiThreshold).toFixed(2));
+                ui.harmonyDojiThreshold.value = String(v);
+                audioState.harmony.dojiThreshold = v;
+                ui.harmonyDojiThresholdLabel.textContent = v.toFixed(2);
+                if (shouldSave) saveSettings();
+            };
+            ui.harmonyDojiThreshold.addEventListener('input', () => updateDojiThreshold(true));
+            updateDojiThreshold(false);
+        }
+        if (ui.harmonyMaxVoices && ui.harmonyMaxVoicesLabel) {
+            const updateMaxVoices = (shouldSave) => {
+                if (shouldSave === undefined) shouldSave = false;
+                const v = Math.max(1, Math.min(4, Math.round(Number(ui.harmonyMaxVoices.value) || audioState.harmony.maxVoices)));
+                ui.harmonyMaxVoices.value = String(v);
+                audioState.harmony.maxVoices = v;
+                ui.harmonyMaxVoicesLabel.textContent = String(v);
+                if (shouldSave) saveSettings();
+            };
+            ui.harmonyMaxVoices.addEventListener('input', () => updateMaxVoices(true));
+            updateMaxVoices(false);
+        }
+
         // Lower Wick controls
         if (ui.lowerWickChk) {
             // Sync initial state from checkbox (only if no saved settings)
@@ -828,6 +952,7 @@
         // Sub-panel toggle persistence
         const panelMap = [
             { el: ui.panelChannels, key: 'channels' },
+            { el: ui.panelHarmony, key: 'harmony' },
             { el: ui.panelDrumKit, key: 'drumKit' },
             { el: ui.panelGenre,    key: 'genre' },
             { el: ui.panelTuning,   key: 'tuning' },

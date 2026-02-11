@@ -89,6 +89,13 @@
                 audioState._sopranoSampler = newSampler;
                 // Reset last played note to trigger fresh on next bar
                 audioState._lastSopranoMidi = null;
+            } else if (voice === 'harmony') {
+                if (audioState._harmonySampler) {
+                    audioState._harmonySampler.releaseAll?.();
+                    audioState._harmonySampler.dispose();
+                }
+                audioState._harmonySampler = newSampler;
+                audioState._lastHarmonyMidi = null;
             } else {
                 // Dispose old sampler
                 if (audioState._bassSampler) {
@@ -141,6 +148,14 @@
             audioState._bassSampler.volume.value = Number.isFinite(audioState.lowerWick.volume) ? audioState.lowerWick.volume : -18;
             console.log('[Audio] Bass sampler loaded:', bassInstrument);
 
+            // Load harmony (inner voice) sampler
+            const harmonyInstrument = getSelectedInstrument('harmony');
+            audioState._harmonySampler = await loadSampler(harmonyInstrument);
+            audioState._harmonySampler.volume.value = Number.isFinite(audioState.harmony && audioState.harmony.volume)
+                ? audioState.harmony.volume
+                : -16;
+            console.log('[Audio] Harmony sampler loaded:', harmonyInstrument);
+
             // In samples-only drum mode, do not instantiate legacy synthesized kick.
             if (_am.drumEngineMode !== 'samples_only') {
                 audioState._kickSynth = new Tone.MembraneSynth(KICK_CONFIG).toDestination();
@@ -167,13 +182,20 @@
      * Get the currently selected instrument for a voice
      */
     function getSelectedInstrument(voice) {
-        if (voice === 'upper') {
+        if (voice === 'upper' || voice === 'soprano') {
             const menu = ui.upperInstrumentMenu;
             if (menu) {
                 const sel = menu.querySelector('.ddItem.sel');
                 if (sel) return sel.getAttribute('data-value') || 'harpsichord';
             }
             return audioState.upperWick.instrument;
+        } else if (voice === 'harmony') {
+            const menu = ui.harmonyInstrumentMenu;
+            if (menu) {
+                const sel = menu.querySelector('.ddItem.sel');
+                if (sel) return sel.getAttribute('data-value') || 'electric_piano';
+            }
+            return (audioState.harmony && audioState.harmony.instrument) ? audioState.harmony.instrument : 'electric_piano';
         } else {
             const menu = ui.lowerInstrumentMenu;
             if (menu) {
@@ -191,12 +213,18 @@
         audioState.playing = false;
         audioState._lastBarIndex = -1;
         audioState._lastSopranoMidi = null;
+        audioState._lastHarmonyMidi = null;
         audioState._lastBassMidi = null;
 
         if (audioState._sopranoSampler) {
             audioState._sopranoSampler.releaseAll();
             audioState._sopranoSampler.dispose();
             audioState._sopranoSampler = null;
+        }
+        if (audioState._harmonySampler) {
+            audioState._harmonySampler.releaseAll();
+            audioState._harmonySampler.dispose();
+            audioState._harmonySampler = null;
         }
         if (audioState._bassSampler) {
             audioState._bassSampler.releaseAll();
