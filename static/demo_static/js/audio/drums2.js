@@ -24,8 +24,8 @@
             ride: [],
             clave: []
         },
-        standard_7piece: {
-            label: 'Standard 7-Piece Groove',
+        standard_11piece: {
+            label: 'Standard 11-Instrument Groove',
             kick: [0, 8, 11],
             snare: [4, 12],
             hihat: [0, 2, 4, 6, 8, 10, 12, 14],
@@ -36,8 +36,19 @@
             clave: []
         },
         // Backward-compatible key for existing saved settings.
+        standard_7piece: {
+            label: 'Standard 11-Instrument Groove',
+            kick: [0, 8, 11],
+            snare: [4, 12],
+            hihat: [0, 2, 4, 6, 8, 10, 12, 14],
+            tom: [6, 14],
+            conga: [3, 7, 11, 14],
+            cymbal: [0],
+            ride: [],
+            clave: []
+        },
         standard_5piece: {
-            label: 'Standard 7-Piece Groove',
+            label: 'Standard 11-Instrument Groove',
             kick: [0, 8, 11],
             snare: [4, 12],
             hihat: [0, 2, 4, 6, 8, 10, 12, 14],
@@ -159,94 +170,65 @@
         }
     };
 
-    // Local drop-in sample convention (any existing files in each list are used).
+    // Local drop-in sample convention based on your current drum folders.
     const LOCAL_FILES = {
-        // Canonical + numbered variants + compatibility aliases for your current folder set.
-        kick: [
-            'static/demo_static/audio/drums/kick/kick.wav',
-            'static/demo_static/audio/drums/kick/kick_01.wav',
-            'static/demo_static/audio/drums/kick/kick_02.wav',
-            'static/demo_static/audio/drums/kick/kick1.wav',
-            'static/demo_static/audio/drums/kick/kick2.wav',
-            'static/demo_static/audio/drums/kick/kick3.wav',
-            'static/demo_static/audio/drums/kick/kick4.wav'
-        ],
-        snare: [
-            'static/demo_static/audio/drums/snare/snare.wav',
-            'static/demo_static/audio/drums/snare/snare_01.wav',
-            'static/demo_static/audio/drums/snare/snare_02.wav',
-            'static/demo_static/audio/drums/snare/snare1.wav',
-            'static/demo_static/audio/drums/snare/snare2.wav',
-            'static/demo_static/audio/drums/snare/snare3.wav',
-            'static/demo_static/audio/drums/snare/snare4.wav'
-        ],
-        hihat: [
-            'static/demo_static/audio/drums/hihat/hihat_closed.wav',
-            'static/demo_static/audio/drums/hihat/hihat.wav',
-            'static/demo_static/audio/drums/hihat/hihat_01.wav',
-            // Folder alias: hat/
-            'static/demo_static/audio/drums/hat/hat.wav',
-            'static/demo_static/audio/drums/hat/hat1.wav',
-            'static/demo_static/audio/drums/hat/hat2.wav',
-            'static/demo_static/audio/drums/hat/hat3.wav'
-        ],
-        tom: [
-            'static/demo_static/audio/drums/tom/tom.wav',
-            'static/demo_static/audio/drums/tom/tom_01.wav',
-            'static/demo_static/audio/drums/tom/tom_02.wav',
-            'static/demo_static/audio/drums/tom/tom1.wav'
-        ],
-        conga: [
-            'static/demo_static/audio/drums/conga/conga.wav',
-            'static/demo_static/audio/drums/conga/conga_01.wav',
-            'static/demo_static/audio/drums/conga/conga_02.wav',
-            // Temporary aliases until dedicated conga folder exists.
-            'static/demo_static/audio/drums/tabla/tabla1.wav',
-            'static/demo_static/audio/drums/tabla/tabla2.wav',
-            'static/demo_static/audio/drums/timbale/timbale1.wav',
-            'static/demo_static/audio/drums/timbale/timbale2.wav',
-            'static/demo_static/audio/drums/cajon/cajon1.wav'
-        ],
-        cymbal: [
-            'static/demo_static/audio/drums/cymbal/cymbal.wav',
-            'static/demo_static/audio/drums/cymbal/crash.wav',
-            'static/demo_static/audio/drums/cymbal/ride.wav',
-            // Folder alias: ride/
-            'static/demo_static/audio/drums/ride/ride1.wav'
-        ],
-        clave: [
-            'static/demo_static/audio/drums/clave/clave.wav',
-            'static/demo_static/audio/drums/clave/clave_01.wav',
-            // Temporary aliases until dedicated clave folder exists.
-            'static/demo_static/audio/drums/log/log1.wav',
-            'static/demo_static/audio/drums/log/log2.wav',
-            'static/demo_static/audio/drums/clap/clap1.wav'
-        ]
+        kick: ['static/demo_static/audio/drums/kick/kick.wav', 'static/demo_static/audio/drums/kick/kick1.wav', 'static/demo_static/audio/drums/kick/kick2.wav', 'static/demo_static/audio/drums/kick/kick3.wav', 'static/demo_static/audio/drums/kick/kick4.wav'],
+        snare: ['static/demo_static/audio/drums/snare/snare.wav', 'static/demo_static/audio/drums/snare/snare1.wav', 'static/demo_static/audio/drums/snare/snare2.wav', 'static/demo_static/audio/drums/snare/snare3.wav', 'static/demo_static/audio/drums/snare/snare4.wav'],
+        hat: ['static/demo_static/audio/drums/hat/hat.wav', 'static/demo_static/audio/drums/hat/hat1.wav', 'static/demo_static/audio/drums/hat/hat2.wav', 'static/demo_static/audio/drums/hat/hat3.wav'],
+        tom: ['static/demo_static/audio/drums/tom/tom.wav', 'static/demo_static/audio/drums/tom/tom1.wav', 'static/demo_static/audio/drums/tom/tom2.wav', 'static/demo_static/audio/drums/tom/tom3.wav'],
+        ride: ['static/demo_static/audio/drums/ride/ride.wav', 'static/demo_static/audio/drums/ride/ride1.wav', 'static/demo_static/audio/drums/ride/ride2.wav', 'static/demo_static/audio/drums/ride/ride3.wav'],
+        cajon: ['static/demo_static/audio/drums/cajon/cajon.wav', 'static/demo_static/audio/drums/cajon/cajon1.wav', 'static/demo_static/audio/drums/cajon/cajon2.wav', 'static/demo_static/audio/drums/cajon/cajon3.wav'],
+        clap: ['static/demo_static/audio/drums/clap/clap.wav', 'static/demo_static/audio/drums/clap/clap1.wav', 'static/demo_static/audio/drums/clap/clap2.wav', 'static/demo_static/audio/drums/clap/clap3.wav'],
+        log: ['static/demo_static/audio/drums/log/log.wav', 'static/demo_static/audio/drums/log/log1.wav', 'static/demo_static/audio/drums/log/log2.wav', 'static/demo_static/audio/drums/log/log3.wav'],
+        tabla: ['static/demo_static/audio/drums/tabla/tabla.wav', 'static/demo_static/audio/drums/tabla/tabla1.wav', 'static/demo_static/audio/drums/tabla/tabla2.wav', 'static/demo_static/audio/drums/tabla/tabla3.wav'],
+        timbale: ['static/demo_static/audio/drums/timbale/timbale.wav', 'static/demo_static/audio/drums/timbale/timbale1.wav', 'static/demo_static/audio/drums/timbale/timbale2.wav', 'static/demo_static/audio/drums/timbale/timbale3.wav'],
+        misc: ['static/demo_static/audio/drums/misc/misc.wav', 'static/demo_static/audio/drums/misc/misc1.wav', 'static/demo_static/audio/drums/misc/misc2.wav', 'static/demo_static/audio/drums/misc/misc3.wav']
     };
 
     // Fallback source files when local files are not present.
     const FALLBACK = {
         kick: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/taiko_drum-mp3/',
         snare: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/synth_drum-mp3/',
-        hihat: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/agogo-mp3/',
+        hat: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/agogo-mp3/',
         tom: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/melodic_tom-mp3/',
-        conga: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/steel_drums-mp3/',
-        cymbal: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/reverse_cymbal-mp3/',
-        clave: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/woodblock-mp3/'
+        ride: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/reverse_cymbal-mp3/',
+        cajon: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/steel_drums-mp3/',
+        clap: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/synth_drum-mp3/',
+        log: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/woodblock-mp3/',
+        tabla: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/steel_drums-mp3/',
+        timbale: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/melodic_tom-mp3/',
+        misc: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/synth_drum-mp3/'
     };
 
     const ROUND_ROBIN_NOTES = ['C3', 'D3', 'E3', 'F3', 'G3', 'A3', 'B3'];
     const FALLBACK_NOTES = ['C2', 'C3', 'C4', 'C5'];
-    const PIECES = ['kick', 'snare', 'hihat', 'tom', 'conga', 'cymbal', 'clave'];
+    const PIECES = ['kick', 'snare', 'hat', 'tom', 'ride', 'cajon', 'clap', 'log', 'tabla', 'timbale', 'misc'];
+    const DECAY_META = {
+        kick:    { uiMin: 0.08, uiMax: 0.7,  durMin: 0.04, durMax: 0.42, relMin: 0.01, relMax: 0.22 },
+        snare:   { uiMin: 0.06, uiMax: 0.45, durMin: 0.03, durMax: 0.32, relMin: 0.01, relMax: 0.18 },
+        hat:     { uiMin: 0.03, uiMax: 0.35, durMin: 0.01, durMax: 0.2,  relMin: 0.005, relMax: 0.1 },
+        tom:     { uiMin: 0.08, uiMax: 0.6,  durMin: 0.04, durMax: 0.48, relMin: 0.01, relMax: 0.22 },
+        ride:    { uiMin: 0.08, uiMax: 1.2,  durMin: 0.05, durMax: 1.4,  relMin: 0.02, relMax: 0.5 },
+        cajon:   { uiMin: 0.08, uiMax: 0.9,  durMin: 0.03, durMax: 0.62, relMin: 0.01, relMax: 0.26 },
+        clap:    { uiMin: 0.03, uiMax: 0.35, durMin: 0.01, durMax: 0.28, relMin: 0.005, relMax: 0.14 },
+        log:     { uiMin: 0.03, uiMax: 0.35, durMin: 0.01, durMax: 0.22, relMin: 0.005, relMax: 0.1 },
+        tabla:   { uiMin: 0.08, uiMax: 0.9,  durMin: 0.03, durMax: 0.62, relMin: 0.01, relMax: 0.26 },
+        timbale: { uiMin: 0.08, uiMax: 0.9,  durMin: 0.03, durMax: 0.62, relMin: 0.01, relMax: 0.26 },
+        misc:    { uiMin: 0.03, uiMax: 0.9,  durMin: 0.01, durMax: 0.7,  relMin: 0.005, relMax: 0.3 }
+    };
 
     const _pieceState = {
         kick: { sampler: null, keys: [], source: 'none' },
         snare: { sampler: null, keys: [], source: 'none' },
-        hihat: { sampler: null, keys: [], source: 'none' },
+        hat: { sampler: null, keys: [], source: 'none' },
         tom: { sampler: null, keys: [], source: 'none' },
-        conga: { sampler: null, keys: [], source: 'none' },
-        cymbal: { sampler: null, keys: [], source: 'none' },
-        clave: { sampler: null, keys: [], source: 'none' }
+        ride: { sampler: null, keys: [], source: 'none' },
+        cajon: { sampler: null, keys: [], source: 'none' },
+        clap: { sampler: null, keys: [], source: 'none' },
+        log: { sampler: null, keys: [], source: 'none' },
+        tabla: { sampler: null, keys: [], source: 'none' },
+        timbale: { sampler: null, keys: [], source: 'none' },
+        misc: { sampler: null, keys: [], source: 'none' }
     };
 
     let _drumBus = null;
@@ -256,9 +238,9 @@
     let _kitLoadPromise = null;
 
     const _KIT_DEFAULTS = {
-        kickOn: true, snareOn: true, hihatOn: true, tomOn: true, congaOn: true, cymbalOn: true, claveOn: true,
-        kickLevel: 0, snareLevel: 0, hihatLevel: 0, tomLevel: -2, congaLevel: -1, cymbalLevel: -1, claveLevel: -4,
-        kickDecay: 0.28, snareDecay: 0.14, hihatDecay: 0.06, tomDecay: 0.20, congaDecay: 0.26, cymbalDecay: 0.28, claveDecay: 0.09
+        kickOn: true, snareOn: true, hatOn: true, tomOn: true, rideOn: true, cajonOn: true, clapOn: true, logOn: true, tablaOn: true, timbaleOn: true, miscOn: true,
+        kickLevel: 0, snareLevel: 0, hatLevel: 0, tomLevel: -2, rideLevel: -2, cajonLevel: -2, clapLevel: -3, logLevel: -4, tablaLevel: -2, timbaleLevel: -2, miscLevel: -6,
+        kickDecay: 0.28, snareDecay: 0.14, hatDecay: 0.08, tomDecay: 0.20, rideDecay: 0.32, cajonDecay: 0.26, clapDecay: 0.12, logDecay: 0.10, tablaDecay: 0.24, timbaleDecay: 0.24, miscDecay: 0.16
     };
 
     function clamp(v, lo, hi, fb) {
@@ -274,25 +256,37 @@
         return {
             kickOn: asBool(k.kickOn, _KIT_DEFAULTS.kickOn),
             snareOn: asBool(k.snareOn, _KIT_DEFAULTS.snareOn),
-            hihatOn: asBool(k.hihatOn, _KIT_DEFAULTS.hihatOn),
+            hatOn: asBool(k.hatOn, asBool(k.hihatOn, _KIT_DEFAULTS.hatOn)),
             tomOn: asBool(k.tomOn, _KIT_DEFAULTS.tomOn),
-            congaOn: asBool(k.congaOn, _KIT_DEFAULTS.congaOn),
-            cymbalOn: asBool(k.cymbalOn, _KIT_DEFAULTS.cymbalOn),
-            claveOn: asBool(k.claveOn, _KIT_DEFAULTS.claveOn),
+            rideOn: asBool(k.rideOn, asBool(k.cymbalOn, _KIT_DEFAULTS.rideOn)),
+            cajonOn: asBool(k.cajonOn, asBool(k.congaOn, _KIT_DEFAULTS.cajonOn)),
+            clapOn: asBool(k.clapOn, _KIT_DEFAULTS.clapOn),
+            logOn: asBool(k.logOn, asBool(k.claveOn, _KIT_DEFAULTS.logOn)),
+            tablaOn: asBool(k.tablaOn, _KIT_DEFAULTS.tablaOn),
+            timbaleOn: asBool(k.timbaleOn, _KIT_DEFAULTS.timbaleOn),
+            miscOn: asBool(k.miscOn, _KIT_DEFAULTS.miscOn),
             kickLevel: clamp(k.kickLevel, -18, 12, _KIT_DEFAULTS.kickLevel),
             snareLevel: clamp(k.snareLevel, -18, 12, _KIT_DEFAULTS.snareLevel),
-            hihatLevel: clamp(k.hihatLevel, -18, 12, _KIT_DEFAULTS.hihatLevel),
+            hatLevel: clamp((k.hatLevel !== undefined ? k.hatLevel : k.hihatLevel), -18, 12, _KIT_DEFAULTS.hatLevel),
             tomLevel: clamp(k.tomLevel, -18, 12, _KIT_DEFAULTS.tomLevel),
-            congaLevel: clamp(k.congaLevel, -18, 12, _KIT_DEFAULTS.congaLevel),
-            cymbalLevel: clamp(k.cymbalLevel, -18, 12, _KIT_DEFAULTS.cymbalLevel),
-            claveLevel: clamp(k.claveLevel, -18, 12, _KIT_DEFAULTS.claveLevel),
+            rideLevel: clamp((k.rideLevel !== undefined ? k.rideLevel : k.cymbalLevel), -18, 12, _KIT_DEFAULTS.rideLevel),
+            cajonLevel: clamp((k.cajonLevel !== undefined ? k.cajonLevel : k.congaLevel), -18, 12, _KIT_DEFAULTS.cajonLevel),
+            clapLevel: clamp(k.clapLevel, -18, 12, _KIT_DEFAULTS.clapLevel),
+            logLevel: clamp((k.logLevel !== undefined ? k.logLevel : k.claveLevel), -18, 12, _KIT_DEFAULTS.logLevel),
+            tablaLevel: clamp(k.tablaLevel, -18, 12, _KIT_DEFAULTS.tablaLevel),
+            timbaleLevel: clamp(k.timbaleLevel, -18, 12, _KIT_DEFAULTS.timbaleLevel),
+            miscLevel: clamp(k.miscLevel, -18, 12, _KIT_DEFAULTS.miscLevel),
             kickDecay: clamp(k.kickDecay, 0.08, 0.7, _KIT_DEFAULTS.kickDecay),
             snareDecay: clamp(k.snareDecay, 0.06, 0.45, _KIT_DEFAULTS.snareDecay),
-            hihatDecay: clamp(k.hihatDecay, 0.03, 0.22, _KIT_DEFAULTS.hihatDecay),
+            hatDecay: clamp((k.hatDecay !== undefined ? k.hatDecay : k.hihatDecay), 0.03, 0.35, _KIT_DEFAULTS.hatDecay),
             tomDecay: clamp(k.tomDecay, 0.08, 0.6, _KIT_DEFAULTS.tomDecay),
-            congaDecay: clamp(k.congaDecay, 0.08, 0.9, _KIT_DEFAULTS.congaDecay),
-            cymbalDecay: clamp(k.cymbalDecay, 0.08, 0.9, _KIT_DEFAULTS.cymbalDecay),
-            claveDecay: clamp(k.claveDecay, 0.03, 0.25, _KIT_DEFAULTS.claveDecay)
+            rideDecay: clamp((k.rideDecay !== undefined ? k.rideDecay : k.cymbalDecay), 0.08, 1.2, _KIT_DEFAULTS.rideDecay),
+            cajonDecay: clamp((k.cajonDecay !== undefined ? k.cajonDecay : k.congaDecay), 0.08, 0.9, _KIT_DEFAULTS.cajonDecay),
+            clapDecay: clamp(k.clapDecay, 0.03, 0.35, _KIT_DEFAULTS.clapDecay),
+            logDecay: clamp((k.logDecay !== undefined ? k.logDecay : k.claveDecay), 0.03, 0.35, _KIT_DEFAULTS.logDecay),
+            tablaDecay: clamp(k.tablaDecay, 0.08, 0.9, _KIT_DEFAULTS.tablaDecay),
+            timbaleDecay: clamp(k.timbaleDecay, 0.08, 0.9, _KIT_DEFAULTS.timbaleDecay),
+            miscDecay: clamp(k.miscDecay, 0.03, 0.9, _KIT_DEFAULTS.miscDecay)
         };
     }
 
@@ -404,11 +398,15 @@
         };
         setVol('kick', k.kickOn, v + k.kickLevel - 2);
         setVol('snare', k.snareOn, v + k.snareLevel - 1);
-        setVol('hihat', k.hihatOn, v + k.hihatLevel - 3);
+        setVol('hat', k.hatOn, v + k.hatLevel - 3);
         setVol('tom', k.tomOn, v + k.tomLevel - 2);
-        setVol('conga', k.congaOn, v + k.congaLevel - 2);
-        setVol('cymbal', k.cymbalOn, v + k.cymbalLevel - 4);
-        setVol('clave', k.claveOn, v + k.claveLevel - 2);
+        setVol('ride', k.rideOn, v + k.rideLevel - 4);
+        setVol('cajon', k.cajonOn, v + k.cajonLevel - 2);
+        setVol('clap', k.clapOn, v + k.clapLevel - 2);
+        setVol('log', k.logOn, v + k.logLevel - 2);
+        setVol('tabla', k.tablaOn, v + k.tablaLevel - 2);
+        setVol('timbale', k.timbaleOn, v + k.timbaleLevel - 2);
+        setVol('misc', k.miscOn, v + k.miscLevel - 2);
     }
 
     function setDrumVolume(val) {
@@ -438,6 +436,31 @@
         return Math.max(0.2, Math.min(1, base + ((Math.random() * 0.2) - 0.1) * stoch));
     }
 
+    function lerp(a, b, t) {
+        return a + ((b - a) * t);
+    }
+
+    function decayNorm(piece, uiValue) {
+        const m = DECAY_META[piece] || null;
+        if (!m) return 0.5;
+        const d = clamp(uiValue, m.uiMin, m.uiMax, m.uiMin);
+        return (d - m.uiMin) / Math.max(0.0001, (m.uiMax - m.uiMin));
+    }
+
+    function decayDuration(piece, uiValue) {
+        const m = DECAY_META[piece] || null;
+        if (!m) return Math.max(0.02, Number(uiValue) || 0.12);
+        const t = decayNorm(piece, uiValue);
+        return Math.max(0.02, lerp(m.durMin, m.durMax, t));
+    }
+
+    function decayRelease(piece, uiValue) {
+        const m = DECAY_META[piece] || null;
+        if (!m) return 0.05;
+        const t = decayNorm(piece, uiValue);
+        return Math.max(0.005, lerp(m.relMin, m.relMax, t));
+    }
+
     function pickKey(piece, preferredNote) {
         const ps = _pieceState[piece];
         if (!ps || !ps.keys || !ps.keys.length) return preferredNote || 'C3';
@@ -445,11 +468,12 @@
         return ps.keys[Math.floor(Math.random() * ps.keys.length)];
     }
 
-    function hit(piece, preferredNote, dur, t, v) {
+    function hit(piece, preferredNote, uiDecay, t, v) {
         const ps = _pieceState[piece];
         if (!ps || !ps.sampler) return;
+        ps.sampler.release = decayRelease(piece, uiDecay);
         const key = pickKey(piece, preferredNote);
-        ps.sampler.triggerAttackRelease(key, Math.max(0.02, dur), t, v);
+        ps.sampler.triggerAttackRelease(key, decayDuration(piece, uiDecay), t, v);
     }
 
     function playDrumStep(beatKey, subStepInBar, now) {
@@ -463,34 +487,50 @@
         const t = now + (stoch > 0 ? ((Math.random() - 0.5) * 0.01 * stoch) : 0);
         const inKick = Array.isArray(pattern.kick) && pattern.kick.includes(subStepInBar);
         const inSnare = Array.isArray(pattern.snare) && pattern.snare.includes(subStepInBar);
-        const hasHihatPattern = Array.isArray(pattern.hihat) && pattern.hihat.length > 0;
-        const hasRidePattern = Array.isArray(pattern.ride) && pattern.ride.length > 0;
-        const hasTomPattern = Array.isArray(pattern.tom) && pattern.tom.length > 0;
-        const hasCongaPattern = Array.isArray(pattern.conga) && pattern.conga.length > 0;
-        const hasCymbalPattern = Array.isArray(pattern.cymbal) && pattern.cymbal.length > 0;
-        const inHihat = hasHihatPattern ? pattern.hihat.includes(subStepInBar) : (hasRidePattern ? pattern.ride.includes(subStepInBar) : (subStepInBar % 2 === 0));
-        const inRide = hasRidePattern && pattern.ride.includes(subStepInBar);
-        const inTom = hasTomPattern ? pattern.tom.includes(subStepInBar) : (subStepInBar === 6 || subStepInBar === 14);
-        const inConga = hasCongaPattern ? pattern.conga.includes(subStepInBar) : false;
-        const inCymbal = hasCymbalPattern ? pattern.cymbal.includes(subStepInBar) : (subStepInBar === 0 || subStepInBar === 8);
-        const inClave = Array.isArray(pattern.clave) && pattern.clave.includes(subStepInBar);
+        const hatPattern = Array.isArray(pattern.hat) ? pattern.hat : (Array.isArray(pattern.hihat) ? pattern.hihat : []);
+        const ridePattern = Array.isArray(pattern.ride) ? pattern.ride : (Array.isArray(pattern.cymbal) ? pattern.cymbal : []);
+        const cajonPattern = Array.isArray(pattern.cajon) ? pattern.cajon : (Array.isArray(pattern.conga) ? pattern.conga : []);
+        const clapPattern = Array.isArray(pattern.clap) ? pattern.clap : (Array.isArray(pattern.clave) ? pattern.clave : []);
+        const logPattern = Array.isArray(pattern.log) ? pattern.log : (Array.isArray(pattern.clave) ? pattern.clave : []);
+        const tablaPattern = Array.isArray(pattern.tabla) ? pattern.tabla : (Array.isArray(pattern.conga) ? pattern.conga : []);
+        const timbalePattern = Array.isArray(pattern.timbale) ? pattern.timbale : (Array.isArray(pattern.tom) ? pattern.tom : []);
+        const miscPattern = Array.isArray(pattern.misc) ? pattern.misc : [];
 
-        const hits = { kick: false, snare: false, hihat: false, ride: false, tom: false, conga: false, cymbal: false, clave: false };
+        const inHat = hatPattern.length ? hatPattern.includes(subStepInBar) : (subStepInBar % 2 === 0);
+        const inRide = ridePattern.length ? ridePattern.includes(subStepInBar) : (subStepInBar === 0 || subStepInBar === 8);
+        const inTom = Array.isArray(pattern.tom) && pattern.tom.length ? pattern.tom.includes(subStepInBar) : (subStepInBar === 6 || subStepInBar === 14);
+        const inCajon = cajonPattern.includes(subStepInBar);
+        const inClap = clapPattern.includes(subStepInBar);
+        const inLog = logPattern.includes(subStepInBar);
+        const inTabla = tablaPattern.includes(subStepInBar);
+        const inTimbale = timbalePattern.includes(subStepInBar);
+        const inMisc = miscPattern.includes(subStepInBar);
+
+        const hits = {
+            kick: false, snare: false, hihat: false, ride: false, tom: false, conga: false, cymbal: false, clave: false,
+            hat: false, cajon: false, clap: false, log: false, tabla: false, timbale: false, misc: false
+        };
 
         if (cfg.kickOn && inKick) { hit('kick', 'C2', cfg.kickDecay, t, vel(0.85, stoch)); hits.kick = true; }
         if (cfg.snareOn && inSnare) { hit('snare', 'D3', cfg.snareDecay, t, vel(0.78, stoch)); hits.snare = true; }
-        if (cfg.hihatOn && inHihat) { hit('hihat', 'C5', cfg.hihatDecay, t, vel(0.58, stoch)); hits.hihat = true; }
-        if (cfg.cymbalOn && inRide) { hit('cymbal', 'C5', Math.max(0.1, cfg.cymbalDecay * 0.6), t + 0.003, vel(0.5, stoch)); hits.ride = true; }
+        if (cfg.hatOn && inHat) { hit('hat', 'C5', cfg.hatDecay, t, vel(0.58, stoch)); hits.hihat = true; hits.hat = true; }
+        if (cfg.rideOn && inRide) { hit('ride', 'C5', cfg.rideDecay, t + 0.003, vel(0.5, stoch)); hits.ride = true; }
         if (cfg.tomOn && inTom) { hit('tom', (subStepInBar % 8 === 6) ? 'D3' : 'A2', cfg.tomDecay, t, vel(0.72, stoch)); hits.tom = true; }
-        if (cfg.congaOn && inConga) {
-            const cNote = (subStepInBar % 4 === 2) ? 'D4' : ((subStepInBar % 8 === 4) ? 'F4' : 'C4');
-            hit('conga', cNote, cfg.congaDecay, t - 0.002, vel(0.7, stoch));
-            hits.conga = true;
-        }
-        if (cfg.cymbalOn && inCymbal) { hit('cymbal', 'C4', Math.max(0.12, cfg.cymbalDecay), t + 0.004, vel(0.66, stoch)); hits.cymbal = true; }
-        if (cfg.claveOn && inClave) { hit('clave', 'C5', cfg.claveDecay, t, vel(0.6, stoch)); hits.clave = true; }
+        if (cfg.cajonOn && inCajon) { hit('cajon', 'C4', cfg.cajonDecay, t - 0.002, vel(0.7, stoch)); hits.cajon = true; }
+        if (cfg.clapOn && inClap) { hit('clap', 'C5', cfg.clapDecay, t, vel(0.6, stoch)); hits.clap = true; }
+        if (cfg.logOn && inLog) { hit('log', 'C5', cfg.logDecay, t, vel(0.6, stoch)); hits.log = true; }
+        if (cfg.tablaOn && inTabla) { hit('tabla', 'D4', cfg.tablaDecay, t, vel(0.62, stoch)); hits.tabla = true; }
+        if (cfg.timbaleOn && inTimbale) { hit('timbale', 'F4', cfg.timbaleDecay, t, vel(0.64, stoch)); hits.timbale = true; }
+        if (cfg.miscOn && inMisc) { hit('misc', 'E4', cfg.miscDecay, t, vel(0.58, stoch)); hits.misc = true; }
 
-        return (hits.kick || hits.snare || hits.hihat || hits.ride || hits.tom || hits.conga || hits.cymbal || hits.clave) ? hits : null;
+        // Compatibility fields for existing visual/event consumers.
+        hits.conga = hits.cajon || hits.tabla || hits.timbale;
+        hits.clave = hits.clap || hits.log;
+
+        return (
+            hits.kick || hits.snare || hits.hihat || hits.ride || hits.tom ||
+            hits.cajon || hits.clap || hits.log || hits.tabla || hits.timbale || hits.misc
+        ) ? hits : null;
     }
 
     function previewDrumPiece(piece, when) {
@@ -502,11 +542,19 @@
             switch (String(piece || '')) {
                 case 'kick': if (!cfg.kickOn) return false; hit('kick', 'C2', cfg.kickDecay, t, 0.9); return true;
                 case 'snare': if (!cfg.snareOn) return false; hit('snare', 'D3', cfg.snareDecay, t, 0.84); return true;
-                case 'hihat': if (!cfg.hihatOn) return false; hit('hihat', 'C5', cfg.hihatDecay, t, 0.72); return true;
+                case 'hat':
+                case 'hihat': if (!cfg.hatOn) return false; hit('hat', 'C5', cfg.hatDecay, t, 0.72); return true;
                 case 'tom': if (!cfg.tomOn) return false; hit('tom', 'A2', cfg.tomDecay, t, 0.8); return true;
-                case 'conga': if (!cfg.congaOn) return false; hit('conga', 'C4', cfg.congaDecay, t, 0.82); return true;
-                case 'cymbal': if (!cfg.cymbalOn) return false; hit('cymbal', 'C4', cfg.cymbalDecay, t, 0.8); return true;
-                case 'clave': if (!cfg.claveOn) return false; hit('clave', 'C5', cfg.claveDecay, t, 0.8); return true;
+                case 'ride':
+                case 'cymbal': if (!cfg.rideOn) return false; hit('ride', 'C4', cfg.rideDecay, t, 0.8); return true;
+                case 'cajon':
+                case 'conga': if (!cfg.cajonOn) return false; hit('cajon', 'C4', cfg.cajonDecay, t, 0.82); return true;
+                case 'clap': if (!cfg.clapOn) return false; hit('clap', 'C5', cfg.clapDecay, t, 0.8); return true;
+                case 'log':
+                case 'clave': if (!cfg.logOn) return false; hit('log', 'C5', cfg.logDecay, t, 0.8); return true;
+                case 'tabla': if (!cfg.tablaOn) return false; hit('tabla', 'D4', cfg.tablaDecay, t, 0.82); return true;
+                case 'timbale': if (!cfg.timbaleOn) return false; hit('timbale', 'F4', cfg.timbaleDecay, t, 0.82); return true;
+                case 'misc': if (!cfg.miscOn) return false; hit('misc', 'E4', cfg.miscDecay, t, 0.8); return true;
                 default: return false;
             }
         } catch (_e) {
@@ -520,11 +568,15 @@
         const delta = 0.085;
         previewDrumPiece('kick', t0);
         previewDrumPiece('snare', t0 + delta);
-        previewDrumPiece('hihat', t0 + (delta * 2));
+        previewDrumPiece('hat', t0 + (delta * 2));
         previewDrumPiece('tom', t0 + (delta * 3));
-        previewDrumPiece('conga', t0 + (delta * 4));
-        previewDrumPiece('cymbal', t0 + (delta * 5));
-        previewDrumPiece('clave', t0 + (delta * 6));
+        previewDrumPiece('ride', t0 + (delta * 4));
+        previewDrumPiece('cajon', t0 + (delta * 5));
+        previewDrumPiece('clap', t0 + (delta * 6));
+        previewDrumPiece('log', t0 + (delta * 7));
+        previewDrumPiece('tabla', t0 + (delta * 8));
+        previewDrumPiece('timbale', t0 + (delta * 9));
+        previewDrumPiece('misc', t0 + (delta * 10));
         return true;
     }
 

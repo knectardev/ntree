@@ -107,11 +107,11 @@
         updateLabel(false);
     }
 
-    function ensureSevenPieceBeatActive() {
-        // If user is editing dedicated 7-piece kit controls while beat is still
+    function ensureDrumKitBeatActive() {
+        // If user is editing dedicated drum-kit controls while beat is still
         // on "Simple", promote playback beat so kit changes are heard in playback.
         if (audioState.drumBeat === 'simple') {
-            audioState.drumBeat = 'standard_7piece';
+            audioState.drumBeat = 'standard_11piece';
             applyDropdownSelection(ui.drumBeatMenu, ui.drumBeatLabel, audioState.drumBeat);
             if (previewFullKit) previewFullKit();
         }
@@ -237,8 +237,8 @@
             musicState.rootMidi = 60 + (ROOT_KEY_OFFSETS[audioState.rootKey] || 0);  // Sync with musicState
             audioState.chordProgression = settings.chordProgression || 'canon';
             audioState.bassLineStyle = settings.bassLineStyle || DEFAULT_BASS_LINE_STYLE;
-            const beat = String(settings.drumBeat || 'standard_7piece');
-            audioState.drumBeat = (beat === 'standard_5piece') ? 'standard_7piece' : beat;
+            const beat = String(settings.drumBeat || 'standard_11piece');
+            audioState.drumBeat = (beat === 'standard_5piece' || beat === 'standard_7piece') ? 'standard_11piece' : beat;
             audioState.drumVolume = clampDb(settings.drumVolume, -12);
             audioState.drumNaturalRoom = settings.drumNaturalRoom ?? true;
             audioState.drumGlowIntensity = clampRange(settings.drumGlowIntensity, 0.4, 2.5, 1.0);
@@ -246,25 +246,37 @@
             if (!audioState.drumKit) audioState.drumKit = {};
             audioState.drumKit.kickOn = dk.kickOn ?? true;
             audioState.drumKit.snareOn = dk.snareOn ?? true;
-            audioState.drumKit.hihatOn = dk.hihatOn ?? true;
+            audioState.drumKit.hatOn = dk.hatOn ?? dk.hihatOn ?? true;
             audioState.drumKit.tomOn = dk.tomOn ?? true;
-            audioState.drumKit.congaOn = dk.congaOn ?? true;
-            audioState.drumKit.cymbalOn = dk.cymbalOn ?? true;
-            audioState.drumKit.claveOn = dk.claveOn ?? true;
+            audioState.drumKit.rideOn = dk.rideOn ?? dk.cymbalOn ?? true;
+            audioState.drumKit.cajonOn = dk.cajonOn ?? dk.congaOn ?? true;
+            audioState.drumKit.clapOn = dk.clapOn ?? true;
+            audioState.drumKit.logOn = dk.logOn ?? dk.claveOn ?? true;
+            audioState.drumKit.tablaOn = dk.tablaOn ?? true;
+            audioState.drumKit.timbaleOn = dk.timbaleOn ?? true;
+            audioState.drumKit.miscOn = dk.miscOn ?? true;
             audioState.drumKit.kickLevel = clampRange(dk.kickLevel, -18, 12, 0);
             audioState.drumKit.snareLevel = clampRange(dk.snareLevel, -18, 12, 0);
-            audioState.drumKit.hihatLevel = clampRange(dk.hihatLevel, -18, 12, 0);
+            audioState.drumKit.hatLevel = clampRange(dk.hatLevel ?? dk.hihatLevel, -18, 12, 0);
             audioState.drumKit.tomLevel = clampRange(dk.tomLevel, -18, 12, -2);
-            audioState.drumKit.congaLevel = clampRange(dk.congaLevel, -18, 12, -1);
-            audioState.drumKit.cymbalLevel = clampRange(dk.cymbalLevel, -18, 12, -1);
-            audioState.drumKit.claveLevel = clampRange(dk.claveLevel, -18, 12, -4);
+            audioState.drumKit.rideLevel = clampRange(dk.rideLevel ?? dk.cymbalLevel, -18, 12, -2);
+            audioState.drumKit.cajonLevel = clampRange(dk.cajonLevel ?? dk.congaLevel, -18, 12, -2);
+            audioState.drumKit.clapLevel = clampRange(dk.clapLevel, -18, 12, -3);
+            audioState.drumKit.logLevel = clampRange(dk.logLevel ?? dk.claveLevel, -18, 12, -4);
+            audioState.drumKit.tablaLevel = clampRange(dk.tablaLevel, -18, 12, -2);
+            audioState.drumKit.timbaleLevel = clampRange(dk.timbaleLevel, -18, 12, -2);
+            audioState.drumKit.miscLevel = clampRange(dk.miscLevel, -18, 12, -6);
             audioState.drumKit.kickDecay = clampRange(dk.kickDecay, 0.08, 0.7, 0.28);
             audioState.drumKit.snareDecay = clampRange(dk.snareDecay, 0.06, 0.45, 0.14);
-            audioState.drumKit.hihatDecay = clampRange(dk.hihatDecay, 0.03, 0.22, 0.06);
+            audioState.drumKit.hatDecay = clampRange(dk.hatDecay ?? dk.hihatDecay, 0.03, 0.35, 0.08);
             audioState.drumKit.tomDecay = clampRange(dk.tomDecay, 0.08, 0.6, 0.20);
-            audioState.drumKit.congaDecay = clampRange(dk.congaDecay, 0.08, 0.9, 0.26);
-            audioState.drumKit.cymbalDecay = clampRange(dk.cymbalDecay, 0.08, 0.9, 0.28);
-            audioState.drumKit.claveDecay = clampRange(dk.claveDecay, 0.03, 0.25, 0.09);
+            audioState.drumKit.rideDecay = clampRange(dk.rideDecay ?? dk.cymbalDecay, 0.08, 1.2, 0.32);
+            audioState.drumKit.cajonDecay = clampRange(dk.cajonDecay ?? dk.congaDecay, 0.08, 0.9, 0.26);
+            audioState.drumKit.clapDecay = clampRange(dk.clapDecay, 0.03, 0.35, 0.12);
+            audioState.drumKit.logDecay = clampRange(dk.logDecay ?? dk.claveDecay, 0.03, 0.35, 0.10);
+            audioState.drumKit.tablaDecay = clampRange(dk.tablaDecay, 0.08, 0.9, 0.24);
+            audioState.drumKit.timbaleDecay = clampRange(dk.timbaleDecay, 0.08, 0.9, 0.24);
+            audioState.drumKit.miscDecay = clampRange(dk.miscDecay, 0.03, 0.9, 0.16);
             audioState.displayNotes = settings.displayNotes ?? true;
             audioState.chordOverlay = settings.chordOverlay ?? true;
             audioState.sensitivity = settings.sensitivity ?? 0.5;
@@ -354,11 +366,15 @@
         }
         if (ui.kickOn) ui.kickOn.checked = !!audioState.drumKit.kickOn;
         if (ui.snareOn) ui.snareOn.checked = !!audioState.drumKit.snareOn;
-        if (ui.hihatOn) ui.hihatOn.checked = !!audioState.drumKit.hihatOn;
+        if (ui.hatOn) ui.hatOn.checked = !!audioState.drumKit.hatOn;
         if (ui.tomOn) ui.tomOn.checked = !!audioState.drumKit.tomOn;
-        if (ui.congaOn) ui.congaOn.checked = !!audioState.drumKit.congaOn;
-        if (ui.cymbalOn) ui.cymbalOn.checked = !!audioState.drumKit.cymbalOn;
-        if (ui.claveOn) ui.claveOn.checked = !!audioState.drumKit.claveOn;
+        if (ui.rideOn) ui.rideOn.checked = !!audioState.drumKit.rideOn;
+        if (ui.cajonOn) ui.cajonOn.checked = !!audioState.drumKit.cajonOn;
+        if (ui.clapOn) ui.clapOn.checked = !!audioState.drumKit.clapOn;
+        if (ui.logOn) ui.logOn.checked = !!audioState.drumKit.logOn;
+        if (ui.tablaOn) ui.tablaOn.checked = !!audioState.drumKit.tablaOn;
+        if (ui.timbaleOn) ui.timbaleOn.checked = !!audioState.drumKit.timbaleOn;
+        if (ui.miscOn) ui.miscOn.checked = !!audioState.drumKit.miscOn;
         if (ui.kickLevel) {
             ui.kickLevel.value = String(audioState.drumKit.kickLevel);
             if (ui.kickLevelLabel) ui.kickLevelLabel.textContent = Math.round(audioState.drumKit.kickLevel) + ' dB';
@@ -367,25 +383,41 @@
             ui.snareLevel.value = String(audioState.drumKit.snareLevel);
             if (ui.snareLevelLabel) ui.snareLevelLabel.textContent = Math.round(audioState.drumKit.snareLevel) + ' dB';
         }
-        if (ui.hihatLevel) {
-            ui.hihatLevel.value = String(audioState.drumKit.hihatLevel);
-            if (ui.hihatLevelLabel) ui.hihatLevelLabel.textContent = Math.round(audioState.drumKit.hihatLevel) + ' dB';
+        if (ui.hatLevel) {
+            ui.hatLevel.value = String(audioState.drumKit.hatLevel);
+            if (ui.hatLevelLabel) ui.hatLevelLabel.textContent = Math.round(audioState.drumKit.hatLevel) + ' dB';
         }
         if (ui.tomLevel) {
             ui.tomLevel.value = String(audioState.drumKit.tomLevel);
             if (ui.tomLevelLabel) ui.tomLevelLabel.textContent = Math.round(audioState.drumKit.tomLevel) + ' dB';
         }
-        if (ui.congaLevel) {
-            ui.congaLevel.value = String(audioState.drumKit.congaLevel);
-            if (ui.congaLevelLabel) ui.congaLevelLabel.textContent = Math.round(audioState.drumKit.congaLevel) + ' dB';
+        if (ui.rideLevel) {
+            ui.rideLevel.value = String(audioState.drumKit.rideLevel);
+            if (ui.rideLevelLabel) ui.rideLevelLabel.textContent = Math.round(audioState.drumKit.rideLevel) + ' dB';
         }
-        if (ui.cymbalLevel) {
-            ui.cymbalLevel.value = String(audioState.drumKit.cymbalLevel);
-            if (ui.cymbalLevelLabel) ui.cymbalLevelLabel.textContent = Math.round(audioState.drumKit.cymbalLevel) + ' dB';
+        if (ui.cajonLevel) {
+            ui.cajonLevel.value = String(audioState.drumKit.cajonLevel);
+            if (ui.cajonLevelLabel) ui.cajonLevelLabel.textContent = Math.round(audioState.drumKit.cajonLevel) + ' dB';
         }
-        if (ui.claveLevel) {
-            ui.claveLevel.value = String(audioState.drumKit.claveLevel);
-            if (ui.claveLevelLabel) ui.claveLevelLabel.textContent = Math.round(audioState.drumKit.claveLevel) + ' dB';
+        if (ui.clapLevel) {
+            ui.clapLevel.value = String(audioState.drumKit.clapLevel);
+            if (ui.clapLevelLabel) ui.clapLevelLabel.textContent = Math.round(audioState.drumKit.clapLevel) + ' dB';
+        }
+        if (ui.logLevel) {
+            ui.logLevel.value = String(audioState.drumKit.logLevel);
+            if (ui.logLevelLabel) ui.logLevelLabel.textContent = Math.round(audioState.drumKit.logLevel) + ' dB';
+        }
+        if (ui.tablaLevel) {
+            ui.tablaLevel.value = String(audioState.drumKit.tablaLevel);
+            if (ui.tablaLevelLabel) ui.tablaLevelLabel.textContent = Math.round(audioState.drumKit.tablaLevel) + ' dB';
+        }
+        if (ui.timbaleLevel) {
+            ui.timbaleLevel.value = String(audioState.drumKit.timbaleLevel);
+            if (ui.timbaleLevelLabel) ui.timbaleLevelLabel.textContent = Math.round(audioState.drumKit.timbaleLevel) + ' dB';
+        }
+        if (ui.miscLevel) {
+            ui.miscLevel.value = String(audioState.drumKit.miscLevel);
+            if (ui.miscLevelLabel) ui.miscLevelLabel.textContent = Math.round(audioState.drumKit.miscLevel) + ' dB';
         }
         if (ui.kickDecay) {
             ui.kickDecay.value = String(audioState.drumKit.kickDecay);
@@ -395,25 +427,41 @@
             ui.snareDecay.value = String(audioState.drumKit.snareDecay);
             if (ui.snareDecayLabel) ui.snareDecayLabel.textContent = Number(audioState.drumKit.snareDecay).toFixed(2) + 's';
         }
-        if (ui.hihatDecay) {
-            ui.hihatDecay.value = String(audioState.drumKit.hihatDecay);
-            if (ui.hihatDecayLabel) ui.hihatDecayLabel.textContent = Number(audioState.drumKit.hihatDecay).toFixed(2) + 's';
+        if (ui.hatDecay) {
+            ui.hatDecay.value = String(audioState.drumKit.hatDecay);
+            if (ui.hatDecayLabel) ui.hatDecayLabel.textContent = Number(audioState.drumKit.hatDecay).toFixed(2) + 's';
         }
         if (ui.tomDecay) {
             ui.tomDecay.value = String(audioState.drumKit.tomDecay);
             if (ui.tomDecayLabel) ui.tomDecayLabel.textContent = Number(audioState.drumKit.tomDecay).toFixed(2) + 's';
         }
-        if (ui.congaDecay) {
-            ui.congaDecay.value = String(audioState.drumKit.congaDecay);
-            if (ui.congaDecayLabel) ui.congaDecayLabel.textContent = Number(audioState.drumKit.congaDecay).toFixed(2) + 's';
+        if (ui.rideDecay) {
+            ui.rideDecay.value = String(audioState.drumKit.rideDecay);
+            if (ui.rideDecayLabel) ui.rideDecayLabel.textContent = Number(audioState.drumKit.rideDecay).toFixed(2) + 's';
         }
-        if (ui.cymbalDecay) {
-            ui.cymbalDecay.value = String(audioState.drumKit.cymbalDecay);
-            if (ui.cymbalDecayLabel) ui.cymbalDecayLabel.textContent = Number(audioState.drumKit.cymbalDecay).toFixed(2) + 's';
+        if (ui.cajonDecay) {
+            ui.cajonDecay.value = String(audioState.drumKit.cajonDecay);
+            if (ui.cajonDecayLabel) ui.cajonDecayLabel.textContent = Number(audioState.drumKit.cajonDecay).toFixed(2) + 's';
         }
-        if (ui.claveDecay) {
-            ui.claveDecay.value = String(audioState.drumKit.claveDecay);
-            if (ui.claveDecayLabel) ui.claveDecayLabel.textContent = Number(audioState.drumKit.claveDecay).toFixed(2) + 's';
+        if (ui.clapDecay) {
+            ui.clapDecay.value = String(audioState.drumKit.clapDecay);
+            if (ui.clapDecayLabel) ui.clapDecayLabel.textContent = Number(audioState.drumKit.clapDecay).toFixed(2) + 's';
+        }
+        if (ui.logDecay) {
+            ui.logDecay.value = String(audioState.drumKit.logDecay);
+            if (ui.logDecayLabel) ui.logDecayLabel.textContent = Number(audioState.drumKit.logDecay).toFixed(2) + 's';
+        }
+        if (ui.tablaDecay) {
+            ui.tablaDecay.value = String(audioState.drumKit.tablaDecay);
+            if (ui.tablaDecayLabel) ui.tablaDecayLabel.textContent = Number(audioState.drumKit.tablaDecay).toFixed(2) + 's';
+        }
+        if (ui.timbaleDecay) {
+            ui.timbaleDecay.value = String(audioState.drumKit.timbaleDecay);
+            if (ui.timbaleDecayLabel) ui.timbaleDecayLabel.textContent = Number(audioState.drumKit.timbaleDecay).toFixed(2) + 's';
+        }
+        if (ui.miscDecay) {
+            ui.miscDecay.value = String(audioState.drumKit.miscDecay);
+            if (ui.miscDecayLabel) ui.miscDecayLabel.textContent = Number(audioState.drumKit.miscDecay).toFixed(2) + 's';
         }
         if (setDrumKitParams) setDrumKitParams(audioState.drumKit);
         
@@ -522,7 +570,7 @@
             ui.drumNaturalRoomChk.addEventListener('change', () => {
                 audioState.drumNaturalRoom = !!ui.drumNaturalRoomChk.checked;
                 if (setDrumNaturalRoom) setDrumNaturalRoom(audioState.drumNaturalRoom);
-                ensureSevenPieceBeatActive();
+                ensureDrumKitBeatActive();
                 saveSettings();
             });
         }
@@ -539,7 +587,9 @@
             ui.drumGlowIntensity.addEventListener('input', () => updateDrumGlowIntensity(true));
             updateDrumGlowIntensity(false);
         }
-        const _drumPreviewAt = { kick: 0, snare: 0, hihat: 0, tom: 0, conga: 0, cymbal: 0, clave: 0 };
+        const _drumPreviewAt = {
+            kick: 0, snare: 0, hat: 0, tom: 0, ride: 0, cajon: 0, clap: 0, log: 0, tabla: 0, timbale: 0, misc: 0
+        };
         function maybePreview(piece) {
             if (!piece || !previewDrumPiece) return;
             const nowMs = Date.now();
@@ -556,7 +606,7 @@
                 audioState.drumKit[key] = enabled;
                 if (setDrumKitParams) setDrumKitParams(audioState.drumKit);
                 if (enabled && shouldSave) maybePreview(previewPiece);
-                if (shouldSave) ensureSevenPieceBeatActive();
+                if (shouldSave) ensureDrumKitBeatActive();
                 if (shouldSave) saveSettings();
             };
             chk.addEventListener('change', () => update(true));
@@ -581,7 +631,7 @@
                 label.textContent = (isDb ? Math.round(v) : v.toFixed(precision)) + suffix;
                 if (setDrumKitParams) setDrumKitParams(audioState.drumKit);
                 if (shouldSave) maybePreview(previewPiece);
-                if (shouldSave) ensureSevenPieceBeatActive();
+                if (shouldSave) ensureDrumKitBeatActive();
                 if (shouldSave) saveSettings();
             };
             slider.addEventListener('input', () => update(true));
@@ -589,25 +639,37 @@
         }
         bindDrumKitToggle(ui.kickOn, 'kickOn', 'kick');
         bindDrumKitToggle(ui.snareOn, 'snareOn', 'snare');
-        bindDrumKitToggle(ui.hihatOn, 'hihatOn', 'hihat');
+        bindDrumKitToggle(ui.hatOn, 'hatOn', 'hat');
         bindDrumKitToggle(ui.tomOn, 'tomOn', 'tom');
-        bindDrumKitToggle(ui.congaOn, 'congaOn', 'conga');
-        bindDrumKitToggle(ui.cymbalOn, 'cymbalOn', 'cymbal');
-        bindDrumKitToggle(ui.claveOn, 'claveOn', 'clave');
+        bindDrumKitToggle(ui.rideOn, 'rideOn', 'ride');
+        bindDrumKitToggle(ui.cajonOn, 'cajonOn', 'cajon');
+        bindDrumKitToggle(ui.clapOn, 'clapOn', 'clap');
+        bindDrumKitToggle(ui.logOn, 'logOn', 'log');
+        bindDrumKitToggle(ui.tablaOn, 'tablaOn', 'tabla');
+        bindDrumKitToggle(ui.timbaleOn, 'timbaleOn', 'timbale');
+        bindDrumKitToggle(ui.miscOn, 'miscOn', 'misc');
         bindDrumKitSlider(ui.kickLevel, ui.kickLevelLabel, 'kickLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'kick' });
         bindDrumKitSlider(ui.snareLevel, ui.snareLevelLabel, 'snareLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'snare' });
-        bindDrumKitSlider(ui.hihatLevel, ui.hihatLevelLabel, 'hihatLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'hihat' });
+        bindDrumKitSlider(ui.hatLevel, ui.hatLevelLabel, 'hatLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'hat' });
         bindDrumKitSlider(ui.tomLevel, ui.tomLevelLabel, 'tomLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'tom' });
-        bindDrumKitSlider(ui.congaLevel, ui.congaLevelLabel, 'congaLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'conga' });
-        bindDrumKitSlider(ui.cymbalLevel, ui.cymbalLevelLabel, 'cymbalLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'cymbal' });
-        bindDrumKitSlider(ui.claveLevel, ui.claveLevelLabel, 'claveLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'clave' });
+        bindDrumKitSlider(ui.rideLevel, ui.rideLevelLabel, 'rideLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'ride' });
+        bindDrumKitSlider(ui.cajonLevel, ui.cajonLevelLabel, 'cajonLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'cajon' });
+        bindDrumKitSlider(ui.clapLevel, ui.clapLevelLabel, 'clapLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'clap' });
+        bindDrumKitSlider(ui.logLevel, ui.logLevelLabel, 'logLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'log' });
+        bindDrumKitSlider(ui.tablaLevel, ui.tablaLevelLabel, 'tablaLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'tabla' });
+        bindDrumKitSlider(ui.timbaleLevel, ui.timbaleLevelLabel, 'timbaleLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'timbale' });
+        bindDrumKitSlider(ui.miscLevel, ui.miscLevelLabel, 'miscLevel', { min: -18, max: 12, precision: 0, suffix: ' dB', db: true, previewPiece: 'misc' });
         bindDrumKitSlider(ui.kickDecay, ui.kickDecayLabel, 'kickDecay', { min: 0.08, max: 0.7, precision: 2, suffix: 's', previewPiece: 'kick' });
         bindDrumKitSlider(ui.snareDecay, ui.snareDecayLabel, 'snareDecay', { min: 0.06, max: 0.45, precision: 2, suffix: 's', previewPiece: 'snare' });
-        bindDrumKitSlider(ui.hihatDecay, ui.hihatDecayLabel, 'hihatDecay', { min: 0.03, max: 0.22, precision: 2, suffix: 's', previewPiece: 'hihat' });
+        bindDrumKitSlider(ui.hatDecay, ui.hatDecayLabel, 'hatDecay', { min: 0.03, max: 0.35, precision: 2, suffix: 's', previewPiece: 'hat' });
         bindDrumKitSlider(ui.tomDecay, ui.tomDecayLabel, 'tomDecay', { min: 0.08, max: 0.6, precision: 2, suffix: 's', previewPiece: 'tom' });
-        bindDrumKitSlider(ui.congaDecay, ui.congaDecayLabel, 'congaDecay', { min: 0.08, max: 0.9, precision: 2, suffix: 's', previewPiece: 'conga' });
-        bindDrumKitSlider(ui.cymbalDecay, ui.cymbalDecayLabel, 'cymbalDecay', { min: 0.08, max: 0.9, precision: 2, suffix: 's', previewPiece: 'cymbal' });
-        bindDrumKitSlider(ui.claveDecay, ui.claveDecayLabel, 'claveDecay', { min: 0.03, max: 0.25, precision: 2, suffix: 's', previewPiece: 'clave' });
+        bindDrumKitSlider(ui.rideDecay, ui.rideDecayLabel, 'rideDecay', { min: 0.08, max: 1.2, precision: 2, suffix: 's', previewPiece: 'ride' });
+        bindDrumKitSlider(ui.cajonDecay, ui.cajonDecayLabel, 'cajonDecay', { min: 0.08, max: 0.9, precision: 2, suffix: 's', previewPiece: 'cajon' });
+        bindDrumKitSlider(ui.clapDecay, ui.clapDecayLabel, 'clapDecay', { min: 0.03, max: 0.35, precision: 2, suffix: 's', previewPiece: 'clap' });
+        bindDrumKitSlider(ui.logDecay, ui.logDecayLabel, 'logDecay', { min: 0.03, max: 0.35, precision: 2, suffix: 's', previewPiece: 'log' });
+        bindDrumKitSlider(ui.tablaDecay, ui.tablaDecayLabel, 'tablaDecay', { min: 0.08, max: 0.9, precision: 2, suffix: 's', previewPiece: 'tabla' });
+        bindDrumKitSlider(ui.timbaleDecay, ui.timbaleDecayLabel, 'timbaleDecay', { min: 0.08, max: 0.9, precision: 2, suffix: 's', previewPiece: 'timbale' });
+        bindDrumKitSlider(ui.miscDecay, ui.miscDecayLabel, 'miscDecay', { min: 0.03, max: 0.9, precision: 2, suffix: 's', previewPiece: 'misc' });
         setupDropdown(ui.upperInstrumentDD, ui.upperInstrumentBtn, ui.upperInstrumentMenu, ui.upperInstrumentLabel,
             (val) => { 
                 audioState.upperWick.instrument = val;
@@ -740,7 +802,7 @@
         setupDropdown(ui.drumBeatDD, ui.drumBeatBtn, ui.drumBeatMenu, ui.drumBeatLabel,
             (val) => { 
                 audioState.drumBeat = val; 
-                if (val === 'standard_7piece' && previewFullKit) {
+                if (val === 'standard_11piece' && previewFullKit) {
                     previewFullKit();
                 }
                 saveSettings();

@@ -722,7 +722,7 @@
         
         // Drum beat (every sub-step; pattern decides what to play)
         if (playDrumStep) {
-            const drumBeat = audioState.drumBeat || 'standard_7piece';
+            const drumBeat = audioState.drumBeat || 'standard_11piece';
             const drumHits = playDrumStep(drumBeat, subStepInBar, now);
             if (drumHits) {
                 emitDrumStepEvent(barIndex, subStepInBar, drumHits, perfNow);
