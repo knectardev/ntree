@@ -247,7 +247,7 @@
             audioState.harmony.enabled = hs.enabled ?? true;
             audioState.harmony.volume = clampDb(hs.volume, -16);
             audioState.harmony.instrument = hs.instrument || 'electric_piano';
-            audioState.harmony.rhythm = (hs.rhythm === '2' || hs.rhythm === '4' || hs.rhythm === '8') ? hs.rhythm : '4';
+            audioState.harmony.rhythm = (hs.rhythm === '1' || hs.rhythm === '2' || hs.rhythm === '4' || hs.rhythm === '8') ? hs.rhythm : '4';
             audioState.harmony.style = (hs.style && HARMONY_STYLES[hs.style]) ? hs.style : 'jazz_shell_voicings';
             audioState.harmony.bodySensitivity = clampRange(hs.bodySensitivity, 0.2, 2.0, 1.0);
             audioState.harmony.dojiThreshold = clampRange(hs.dojiThreshold, 0.05, 0.40, 0.14);
@@ -790,7 +790,7 @@
             });
         setupDropdown(ui.harmonyRhythmDD, ui.harmonyRhythmBtn, ui.harmonyRhythmMenu, ui.harmonyRhythmLabel,
             (val) => {
-                audioState.harmony.rhythm = (val === '2' || val === '4' || val === '8') ? val : '4';
+                audioState.harmony.rhythm = (val === '1' || val === '2' || val === '4' || val === '8') ? val : '4';
                 saveSettings();
             });
         setupDropdown(ui.harmonyStyleDD, ui.harmonyStyleBtn, ui.harmonyStyleMenu, ui.harmonyStyleLabel,

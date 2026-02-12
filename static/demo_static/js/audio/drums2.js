@@ -59,14 +59,14 @@
             clave: []
         },
         minimal_jazz: {
-            label: 'Minimal Jazz (7-piece ride-led)',
-            kick: [0, 10],
+            label: 'Standard Swing Beat',
+            kick: [0, 8, 10],
             snare: [4, 12],
-            hihat: [],
-            tom: [14],
-            conga: [7, 15],
-            cymbal: [0],
-            ride: [0, 2, 4, 6, 8, 10, 12, 14],
+            hihat: [4, 12],
+            tom: [],
+            conga: [],
+            cymbal: [],
+            ride: [0, 3, 4, 7, 8, 11, 12, 15],
             clave: []
         },
         latin_salsa: {

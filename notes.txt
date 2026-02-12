@@ -1,166 +1,150 @@
-Since your system already differentiates between **Bullish (Major)** and **Bearish (Minor)** states and utilizes a registry of semitone offsets for the bass, we can create a "Mid-Voice Harmony Registry" that mirrors this architecture.
+To evolve your system from a static "fixed-scale" approach to a professional **Harmonically Aware** engine, you need to transition from using a single scale for an entire bar to using **Local Chord Scales** (also known as the Chord-Scale System).
 
-The goal is to fill the "Inner Voice" gap using **Candle Body Height** to control harmonic density, while ensuring the notes remain within a specific middle-frequency range ( to ).
+The current logic in `theory.js` correctly identifies the current chord and regime. However, the melodic generator primarily pulls from a global scale regardless of whether the specific note is compatible with the underlying chord's "flavor".
 
----
+### 1. The Architectural Shift: "The Chord-Scale Filter"
 
-## 1. The "Mid-Voice" Harmony Logic
+Instead of a single scale pool, the system should generate a **Dynamic Scale Pool** every time the chord changes. This pool is the intersection of your chosen "Genre Scale" and the "Current Chord Tones".
 
-I propose a logic structure that uses **Dyads** (two-note intervals) or **Triads** (three-note chords) based on the candle's energy.
+| Component | Current Status | Recommended Upgrade |
+| --- | --- | --- |
+| **Global Scale** | Indian Raag / Pentatonic | Acts as the "Parent" DNA. |
+| **Local Chord** | Progression Step (I, IV, V, etc.) | Acts as the "Filter." |
+| **Resulting Mode** | Static | **Dynamic Modal Shift** (e.g., Lydian over IV, Mixolydian over V). |
 
-### Harmonic Selection based on Candle State
+### 2. Implementation Strategy: The "Merged Pool"
 
-* **Bullish Candles:** Focus on the **Major 3rd** and **Major 7th** to provide that bright, "Jazz Major" feel seen in your UI settings.
-* **Bearish Candles:** Focus on the **Minor 3rd** and **Perfect 5th** (or Minor 6th) to provide a darker, grounded texture.
-* **Doji (Small Body):** Play only the **Root** or **5th** to minimize harmonic clutter during low-volatility periods.
+You can solve harmonic clashes by refactoring `getScaleNotes` in `theory.js` to perform a **weighted merge**.
 
-### The "Body Height" Velocity Multiplier
+**The Logic:**
 
-The candle body height should map to the **MIDI Velocity** (volume) and **Density**:
+* **Tier A (Chord Tones):** The Root, 3rd, and 5th of the current chord. These must always be available as "Safe Landing" notes.
+* **Tier B (Compatible Scale Tones):** Notes from your selected Raag or Scale that do not create a "Minor 2nd" interval clash with the Chord Tones.
+* **Tier C (Avoid Notes):** Notes that exist in the scale but create harsh dissonance against the specific chord (e.g., a natural 4th over a Major 7th chord). These should be deprioritized or removed from the pool.
 
-* **Tiny Body:** 1 note (The "Shell" voicing).
-* **Average Body:** 2 notes (The "Interval" voicing).
-* **Large Body (Marubozu):** 3-4 notes (The "Full" voicing).
+### 3. Technical Roadmap for Cursor
 
----
+Request these specific refactors in `theory.js` and your conductor logic:
 
-## 2. Proposed Registry Structure (`harmony_styles.js`)
+> **"Refactor the melodic generation to be Harmonically Aware using a Chord-Scale System:**
+> **1. Refactor `getScaleNotes`:** Instead of returning a static scale, it should now accept `currentChordToneMods` as an input. It must prioritize notes that belong to BOTH the selected Scale/Raag and the current Chord Tones.
+> **2. Implement 'Safe Landing' Logic:** Modify the Pathfinder so that on the **Downbeat (Sub-step 0)** and **Mid-bar (Sub-step 8)**, the melody is forced to quantize to a **Chord Tone** (Root, 3rd, or 5th) rather than just any scale degree.
+> **3. Harmonic Gravity:** When moving toward a price wick, if the nearest scale note is a 'Dissonant' note (an 'Avoid' note for that chord), the engine should 'Gravity-Shift' the note to the nearest adjacent Chord Tone."
 
-Following the pattern in your `bass_styles.js`, here is how you can implement the inner voice accompaniment:
+### 4. Why this fixes the "Improvisatory" Feel
 
-```javascript
-/**
- * audio/harmony_styles.js — Inner Voice / Accompaniment Registry
- */
-(function() {
-    'use strict';
-    const _am = window._audioModule;
+Real improvisers don't just play a scale; they play **to the changes**. By making the scale aware of the chord, you ensure that:
 
-    const HARMONY_STYLES = {
-        jazz_shell_voicings: {
-            label: 'Jazz Shell (3rds & 7ths)',
-            range: ['C3', 'C5'],
-            // Offsets from Chord Root
-            bullish: [4, 11], // Major 3rd, Major 7th
-            bearish: [3, 10]  // Minor 3rd, Minor 7th
-        },
-        power_chords_thick: {
-            label: 'Rock Power Stacks',
-            range: ['G2', 'G4'],
-            bullish: [0, 7, 12], // Root, 5th, Octave
-            bearish: [0, 7, 12]  // Consistent "thick" feel
-        },
-        ambient_sustained_pad: {
-            label: 'Ambient Tension',
-            range: ['C4', 'C5'],
-            bullish: [4, 7, 9],  // Major 3rd, 5th, 6th (add6)
-            bearish: [3, 7, 8]   // Minor 3rd, 5th, Minor 6th
-        },
-        orchestral_strings: {
-            label: 'Orchestral Fill',
-            range: ['C3', 'A4'],
-            bullish: [0, 4, 7],  // Basic Major Triad
-            bearish: [0, 3, 7]   // Basic Minor Triad
-        }
-    };
+1. **Resolution:** The music "resolves" every time the chord changes because the melody "lands" on a note that defines that chord.
+2. **Color:** You keep the "flavor" of the Indian Raag or Jazz Mode in the passing tones, but the "foundation" stays locked to the harmony.
+3. **Clash Prevention:** It mathematically eliminates the "Wrong Note" syndrome that happens when a static Raag hits a complex chord progression like your "Canon" or "Jazz Blues".
 
-    _am.HARMONY_STYLES = HARMONY_STYLES;
-})();
+Implementing a **Harmonically Aware** music system is a significant architectural leap. It moves your engine from being a "Scale Player" to an "Improviser."
 
-```
+Currently, your `theory.js` uses a "Global Scale" approach. To fix the harmonic clashes, you need to implement a **Chord-Scale System**. This means that while your *Genre* (like an Indian Raag) provides the overall "flavor," the specific notes available to the melody are filtered in real-time by the *Chord* currently being played.
 
----
+### 1. The Architectural Shift: Dynamic Note Pools
 
-## 3. Algorithm: The "Inner Voice" Selector
+Instead of `getScaleNotes` returning a fixed list, it should generate a **Dynamic Pool** that is the intersection of the "Parent Scale" and the "Chord Tones."
 
-When a new candle forms, the `pathfinder.js` logic can trigger the harmony:
+| Layer | Example | Role |
+| --- | --- | --- |
+| **Parent DNA** | Raag Yaman | Provides the "Flavor" and Interval structure. |
+| **Local Filter** | C Major Chord | Provides the "Safe" structural notes (Root, 3rd, 5th). |
+| **Resulting Pool** | Chord-Aware Scale | The melody "hugs" the chord tones while "passing" through Raag notes. |
 
-1. **Check Body Size:** Calculate .
-2. **Determine Chord:** Fetch current chord from your **Jazz (ii-V-I)** engine.
-3. **Apply Transposition:** Use the `HARMONY_STYLES` offsets relative to the **Root Key**.
-4. **Stay in Bounds:** If the price-driven note exceeds the defined `range` (e.g., ), use a modulo operator to "wrap" the note back down an octave, ensuring it never clashes with the Soprano/Upper Wick instrument.
+### 2. Implementation Strategy: "The Three Tiers of Safety"
 
-To implement the inner voice harmony, we can leverage the candle body's "displacement" (the distance between Open and Close) to control the **voicing density** and **velocity**.
+You can ask Cursor to refactor the note-selection logic to prioritize notes based on their relationship to the current chord:
 
-Since your system already handles root keys and progressions like **Jazz (ii-V-I)**, the following logic will ensure the inner voice stays musically relevant while reacting to price volatility.
+1. **Tier 1: Chord Tones (Structural):** The Root, 3rd, and 5th of the current chord. These are the "landing pads" for downbeats and long notes.
+2. **Tier 2: Scale Extensions (Color):** Notes in your Raag/Scale that are not in the chord but sound beautiful (e.g., the 9th or 13th).
+3. **Tier 3: Avoid Notes (Dissonant):** Notes in the scale that create a harsh "Minor 2nd" clash with a chord tone (e.g., playing a natural 4th over a Major chord). These should be filtered out or "pushed" to the nearest safe note.
 
----
+### 3. Technical Instructions for Cursor
 
-## 1. Defining the Mid-Voice Registry
+Give this to Cursor to refactor `theory.js` and your playback conductor:
 
-Using the structure of your `bass_styles.js`, we can define "Voicing Templates" that respond to the Bullish or Bearish state of the candle.
+> **"We need to implement Harmonically Aware melody generation. Refactor `theory.js` to support a Dynamic Chord-Scale system:**
+> **1. Refactor `getScaleNotes`:** It should now accept the `currentChord` as a parameter. It must return a weighted array of notes where Chord Tones (Root, 3rd, 5th) are prioritized.
+> **2. The 'Landing Rule':** In the `processSubStep` conductor, force the melody to quantize to a **Chord Tone** on Sub-steps 0 (Downbeat) and 8 (Mid-bar). This ensures the music 'resolves' when the chord changes.
+> **3. Avoid Note Filtering:** Implement a 'Collision Detector' that removes scale notes if they are exactly 1 semitone away from a current Chord Tone (unless they are a specified 'color' note of the genre).
+> **4. Scale-to-Chord Mapping:** Map our Genres to specific Modal Substitutions (e.g., if the user chooses 'Jazz' and the chord is 'V7', use the Mixolydian mode; if 'IV', use Lydian)."
 
-```javascript
-/**
- * audio/harmony_styles.js 
- * Logic: Body Height -> Chord Density | Body State -> Chord Quality
- */
-const HARMONY_MODES = {
-    jazz_voicing: {
-        label: 'Jazz Mid-range (3rds & 7ths)',
-        // Semitone offsets from chord root
-        bullish: [4, 7, 11], // Major Triad + Maj7
-        bearish: [3, 7, 10], // Minor Triad + m7
-        instrument_suggestions: ['Rhodes', 'Warm Pad']
-    },
-    classical_trio: {
-        label: 'Classical Trio',
-        bullish: [0, 4, 7],  // Major Triad
-        bearish: [0, 3, 7],  // Minor Triad
-        instrument_suggestions: ['Strings', 'Organ']
-    }
-};
+### 4. Why this creates a "Pro" Sound:
 
-```
+* **Resolution:** When the chord changes from C Major to G Major, your melody will automatically "land" on a B, D, or G. This makes the music feel like it's "following" the market's harmonic progression.
+* **No Clashes:** By mathematically filtering out "Avoid Notes," you can use complex scales like the *Melodic Minor* or *Raag Bhairav* without ever hitting a "sour" note against a simple triad chord.
+* **Intelligence:** The system starts to feel like a human player who knows the "theory" behind the changes.
+
+To implement a **Harmonically Aware** engine, you must move beyond simply checking if a note is in a scale. The "Avoid Note Matrix" acts as a real-time safety filter that prevents the melody from lingering on notes that clash with the active chord's structure.
+
+### 1. The Avoid Note Matrix (The "Safety Filter")
+
+The fundamental rule of this matrix is the **Minor 9th / Minor 2nd Rule**: a note is considered an "Avoid Note" if it sits exactly **one semitone above** a primary chord tone (). While these notes are fine for fast "passing" motion, stopping on them creates a harsh harmonic clash.
+
+| Chord Quality | Chord Tones | **Avoid Notes (Dissonant)** | **Safe Tensions (Pro Sound)** |
+| --- | --- | --- | --- |
+| **Major (Maj7)** |  | **Natural 4th** (clashes with ) |  |
+| **Minor (m7)** |  | **** (clashes with ) |  |
+| **Dominant (7)** |  | **Natural 4th** (clashes with ) |  |
+| **Half-Dim ()** |  | **** (clashes with ) |  |
 
 ---
 
-## 2. The Harmonic Calculation Algorithm
+### 2. Implementation Logic for `theory.js`
 
-The "Inner Voice" should reside in the mid-frequency range ( to ) to avoid clashing with your high-pitched **Harmonica** (Upper Wick) or low **Acoustic Bass** (Lower Wick).
+To architect this correctly, refactor your `getScaleNotes` or `nearestScaleNote` to use a **Weighting System**.
 
-### Step A: Determine Density from Body Height
-
-The algorithm calculates the pixel height of the candle body.
-
-* **Small Body (Doji/Consolidation):** Play only the **3rd** of the chord (The "Color" note).
-* **Medium Body:** Play the **3rd and 7th** (The "Shell" voicing).
-* **Large Body (Expansion):** Play the full **Triad (1, 3, 5, 7)**.
-
-### Step B: Coordinate with the Bass Line
-
-Your `bass_styles.js` uses semitone offsets to create movement. To keep the mid-voice stable, we use **Inversion Logic**:
-
-1. Identify the note currently being played by the **Acoustic Bass**.
-2. Select the mid-voice notes that are furthest from the bass note to prevent "muddiness."
-3. **Bullish State:** Map to the **Major/Natural Minor** scale setting.
-4. **Bearish State:** Map to the parallel minor or diminished tones if the price drop is significant.
+1. **Chord Tone Priority (Weight: 1.0):** If a scale note is also a Chord Tone (), it is a "Primary Target." Use these for the start and end of phrases.
+2. **Color Tone (Weight: 0.7):** If a note is in the scale and is a safe tension (like a  or ), it is used for melodic "flavor."
+3. **Avoid Note (Weight: 0.1):** If a note is in the scale but clashes with a chord tone (like a natural  over a Major chord), the algorithm should only play it as a very short "passing note" or skip it entirely if the price movement is slow.
 
 ---
 
-## 3. Implementation Logic (Pseudo-code)
+### 3. "Genre-Specific" Modal Substitutions
 
-You can drop this logic into your `pathfinder.js` or equivalent playback engine:
+Since you are using diverse genres like **Indian Raags**, the "Avoid Note" logic must be flexible. Some Raags intentionally use dissonance for emotional effect.
 
-```javascript
-function triggerInnerVoice(candle, currentChord) {
-    const bodyHeight = Math.abs(candle.open - candle.close);
-    const isBullish = candle.close > candle.open;
-    
-    // 1. Get offsets based on Bullish (Major) or Bearish (Minor) state
-    const style = HARMONY_MODES.jazz_voicing;
-    const offsets = isBullish ? style.bullish : style.bearish;
+* **Raag Yaman (Lydian flavor):** In this mode, the  is a "Color Tone" and is completely safe.
+* **Raag Bhairav (Double Harmonic):** The  is a critical flavor note; here, you would override the "Avoid" rule to keep the cultural identity of the scale.
 
-    // 2. Determine how many notes to play based on "Pattern Density"
-    // (Referencing your UI 'Pattern Density' slider)
-    const densityLimit = bodyHeight > averageHeight ? offsets.length : 2;
-    const activeNotes = offsets.slice(0, densityLimit);
+### 4. Technical Prompt for Cursor
 
-    // 3. Map to MIDI Notes (keeping it between C3 and C4)
-    activeNotes.forEach(offset => {
-        const midiNote = currentChord.root + offset + 48; // +48 for mid-octave
-        playInstrument('Piano/Organ', midiNote, velocity = bodyHeight * 0.8);
-    });
-}
+Use this prompt to have Cursor update your `theory.js` logic:
 
-```
+> **"Implement a Harmonic Avoid-Note Matrix in `theory.js`.**
+> **1. Chord-Scale Intersection:** Update `getScaleNotes` to calculate the intersection between the `musicState.currentScale` and the `currentChordTones`.
+> **2. Note Tagging:** Tag each note in the returned array as `type: 'structural'` (Chord Tone), `type: 'extension'` (Safe Scale Note), or `type: 'avoid'` (Dissonant clash).
+> **3. The 'Resolution' Rule:** In the melody conductor, if the current price target lands on an `avoid` note, force a 'Micro-Quantization' to the nearest `structural` note (the nearest Chord Tone).
+> **4. Visual Sync:** When the melody hits a `structural` note, make the chart pulse slightly brighter to show the user that the music has 'resolved' to the harmony."
+
+This ensures your "Naked" mode remains mathematically perfect, while your "Dynamic" mode sounds like a seasoned musician who knows how to navigate "the changes" in your market-driven chord progressions.
+
+
+Best Insertion Points
+Primary home: static/demo_static/js/audio/theory.js
+Add a new function like getChordAwareScaleNotes(...) (or getTonalContext(...)) that:
+reads current chord degree from audioState.chordProgression + musicState.progressionStep
+derives an active modal/chord-aware pitch set from the selected base scale
+returns the pool for the current bar/sub-step
+Why here: all harmonic truth already lives here (getScaleNotes(), getCurrentChordToneMods(), quantizeToChord()).
+Main wiring point: static/demo_static/js/audio/conductor.js
+This is where pools are built each sub-step (sopranoScalePool, bassScalePool), so swap from plain getScaleNotes() to chord-aware pools.
+This gives you harmonic-awareness for both:
+deep pathfinder mode
+pattern-override mode
+Critical fix for your exact complaint: generatePatternNote() in conductor.js
+In scale_asc / scale_asc_desc, it currently walks a static scale pool and only chord-modes use chordPool.
+Add chord-aware behavior here first (or a toggle), because that is the test mode you’re evaluating.
+Keep mostly unchanged: pathfinder.js
+It already consumes pools passed in; if conductor sends chord-aware pools, pathfinder mostly benefits automatically.
+Only touch this if you want extra chord-tone weighting logic (e.g., strong beats prefer 1/3/5/7).
+Avoid as primary integration point: engine.js
+quantizeToChord() use there is more legacy/score-generation oriented, not the central live improvisation loop.
+Good utility, but not where to drive the new architecture.
+Practical rollout order (lowest risk)
+Add chord-aware pool function in theory.js.
+Use it in conductor.js where pools are built.
+Update generatePatternNote() so Asc. Scale test mode is harmonically aware.
+Optionally add a UI toggle (Harmonic-aware scale) to preserve old deterministic behavior for debugging.
