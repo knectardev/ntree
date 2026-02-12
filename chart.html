@@ -11,6 +11,7 @@
   <div class="appNav" id="appNav">
     <a href="/" title="Back to Dashboard">Dashboard</a>
     <a href="/backtest-config" title="Backtest Configurations">Backtest Config</a>
+    <button type="button" id="shortLinkBtn" class="appNavBtn" title="Generate short link with current audio settings">Short Link</button>
   </div>
   <div class="statusChip" id="updateChip" aria-live="polite">
     <span class="statusDot" id="updateDot"></span>
@@ -1150,6 +1151,60 @@
   <script src="static/demo_static/js/audio/engine.js"></script>
   <script src="static/demo_static/js/audio/conductor.js"></script>
   <script src="static/demo_static/js/audio/ui.js"></script>
+  <script>
+    (function(){
+      function initShortLinkBtn(){
+        var btn = document.getElementById('shortLinkBtn');
+        if(!btn) return;
+        btn.addEventListener('click', function(){
+          var _am = window._audioModule;
+          var getShareableUrl = _am && typeof _am.getShareableUrl === 'function' ? _am.getShareableUrl : null;
+          if(!getShareableUrl){
+            console.warn('[ShortLink] Audio module not ready');
+            return;
+          }
+          var longUrl = getShareableUrl();
+          btn.disabled = true;
+          btn.textContent = '...';
+          var apiUrl = '/api/shorten-url?url=' + encodeURIComponent(longUrl);
+          fetch(apiUrl).then(function(r){ return r.json(); }).then(function(j){
+            var short = j && j.short_url;
+            if(short && navigator.clipboard && navigator.clipboard.writeText){
+              return navigator.clipboard.writeText(short).then(function(){
+                btn.textContent = 'Copied!';
+                setTimeout(function(){ btn.textContent = 'Short Link'; btn.disabled = false; }, 2000);
+              });
+            }
+            if(short){
+              var ta = document.createElement('textarea');
+              ta.value = short;
+              ta.style.position = 'fixed';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              document.body.removeChild(ta);
+              btn.textContent = 'Copied!';
+              setTimeout(function(){ btn.textContent = 'Short Link'; btn.disabled = false; }, 2000);
+            } else {
+              btn.textContent = 'Short Link';
+              btn.disabled = false;
+              console.warn('[ShortLink]', j && j.error ? j.error : 'Failed');
+            }
+          }).catch(function(err){
+            btn.textContent = 'Short Link';
+            btn.disabled = false;
+            console.warn('[ShortLink]', err);
+          });
+        });
+      }
+      if(document.readyState === 'loading'){
+        document.addEventListener('DOMContentLoaded', initShortLinkBtn);
+      } else {
+        initShortLinkBtn();
+      }
+    })();
+  </script>
 </body>
 </html>
 

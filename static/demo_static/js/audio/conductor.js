@@ -97,6 +97,41 @@
         return pattern[idx] === 1;
     }
 
+    function getSopranoRhythmMode() {
+        return String(audioState.upperWick && audioState.upperWick.rhythm ? audioState.upperWick.rhythm : '4');
+    }
+
+    function getSopranoTriggerIntervalFromMode(mode) {
+        const raw = String(mode || '4');
+        if (raw === 'random_4_8_16') return 1; // 16th-grid onsets, random duration per note
+        if (raw === 'random_4_8') return 2;    // 8th-grid onsets, random duration per note
+        const div = parseInt(raw, 10);
+        if (div === 1 || div === 2 || div === 4 || div === 8 || div === 16) {
+            return Math.max(1, Math.round(SUB_STEP_COUNT / div));
+        }
+        return 4; // Quarter fallback
+    }
+
+    function shouldTriggerSopranoPulse(subStepInBar) {
+        const mode = getSopranoRhythmMode();
+        const interval = getSopranoTriggerIntervalFromMode(mode);
+        const onGrid = (subStepInBar % interval) === 0;
+        if (!onGrid) {
+            return { shouldPlay: false, mode: mode };
+        }
+
+        const baseHits = Math.max(1, Math.floor(SUB_STEP_COUNT / interval));
+        const density = Math.max(1, Math.min(SUB_STEP_COUNT, Math.round(Number(audioState.rhythmDensity) || 8)));
+        if (density >= baseHits) {
+            return { shouldPlay: true, mode: mode };
+        }
+
+        // Pattern density acts as controlled sparsity over the selected rhythm grid.
+        const sparseMask = getEuclideanPattern(density, baseHits);
+        const gridIndex = Math.floor(subStepInBar / interval) % baseHits;
+        return { shouldPlay: sparseMask[gridIndex] === 1, mode: mode };
+    }
+
     function getRangeNormForBar(barIndex) {
         const d = state && Array.isArray(state.data) ? state.data : [];
         if (!d.length) return 0.5;
@@ -159,8 +194,8 @@
         }
     }
 
-    function pickSopranoRhythmValue() {
-        const raw = String(audioState.upperWick && audioState.upperWick.rhythm ? audioState.upperWick.rhythm : '4');
+    function pickSopranoRhythmValue(modeOverride) {
+        const raw = String(modeOverride || getSopranoRhythmMode());
         if (raw === 'random_4_8_16') {
             const opts = ['4', '8', '16'];
             return opts[Math.floor(Math.random() * opts.length)];
@@ -883,7 +918,8 @@
         const bassTonalContext = bassPools.tonalContext;
         
         // ── SOPRANO PATHFINDER (High Agility: runs, arpeggios, orbits) ──
-        const shouldPlaySoprano = shouldTriggerRhythmicPulse(subStepInBar, 'soprano');
+        const sopranoPulse = shouldTriggerSopranoPulse(subStepInBar);
+        const shouldPlaySoprano = sopranoPulse.shouldPlay;
         
         let sopranoMidi = musicState.prevSoprano || 72;
         
@@ -1000,7 +1036,7 @@
             sopranoMidi = Math.max(sopranoRange.min, Math.min(sopranoRange.max, sopranoMidi));
             updateSopranoHistory(sopranoMidi);
             
-            const sopranoRhythmForNote = pickSopranoRhythmValue();
+            const sopranoRhythmForNote = pickSopranoRhythmValue(sopranoPulse.mode);
             const sopranoDurationSec = computeDynamicDurationSec(barIndex, 'soprano') * rhythmDurationScale(sopranoRhythmForNote);
             const sopranoDurationMs = sopranoDurationSec * 1000;
             const tieSoprano = shouldTieNote('soprano', sopranoMidi, barData.h);

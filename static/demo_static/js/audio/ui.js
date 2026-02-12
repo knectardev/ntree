@@ -243,16 +243,24 @@
     }
 
     /**
+     * Build current URL with audio params. Returns the full URL string.
+     * Used by Copy shareable URL button and Short Link button.
+     */
+    function getShareableUrl() {
+        const settings = serializeAudioToParams();
+        const json = JSON.stringify(settings);
+        const encoded = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const u = new URL(window.location.href);
+        u.searchParams.set(AUDIO_URL_PARAM, encoded);
+        return u.toString();
+    }
+
+    /**
      * Build current URL with audio params and copy to clipboard. Used by Copy shareable URL button.
      */
     function copyShareableUrlToClipboard() {
         try {
-            const settings = serializeAudioToParams();
-            const json = JSON.stringify(settings);
-            const encoded = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-            const u = new URL(window.location.href);
-            u.searchParams.set(AUDIO_URL_PARAM, encoded);
-            const url = u.toString();
+            const url = getShareableUrl();
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(url).then(function() {
                     if (ui.statusLabel) ui.statusLabel.textContent = 'URL copied to clipboard';
@@ -1261,6 +1269,9 @@
 
         console.log('[Audio] Audio controls initialized');
     }
+
+    // Export for Short Link button and external use
+    _am.getShareableUrl = getShareableUrl;
 
     // Initialize when DOM is ready
     if (document.readyState === 'loading') {

@@ -248,6 +248,23 @@
       box-shadow:0 12px 34px rgba(0,0,0,.45);
     }
     .appNav a:hover{background:rgba(255,255,255,.08)}
+    .appNav .appNavBtn{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(8,12,18,.78);
+      backdrop-filter: blur(10px);
+      color: rgba(215,224,234,.92);
+      font-size:12px;
+      font-weight:650;
+      box-shadow:0 12px 34px rgba(0,0,0,.45);
+      cursor:pointer;
+      font-family:inherit;
+    }
+    .appNav .appNavBtn:hover{background:rgba(255,255,255,.08)}
     
     /* Practice controls (Play / Pause / Reset) */
     .practiceCtrls{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
