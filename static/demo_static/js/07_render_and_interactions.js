@@ -1872,6 +1872,7 @@
     (function drawNoteAxis(){
       try{
         if(!audioActive || noteAxisW <= 0) return;
+        var axisNow = performance.now();
         
         // Note names array (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
         var noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -1896,6 +1897,21 @@
         ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
+
+        // Build a quick lookup of active harmony MIDI notes so the left note axis can
+        // lightly highlight the exact harmony tones that are currently sounding.
+        var activeHarmonyMidi = Object.create(null);
+        if (window._audioNoteEvents && window._audioNoteEvents.length) {
+          for (var hi = window._audioNoteEvents.length - 1; hi >= 0; hi--) {
+            var hev = window._audioNoteEvents[hi];
+            if (!hev || hev.voice !== 'harmony') continue;
+            var hmidi = Number(hev.midi);
+            if (!Number.isFinite(hmidi)) continue;
+            var hEnd = Number(hev.glowUntil || hev.endTime || hev.time || 0);
+            if (hEnd < (axisNow - 120)) continue;
+            activeHarmonyMidi[Math.round(hmidi)] = true;
+          }
+        }
         
         // Draw note labels for the chromatic scale
         for (var midi = midiMin; midi <= midiMax; midi++) {
@@ -1911,6 +1927,7 @@
           
           // Skip if outside visible range
           if (!Number.isFinite(noteY) || noteY < pricePlot.y - 5 || noteY > pricePlot.y + pricePlot.h + 5) continue;
+          var isHarmonyHit = !!activeHarmonyMidi[midi];
           
           // Determine if this is a natural note (white key) or sharp/flat (black key)
           var isNatural = [0, 2, 4, 5, 7, 9, 11].indexOf(pitchClass) >= 0;
@@ -1918,7 +1935,9 @@
           
           // Color coding: green for soprano range (C4+), blue for bass range
           var baseAlpha = isOctaveC ? 1.0 : (isNatural ? 0.7 : 0.4);
-          if (midi >= 60) {
+          if (isHarmonyHit) {
+            ctx.fillStyle = 'rgba(255, 214, 128, 0.96)';
+          } else if (midi >= 60) {
             ctx.fillStyle = 'rgba(124, 255, 194, ' + baseAlpha + ')';
           } else {
             ctx.fillStyle = 'rgba(122, 167, 255, ' + baseAlpha + ')';
@@ -1926,15 +1945,26 @@
           
           // Only show select labels to avoid clutter (C notes + E + G for each octave)
           var showLabel = isOctaveC || pitchClass === 4 || pitchClass === 7; // C, E, G
+          if (isHarmonyHit) showLabel = true;
+
+          if (isHarmonyHit) {
+            // Soft axis-lane pulse for harmony note hits.
+            ctx.fillStyle = 'rgba(255, 214, 128, 0.18)';
+            ctx.fillRect(pad + 2, noteY - 3, noteAxisW - 4, 6);
+            // Restore label color after pulse draw.
+            ctx.fillStyle = 'rgba(255, 214, 128, 0.96)';
+          }
           if (showLabel) {
             ctx.fillText(noteName, pad + noteAxisW - 4, noteY);
           }
           
           // Draw tick marks for all notes
-          ctx.strokeStyle = isOctaveC 
+          ctx.strokeStyle = isHarmonyHit
+            ? 'rgba(255, 214, 128, 0.95)'
+            : (isOctaveC 
             ? 'rgba(255, 255, 255, 0.6)' 
-            : (isNatural ? 'rgba(150, 150, 150, 0.3)' : 'rgba(100, 100, 100, 0.15)');
-          ctx.lineWidth = isOctaveC ? 1.5 : 1;
+            : (isNatural ? 'rgba(150, 150, 150, 0.3)' : 'rgba(100, 100, 100, 0.15)'));
+          ctx.lineWidth = isHarmonyHit ? 2 : (isOctaveC ? 1.5 : 1);
           ctx.beginPath();
           ctx.moveTo(pad + noteAxisW - (isOctaveC ? 8 : 4), noteY);
           ctx.lineTo(pad + noteAxisW, noteY);

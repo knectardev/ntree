@@ -180,6 +180,17 @@
         }
     }
 
+    function rhythmBaseDurationSec(rhythm) {
+        switch (String(rhythm)) {
+            case '1': return SUB_STEP_SECONDS * 16;
+            case '2': return SUB_STEP_SECONDS * 8;
+            case '4': return SUB_STEP_SECONDS * 4;
+            case '8': return SUB_STEP_SECONDS * 2;
+            case '16': return SUB_STEP_SECONDS;
+            default: return SUB_STEP_SECONDS * 4;
+        }
+    }
+
     function clampToRange(v, lo, hi, fb) {
         const n = Number(v);
         const d = Number.isFinite(fb) ? fb : lo;
@@ -1102,14 +1113,21 @@
                     const baseMidi = pickMidiForPcInRange(rootPc, minMidi, maxMidi, 60);
                     const nowVel = clampToRange(0.35 + (bodyNorm * 0.5), 0.25, 0.9, 0.55);
                     const durMul = rhythmDurationScale(rhythm);
-                    const toneDuration = Math.max(0.06, Math.min(1.8, rhythmToDuration(rhythm) * (0.6 + durMul * 0.45)));
+                    const baseDurSec = rhythmBaseDurationSec(rhythm);
+                    const toneDuration = Math.max(0.06, Math.min(1.8, baseDurSec * (0.6 + durMul * 0.45)));
                     const midPrice = Number.isFinite(openP) && Number.isFinite(closeP) ? ((openP + closeP) / 2) : barData.c;
 
                     for (let i = 0; i < offsets.length; i++) {
                         const midi = wrapMidiToRange(baseMidi + Number(offsets[i] || 0), minMidi, maxMidi);
                         try {
-                            audioState._harmonySampler.triggerAttackRelease(Tone.Frequency(midi, 'midi').toNote(), toneDuration, now + (i * 0.004), nowVel);
-                            emitSubStepNote('harmony', midi, midPrice, preciseBarIndex, toneDuration * 1000, perfNow, rhythm);
+                            const startAt = now + (i * 0.004);
+                            audioState._harmonySampler.triggerAttackRelease(
+                                Tone.Frequency(midi, 'midi').toNote(),
+                                toneDuration,
+                                startAt,
+                                nowVel
+                            );
+                            emitSubStepNote('harmony', midi, midPrice, preciseBarIndex, toneDuration * 1000, perfNow + (i * 4), rhythm);
                             audioState._lastHarmonyMidi = midi;
                         } catch (_e) {}
                     }

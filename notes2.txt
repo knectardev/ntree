@@ -57,4 +57,45 @@ Because your **Jazz (ii-V-I)** progression is the backbone, the mid-voice needs 
 
 If the first draft feels too cluttered, we can always look at a **"Velocity Scaling"** function that lowers the volume of the mid-notes as you add more of them (Density-compensated Gain).
 
-How is the generated code looking so far—is it successfully pulling the `bullish` vs `bearish` states from your price engine?
+
+
+The code in your `harmony_styles.js` looks solid and follows the pattern of your existing registries. However, seeing the specific implementation of the `doji` state and the `midi` ranges confirms that the concerns regarding **Density** and **Frequency Collisions** are still very much relevant.
+
+Here is a review of the code against the potential "flags" we discussed:
+
+### 1. The "Doji" Anchor (A Strong Addition)
+
+Your implementation of `doji: [7]` in the `jazz_shell_voicings` is a great safety feature.
+
+* **The concern:** Without a Doji state, small candles might still trigger complex chords, creating unnecessary "chatter" during flat market periods.
+* **The reality:** By forcing a single "Perfect 5th" (offset 7) during Dojis, you’ve created a harmonic "anchor" that provides stability when price is consolidating. This effectively solves the "density" issue for low-volatility periods.
+
+### 2. Frequency Overlap (The "Mud" Risk)
+
+Looking at the `minMidi` and `maxMidi` values in your `harmony_styles.js`:
+
+* `jazz_shell_voicings`: `48 (C3)` to `72 (C5)`
+* `power_chords_thick`: `43 (G2)` to `67 (G4)`
+
+**The Flag:** Your `bass_styles.js` (from the previous file) uses offsets like `+12` (octave). If your Bass is playing a  and jumps up an octave to  (MIDI 55), it will be sitting right in the middle of your `jazz_shell` range.
+
+* **Why it matters:** When two different instruments play in the same narrow frequency band ( to ), they "mask" each other. The bass loses its punch, and the harmony loses its clarity.
+* **The Fix:** If the first draft feels "muddy," you might want to nudge the `minMidi` of your harmony styles up to `55` or `60` to ensure there is always a "clear lane" for the bass to jump up without hitting the harmony.
+
+### 3. The "Sonic Wall" (Velocity/Density Mapping)
+
+In the requirements, you mentioned that **Body Height** corresponds to candle energy.
+
+* **The Concern:** If Cursor maps `bodyHeight` directly to `velocity` for *all* notes in the harmony array, a large bullish candle in `power_chords_thick` will trigger `[0, 7, 12]` all at once at max volume.
+* **The Fix:** You should ensure that as more notes are added (increased density), the individual volume of each note is slightly lowered (Gain Compensation).
+
+---
+
+### Summary of the "Harmony Styles" Review
+
+| Feature | Implementation | Verdict |
+| --- | --- | --- |w
+| **Doji State** | `doji: [7]` | **Excellent.** Adds much-needed stability. |
+| **Range (Midi)** | `48 - 72` | **Risky.** Potentially clashes with high-walking bass lines. |
+| **Chord Quality** | `bullish` vs `bearish` | **Perfect.** Aligns with your Major/Minor logic. |
+
