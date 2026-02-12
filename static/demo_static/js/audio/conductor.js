@@ -277,6 +277,21 @@
         return nearestStructuralNote(midi, tonalContext, 18);
     }
 
+    function snapHarmonyMidiToTonalContext(candidateMidi, tonalContext, forceStructural) {
+        if (!isHarmonicAwareEnabled() || !tonalContext || !Number.isFinite(candidateMidi)) {
+            return candidateMidi;
+        }
+        let midi = candidateMidi;
+        if (Array.isArray(tonalContext.playableNotes) && tonalContext.playableNotes.length > 0) {
+            midi = nearestScaleNote(midi, tonalContext.playableNotes, 8);
+        }
+        midi = applyAvoidGravity(midi, tonalContext);
+        if (forceStructural) {
+            midi = nearestStructuralNote(midi, tonalContext, 12);
+        }
+        return midi;
+    }
+
     // ========================================================================
     // PATTERN OVERRIDE STATE & GENERATOR
     // ========================================================================
@@ -1149,6 +1164,8 @@
                 if (style) {
                     const minMidi = clampToRange(style.minMidi, 36, 84, 48);
                     const maxMidi = clampToRange(style.maxMidi, minMidi + 7, 96, 72);
+                    const harmonyPools = buildVoicePools('harmony', regime, { min: minMidi, max: maxMidi });
+                    const harmonyTonalContext = harmonyPools.tonalContext;
 
                     const openP = Number(barData.o);
                     const closeP = Number(barData.c);
@@ -1186,7 +1203,8 @@
                     const midPrice = Number.isFinite(openP) && Number.isFinite(closeP) ? ((openP + closeP) / 2) : barData.c;
 
                     for (let i = 0; i < offsets.length; i++) {
-                        const midi = wrapMidiToRange(baseMidi + Number(offsets[i] || 0), minMidi, maxMidi);
+                        let midi = wrapMidiToRange(baseMidi + Number(offsets[i] || 0), minMidi, maxMidi);
+                        midi = snapHarmonyMidiToTonalContext(midi, harmonyTonalContext, i === 0);
                         try {
                             const startAt = now + (i * 0.004);
                             audioState._harmonySampler.triggerAttackRelease(

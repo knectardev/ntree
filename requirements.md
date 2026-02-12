@@ -376,6 +376,55 @@ The audio system was refactored from a single 3,454-line file into 9 focused mod
 - `window.onReplayBarAdvance` — callback registered by `hookIntoReplaySystem()` for Practice mode integration
 
 **Architecture -- Pathfinding Sequencer**
+
+Melody generation flow (conductor-centric; full diagram in `docs/melody-generation-flow.md`):
+
+```mermaid
+flowchart TD
+    subgraph Conductor [processSubStep - The Conductor]
+        direction TB
+        S1[Every sub-step: Drum beat]
+        S2[Bar boundary: Regime + Progression + Targets]
+        S3[Euclidean pulse gate: shouldTriggerRhythmicPulse]
+        S4{Soprano: Pattern Override?}
+        S5[Pathfinder: Cell selection by distance]
+        S6[Scale run: 1 degree per step toward wick]
+        S7[Orbit: Dance around wick Target]
+        S8[Genre ornaments: beat-gated only]
+        S9[Wick gravity: safety net only]
+        S10[Harmonic: avoid-note + strong-beat landing]
+        S1 --> S2
+        S2 --> S3
+        S3 --> S4
+        S4 -->|Override| S11[generatePatternNote]
+        S4 -->|Pathfinder| S5
+        S5 --> S6
+        S5 --> S7
+        S6 --> S8
+        S7 --> S8
+        S8 --> S9
+        S9 --> S10
+    end
+
+    subgraph Inputs [Inputs]
+        I1[Bar data h l]
+        I2[Regime UPTREND/DOWNTREND]
+        I3[Chord progression step]
+        I4[Scale from config]
+    end
+
+    subgraph Pathfinder [Pathfinder Cell Types]
+        P1[scale_run - far from wick]
+        P2[orbit - near wick]
+        P3[arpeggio enclosure sequence chord_skip leap_fill]
+    end
+
+    I1 --> Conductor
+    I2 --> Conductor
+    I3 --> Conductor
+    I4 --> Conductor
+```
+
 - Each replay bar acts as a "musical measure" with **16 sub-steps**; **high wick** -> soprano voice (upper pitch rail), **low wick** -> bass voice (lower pitch rail); **volume** -> gain envelope; **Speed** slider -> BPM.
 - **Unified playback**: All note generation routes through `processSubStep()` (the "Conductor" in `conductor.js`). Both the independent animation loop and the Replay/Practice hook use the same code path, ensuring identical sound in all modes.
 - **Distance-based pathfinding** (core algorithm in `conductor.js` → `processSubStep()`):
@@ -1160,6 +1209,7 @@ The following reflects the latest series of changes to the chart and replay expe
 
 - **Note-label readability pass**: Increased on-chart audio note label font size and left note-axis label font size in `07_render_and_interactions.js`, and widened the reserved audio note-axis width so larger labels remain legible without clipping during playback.
 - **Inner harmony chord-quality alignment fix**: Updated `audio/conductor.js` inner-harmony voicing selection to follow the active progression chord quality (`major/minor/dim`) from `getChordLabel()` instead of per-candle bullish/bearish body direction, preventing minor voicings from being emitted over major-labeled chords in uptrend sections.
+- **Inner harmony harmonic-context integration**: Inner harmony now snaps generated mid-voice notes to the same chord-aware tonal context used by melody/bass when `Harmonic-aware scale` is enabled (playable-pool quantization + avoid-note gravity + structural anchor on the lead harmony tone), reducing dissonant inner-voice clashes against the active chord progression.
 - **chart.html**: Added app nav (Dashboard, Backtest Config), status chip (“Last update”), and **Session History** modal with Cards / Ledger / Matrix views for replay session history (orders, positions); Refresh and Close actions; Escape to close.
 - **07_render_and_interactions.js**: When Audio Visual playback is active, the canvas reserves a **note axis** (52px) on the left of the plot for piano-style note labels; plot width and layout adjust via `noteAxisW` so the chart and sonification stay aligned.
 - **Audio module refactor**: Split monolithic `13_audio_controls.js` (3,454 lines) into 7 focused modules in `static/demo_static/js/audio/`: `config.js`, `state.js`, `theory.js`, `pathfinder.js`, `engine.js`, `conductor.js`, `ui.js`. Modules communicate via `window._audioModule` namespace. Original archived to `_archive/13_audio_controls.js`. See "Audio Visual Settings" section above for full module inventory.
