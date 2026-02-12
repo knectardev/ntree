@@ -145,6 +145,7 @@
             restartOnChord: true         // When true, pattern resets to chord root on chord change
         },
         genre: 'classical',
+        harmonicAwareScale: true, // When true, build chord-aware melodic pools per progression step
         rootKey: 'C',           // Root key for scales and chord progressions (C, C#, D, ... B)
         chordProgression: 'canon',
         bassLineStyle: 'walking_bass_jazz',
@@ -322,6 +323,7 @@
         genreBtn: document.getElementById('audioGenreBtn'),
         genreMenu: document.getElementById('audioGenreMenu'),
         genreLabel: document.getElementById('audioGenreLabel'),
+        harmonicAwareScaleChk: document.getElementById('audioHarmonicAwareScale'),
 
         // Root key
         rootKeyDD: document.getElementById('audioRootKeyDD'),
@@ -381,7 +383,8 @@
         // Playback controls
         startBtn: document.getElementById('audioStartBtn'),
         stopBtn: document.getElementById('audioStopBtn'),
-        statusLabel: document.getElementById('audioStatus')
+        statusLabel: document.getElementById('audioStatus'),
+        copyUrlBtn: document.getElementById('audioCopyUrlBtn')
     };
 
     // Track all audio dropdowns

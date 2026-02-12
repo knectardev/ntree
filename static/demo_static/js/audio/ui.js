@@ -144,68 +144,176 @@
     }
 
     // ========================================================================
-    // SETTINGS PERSISTENCE (localStorage)
+    // SETTINGS PERSISTENCE (localStorage + URL)
     // ========================================================================
     
     const STORAGE_KEY = 'ntree_audio_visual_settings';
-    
+    const AUDIO_URL_PARAM = 'audio';
+    const URL_UPDATE_DEBOUNCE_MS = 300;
+    let _urlUpdateTimer = null;
+
     /**
-     * Save current settings to localStorage
+     * Build settings object from current audioState (for localStorage and URL).
+     */
+    function serializeAudioToParams() {
+        return {
+            upperWick: {
+                enabled: audioState.upperWick.enabled,
+                volume: audioState.upperWick.volume,
+                instrument: audioState.upperWick.instrument,
+                rhythm: audioState.upperWick.rhythm,
+                pattern: audioState.upperWick.pattern,
+                patternOverride: audioState.upperWick.patternOverride,
+                restartOnChord: audioState.upperWick.restartOnChord
+            },
+            lowerWick: {
+                enabled: audioState.lowerWick.enabled,
+                volume: audioState.lowerWick.volume,
+                instrument: audioState.lowerWick.instrument,
+                rhythm: audioState.lowerWick.rhythm,
+                pattern: audioState.lowerWick.pattern,
+                patternOverride: audioState.lowerWick.patternOverride,
+                restartOnChord: audioState.lowerWick.restartOnChord
+            },
+            harmony: {
+                enabled: !!(audioState.harmony && audioState.harmony.enabled),
+                volume: audioState.harmony && audioState.harmony.volume,
+                instrument: audioState.harmony && audioState.harmony.instrument,
+                rhythm: audioState.harmony && audioState.harmony.rhythm,
+                style: audioState.harmony && audioState.harmony.style,
+                bodySensitivity: audioState.harmony && audioState.harmony.bodySensitivity,
+                dojiThreshold: audioState.harmony && audioState.harmony.dojiThreshold,
+                maxVoices: audioState.harmony && audioState.harmony.maxVoices
+            },
+            genre: audioState.genre,
+            harmonicAwareScale: audioState.harmonicAwareScale !== false,
+            rootKey: audioState.rootKey,
+            chordProgression: audioState.chordProgression,
+            bassLineStyle: audioState.bassLineStyle,
+            drumBeat: audioState.drumBeat,
+            drumVolume: audioState.drumVolume,
+            drumNaturalRoom: !!audioState.drumNaturalRoom,
+            drumGlowIntensity: audioState.drumGlowIntensity,
+            drumKit: Object.assign({}, audioState.drumKit || {}),
+            displayNotes: audioState.displayNotes,
+            chordOverlay: audioState.chordOverlay,
+            sensitivity: audioState.sensitivity,
+            beatStochasticity: audioState.beatStochasticity,
+            rhythmDensity: audioState.rhythmDensity,
+            sustainFactor: audioState.sustainFactor,
+            phrasingApplyToBass: !!audioState.phrasingApplyToBass,
+            melodicRange: audioState.melodicRange,
+            glowDuration: audioState.glowDuration,
+            displayMode: audioState.displayMode,
+            panels: audioState.panels,
+            speed: audioState._currentBpm ?? audioState._savedSpeed ?? 60
+        };
+    }
+
+    /**
+     * Parse audio params from URL ?audio= (base64url JSON). Returns object or null on failure.
+     */
+    function getAudioParamsFromUrl() {
+        try {
+            const raw = typeof getQueryParam === 'function' ? getQueryParam(AUDIO_URL_PARAM, '') : '';
+            if (!raw || typeof raw !== 'string') return null;
+            let s = raw.replace(/-/g, '+').replace(/_/g, '/');
+            while (s.length % 4) s += '=';
+            const json = atob(s);
+            const obj = JSON.parse(json);
+            return obj && typeof obj === 'object' ? obj : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /**
+     * Deep-merge overrides into base (overrides win for any key present).
+     */
+    function deepMerge(base, overrides) {
+        const out = Object.assign({}, base);
+        for (const k of Object.keys(overrides)) {
+            if (overrides[k] !== null && typeof overrides[k] === 'object' && !Array.isArray(overrides[k])) {
+                out[k] = deepMerge(out[k] || {}, overrides[k]);
+            } else {
+                out[k] = overrides[k];
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Build current URL with audio params and copy to clipboard. Used by Copy shareable URL button.
+     */
+    function copyShareableUrlToClipboard() {
+        try {
+            const settings = serializeAudioToParams();
+            const json = JSON.stringify(settings);
+            const encoded = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            const u = new URL(window.location.href);
+            u.searchParams.set(AUDIO_URL_PARAM, encoded);
+            const url = u.toString();
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(function() {
+                    if (ui.statusLabel) ui.statusLabel.textContent = 'URL copied to clipboard';
+                    setTimeout(function() {
+                        if (ui.statusLabel && !audioState.playing) ui.statusLabel.textContent = 'Audio stopped';
+                    }, 2000);
+                }).catch(function() { fallbackCopy(url); });
+            } else {
+                fallbackCopy(url);
+            }
+        } catch (e) {
+            console.warn('[Audio] Failed to copy URL:', e);
+        }
+    }
+    function fallbackCopy(url) {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = url;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (ui.statusLabel) ui.statusLabel.textContent = 'URL copied to clipboard';
+            setTimeout(function() {
+                if (ui.statusLabel && !audioState.playing) ui.statusLabel.textContent = 'Audio stopped';
+            }, 2000);
+        } catch (e2) {
+            if (ui.statusLabel) ui.statusLabel.textContent = 'Copy failed: use address bar';
+        }
+    }
+
+    /**
+     * Update browser URL with current audio params. Preserves existing query params. Debounced.
+     */
+    function scheduleUpdateUrlWithAudioParams() {
+        if (_urlUpdateTimer) clearTimeout(_urlUpdateTimer);
+        _urlUpdateTimer = setTimeout(function() {
+            _urlUpdateTimer = null;
+            try {
+                const settings = serializeAudioToParams();
+                const json = JSON.stringify(settings);
+                const encoded = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                const u = new URL(window.location.href);
+                u.searchParams.set(AUDIO_URL_PARAM, encoded);
+                window.history.replaceState(null, '', u.toString());
+            } catch (e) {
+                // Ignore URL update failures
+            }
+        }, URL_UPDATE_DEBOUNCE_MS);
+    }
+
+    /**
+     * Save current settings to localStorage and schedule URL update.
      */
     function saveSettings() {
         try {
-            const settings = {
-                upperWick: {
-                    enabled: audioState.upperWick.enabled,
-                    volume: audioState.upperWick.volume,
-                    instrument: audioState.upperWick.instrument,
-                    rhythm: audioState.upperWick.rhythm,
-                    pattern: audioState.upperWick.pattern,
-                    patternOverride: audioState.upperWick.patternOverride,
-                    restartOnChord: audioState.upperWick.restartOnChord
-                },
-                lowerWick: {
-                    enabled: audioState.lowerWick.enabled,
-                    volume: audioState.lowerWick.volume,
-                    instrument: audioState.lowerWick.instrument,
-                    rhythm: audioState.lowerWick.rhythm,
-                    pattern: audioState.lowerWick.pattern,
-                    patternOverride: audioState.lowerWick.patternOverride,
-                    restartOnChord: audioState.lowerWick.restartOnChord
-                },
-                harmony: {
-                    enabled: !!(audioState.harmony && audioState.harmony.enabled),
-                    volume: audioState.harmony && audioState.harmony.volume,
-                    instrument: audioState.harmony && audioState.harmony.instrument,
-                    rhythm: audioState.harmony && audioState.harmony.rhythm,
-                    style: audioState.harmony && audioState.harmony.style,
-                    bodySensitivity: audioState.harmony && audioState.harmony.bodySensitivity,
-                    dojiThreshold: audioState.harmony && audioState.harmony.dojiThreshold,
-                    maxVoices: audioState.harmony && audioState.harmony.maxVoices
-                },
-                genre: audioState.genre,
-                rootKey: audioState.rootKey,
-                chordProgression: audioState.chordProgression,
-                bassLineStyle: audioState.bassLineStyle,
-                drumBeat: audioState.drumBeat,
-                drumVolume: audioState.drumVolume,
-                drumNaturalRoom: !!audioState.drumNaturalRoom,
-                drumGlowIntensity: audioState.drumGlowIntensity,
-                drumKit: Object.assign({}, audioState.drumKit || {}),
-                displayNotes: audioState.displayNotes,
-                chordOverlay: audioState.chordOverlay,
-                sensitivity: audioState.sensitivity,
-                beatStochasticity: audioState.beatStochasticity,
-                rhythmDensity: audioState.rhythmDensity,
-                sustainFactor: audioState.sustainFactor,
-                phrasingApplyToBass: !!audioState.phrasingApplyToBass,
-                melodicRange: audioState.melodicRange,
-                glowDuration: audioState.glowDuration,
-                displayMode: audioState.displayMode,
-                panels: audioState.panels,
-                speed: audioState._currentBpm || 60
-            };
+            const settings = serializeAudioToParams();
             localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+            scheduleUpdateUrlWithAudioParams();
             console.log('[Audio] Settings saved');
         } catch (e) {
             console.warn('[Audio] Failed to save settings:', e);
@@ -213,15 +321,23 @@
     }
     
     /**
-     * Load settings from localStorage and apply to audioState
+     * Load settings from localStorage and apply to audioState.
+     * URL param ?audio= (base64 JSON) overrides localStorage when present; precedence: URL > localStorage > defaults.
      */
     function loadSettings() {
         try {
+            let settings = null;
             const stored = localStorage.getItem(STORAGE_KEY);
-            if (!stored) return false;
-            
-            const settings = JSON.parse(stored);
-            console.log('[Audio] Loading saved settings');
+            if (stored) {
+                settings = JSON.parse(stored);
+                console.log('[Audio] Loading saved settings');
+            }
+            const urlOverrides = getAudioParamsFromUrl();
+            if (urlOverrides) {
+                settings = deepMerge(settings || {}, urlOverrides);
+                console.log('[Audio] Applying URL param overrides');
+            }
+            if (!settings) return false;
             
             // Apply to audioState
             if (settings.upperWick) {
@@ -253,6 +369,7 @@
             audioState.harmony.dojiThreshold = clampRange(hs.dojiThreshold, 0.05, 0.40, 0.14);
             audioState.harmony.maxVoices = Math.max(1, Math.min(4, Math.round(Number(hs.maxVoices ?? 3))));
             audioState.genre = settings.genre || 'classical';
+            audioState.harmonicAwareScale = settings.harmonicAwareScale ?? true;
             musicState.currentGenre = audioState.genre;  // Sync with musicState
             audioState.rootKey = settings.rootKey || 'C';
             musicState.rootMidi = 60 + (ROOT_KEY_OFFSETS[audioState.rootKey] || 0);  // Sync with musicState
@@ -384,6 +501,7 @@
         
         // Genre
         applyDropdownSelection(ui.genreMenu, ui.genreLabel, audioState.genre);
+        if (ui.harmonicAwareScaleChk) ui.harmonicAwareScaleChk.checked = audioState.harmonicAwareScale !== false;
         
         // Root key
         applyDropdownSelection(ui.rootKeyMenu, ui.rootKeyLabel, audioState.rootKey);
@@ -583,10 +701,11 @@
     // ========================================================================
 
     function init() {
-        // Load saved settings first
+        // Load saved settings first (URL overrides localStorage when present)
         const hasSettings = loadSettings();
         if (hasSettings) {
             applySettingsToUI();
+            scheduleUpdateUrlWithAudioParams();
         }
         // Upper Wick controls
         if (ui.upperWickChk) {
@@ -896,6 +1015,14 @@
                 console.log(`[Audio] Scale changed to: ${genre ? genre.label : val}`);
                 saveSettings();
             });
+        if (ui.harmonicAwareScaleChk) {
+            if (!hasSettings) audioState.harmonicAwareScale = ui.harmonicAwareScaleChk.checked;
+            ui.harmonicAwareScaleChk.addEventListener('change', () => {
+                audioState.harmonicAwareScale = !!ui.harmonicAwareScaleChk.checked;
+                console.log('[Audio] Harmonic-aware scale:', audioState.harmonicAwareScale);
+                saveSettings();
+            });
+        }
         
         // Root Key
         setupDropdown(ui.rootKeyDD, ui.rootKeyBtn, ui.rootKeyMenu, ui.rootKeyLabel,
@@ -1066,6 +1193,11 @@
                     setStartBtnState('idle');
                 }
             });
+        }
+
+        // Copy shareable URL button
+        if (ui.copyUrlBtn) {
+            ui.copyUrlBtn.addEventListener('click', () => copyShareableUrlToClipboard());
         }
 
         // Reset button — full stop, dispose engine, return to idle

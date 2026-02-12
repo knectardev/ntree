@@ -1,0 +1,20 @@
+---
+description: When adding new audio parameters, update URL serialization
+globs: static/demo_static/js/audio/**/*
+---
+
+# Audio URL Parameterization — Maintenance Rule
+
+When adding new persistent audio parameters to the audio codebase (`static/demo_static/js/audio/*`), you MUST:
+
+1. **Add the parameter to `saveSettings()` and `loadSettings()`** in `ui.js` — via `serializeAudioToParams()` (source of truth for save) and the apply block in `loadSettings()` (destination for load).
+
+2. **URL serialization is automatic** — `serializeAudioToParams()` feeds both localStorage and the URL. No separate URL schema exists. When you add a key to `serializeAudioToParams()`, it is included in the `?audio=` base64url param. When you add handling in `loadSettings()` for that key, URL overrides will apply it via `deepMerge()`.
+
+3. **Update `requirements.md`** if the parameter is user-facing or changes the persisted schema (module table, Settings persistence section, or Recent updates).
+
+## Quick Checklist
+
+- [ ] New param added to `serializeAudioToParams()` in `ui.js`
+- [ ] New param applied in `loadSettings()` (with validation/clamping as needed)
+- [ ] `requirements.md` updated if user-facing

@@ -544,6 +544,12 @@
                   </div>
                 </div>
               </div>
+              <label class="chkRow" style="margin-bottom:10px;">
+                <input id="audioHarmonicAwareScale" type="checkbox" checked />
+                <span class="chkLbl">
+                  <span class="chkName">Harmonic-aware scale</span>
+                </span>
+              </label>
               <!-- Root Key Selection -->
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
                 <span class="hint" style="min-width:110px;">Root Key:</span>
@@ -747,6 +753,9 @@
             </button>
           </div>
           <div class="hint" id="audioStatus" style="margin-top:8px;text-align:center;">Audio stopped</div>
+          <button class="btn" type="button" id="audioCopyUrlBtn" style="margin-top:8px;width:100%;" title="Copy URL with current audio settings for sharing">
+            Copy shareable URL
+          </button>
           </details>
 
         </div>

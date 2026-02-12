@@ -23,8 +23,11 @@
     const updateVisiblePriceRange = _am.updateVisiblePriceRange;
     const getDynamicMidiRange = _am.getDynamicMidiRange;
     const getScaleNotes = _am.getScaleNotes;
+    const getTonalContext = _am.getTonalContext;
     const getChordTonesInRange = _am.getChordTonesInRange;
     const nearestScaleNote = _am.nearestScaleNote;
+    const nearestStructuralNote = _am.nearestStructuralNote;
+    const isAvoidNoteForTonalContext = _am.isAvoidNoteForTonalContext;
     const detectMelodicPattern = _am.detectMelodicPattern;
     const ensureVoiceSeparation = _am.ensureVoiceSeparation;
     const priceToMidi = _am.priceToMidi;
@@ -224,6 +227,54 @@
         while (m < lo) m += 12;
         while (m > hi) m -= 12;
         return clampToRange(m, lo, hi, lo);
+    }
+
+    function isHarmonicAwareEnabled() {
+        return audioState.harmonicAwareScale !== false;
+    }
+
+    function buildVoicePools(voice, regime, range) {
+        const fallbackScalePool = getScaleNotes(regime, musicState.rootMidi, range.min, range.max);
+        const chordPool = getChordTonesInRange(range.min, range.max);
+        if (!isHarmonicAwareEnabled() || typeof getTonalContext !== 'function') {
+            return {
+                scalePool: fallbackScalePool,
+                chordPool: chordPool,
+                tonalContext: null
+            };
+        }
+        const tonalContext = getTonalContext({
+            regime: regime,
+            rootMidi: musicState.rootMidi,
+            minMidi: range.min,
+            maxMidi: range.max,
+            voice: voice,
+            chordStep: musicState.progressionStep
+        });
+        const playable = tonalContext && tonalContext.playableNotes && tonalContext.playableNotes.length > 0
+            ? tonalContext.playableNotes
+            : fallbackScalePool;
+        return {
+            scalePool: playable,
+            chordPool: chordPool,
+            tonalContext: tonalContext
+        };
+    }
+
+    function applyAvoidGravity(midi, tonalContext) {
+        if (!isHarmonicAwareEnabled() || !tonalContext) return midi;
+        if (!Number.isFinite(midi)) return midi;
+        if (!isAvoidNoteForTonalContext || !nearestStructuralNote) return midi;
+        if (!isAvoidNoteForTonalContext(midi, tonalContext)) return midi;
+        return nearestStructuralNote(midi, tonalContext, 12);
+    }
+
+    function applyStrongBeatLanding(midi, tonalContext, subStepInBar) {
+        if (!isHarmonicAwareEnabled() || !tonalContext) return midi;
+        if (!nearestStructuralNote) return midi;
+        const isStrongBeat = subStepInBar === 0 || subStepInBar === 8;
+        if (!isStrongBeat) return midi;
+        return nearestStructuralNote(midi, tonalContext, 18);
     }
 
     // ========================================================================
@@ -764,7 +815,7 @@
         
         const now = Tone.now();
         const perfNow = performance.now();
-        const regime = musicState.regime;
+        let regime = musicState.regime;
         const complexity = audioState.sensitivity || 0.5;  // Complexity slider (0=pure, 1=chaotic)
         
         // Drum beat (every sub-step; pattern decides what to play)
@@ -780,6 +831,7 @@
         if (subStepInBar === 0) {
             updateRegimeFromPrice(barData.c);
             advanceProgression();
+            regime = musicState.regime;
 
             // Emit chord event for visual overlay
             emitChordEvent(barIndex);
@@ -806,10 +858,14 @@
         // Build scale and chord pools (shared by both voices)
         const sopranoRange = getDynamicMidiRange('soprano');
         const bassRange = getDynamicMidiRange('bass');
-        const sopranoScalePool = getScaleNotes(regime, musicState.rootMidi, sopranoRange.min, sopranoRange.max);
-        const bassScalePool = getScaleNotes(regime, musicState.rootMidi, bassRange.min, bassRange.max);
-        const sopranoChordPool = getChordTonesInRange(sopranoRange.min, sopranoRange.max);
-        const bassChordPool = getChordTonesInRange(bassRange.min, bassRange.max);
+        const sopranoPools = buildVoicePools('soprano', regime, sopranoRange);
+        const bassPools = buildVoicePools('bass', regime, bassRange);
+        const sopranoScalePool = sopranoPools.scalePool;
+        const bassScalePool = bassPools.scalePool;
+        const sopranoChordPool = sopranoPools.chordPool;
+        const bassChordPool = bassPools.chordPool;
+        const sopranoTonalContext = sopranoPools.tonalContext;
+        const bassTonalContext = bassPools.tonalContext;
         
         // ── SOPRANO PATHFINDER (High Agility: runs, arpeggios, orbits) ──
         const shouldPlaySoprano = shouldTriggerRhythmicPulse(subStepInBar, 'soprano');
@@ -827,9 +883,10 @@
             else {
                 const vs = musicState.soprano;
                 const rawTarget = priceToMidi(barData.h, 'soprano');
-                const targetMidi = rawTarget !== null 
+                let targetMidi = rawTarget !== null 
                     ? nearestScaleNote(rawTarget, sopranoScalePool, 24)
                     : musicState.prevSoprano || 72;
+                targetMidi = applyAvoidGravity(targetMidi, sopranoTonalContext);
                 
                 // Update target (allows mid-cell target drift)
                 vs.runTargetNote = targetMidi;
@@ -919,6 +976,10 @@
                     sopranoMidi = applyWickGravity(sopranoMidi, targetMidi, sopranoScalePool, 'soprano');
                 }
             }
+
+            // Harmonic safety in the conductor: avoid-note gravity + strong-beat landing.
+            sopranoMidi = applyAvoidGravity(sopranoMidi, sopranoTonalContext);
+            sopranoMidi = applyStrongBeatLanding(sopranoMidi, sopranoTonalContext, subStepInBar);
             
             // ── COMMON: clamp, history, trigger, emit ──
             sopranoMidi = Math.max(sopranoRange.min, Math.min(sopranoRange.max, sopranoMidi));
@@ -967,9 +1028,10 @@
             else {
                 const vb = musicState.bass;
                 const rawTarget = priceToMidi(barData.l, 'bass');
-                const targetMidi = rawTarget !== null
+                let targetMidi = rawTarget !== null
                     ? nearestScaleNote(rawTarget, bassScalePool, 24)
                     : musicState.prevBass || 48;
+                targetMidi = applyAvoidGravity(targetMidi, bassTonalContext);
                 
                 vb.runTargetNote = targetMidi;
                 
@@ -1043,6 +1105,8 @@
                     bassMidi = applyWickGravity(bassMidi, targetMidi, bassScalePool, 'bass');
                 }
             }
+
+            bassMidi = applyAvoidGravity(bassMidi, bassTonalContext);
             
             // ── COMMON: clamp, history, trigger, emit ──
             bassMidi = Math.max(bassRange.min, Math.min(bassRange.max, bassMidi));
@@ -1095,10 +1159,14 @@
                     const sens = clampToRange(harmonyCfg.bodySensitivity, 0.2, 2.0, 1.0);
                     const bodyNorm = clampToRange((bodyAbs / rangeAbs) * sens, 0, 1.25, 0);
                     const dojiThreshold = clampToRange(harmonyCfg.dojiThreshold, 0.05, 0.40, 0.14);
-                    const isBullish = Number.isFinite(closeP) && Number.isFinite(openP) && closeP >= openP;
+                    // Inner harmony voicing must track the active progression chord
+                    // quality (major/minor/dim), not individual candle color.
+                    const chordInfo = getChordLabel(musicState.progressionStep);
+                    const chordQuality = chordInfo && chordInfo.quality ? chordInfo.quality : '';
+                    const useMinorVoicing = (chordQuality === 'min' || chordQuality === 'dim');
                     const baseOffsets = bodyNorm < dojiThreshold
                         ? (Array.isArray(style.doji) && style.doji.length ? style.doji : [0, 7])
-                        : (isBullish ? style.bullish : style.bearish);
+                        : (useMinorVoicing ? style.bearish : style.bullish);
 
                     const maxVoices = clampToRange(harmonyCfg.maxVoices, 1, 4, 3);
                     let targetVoices = 1;

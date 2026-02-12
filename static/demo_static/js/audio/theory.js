@@ -61,24 +61,58 @@
     // SCALE & CHORD UTILITIES
     // ========================================================================
 
+    // Genre-specific avoid-note overrides (relative intervals from root).
+    // These preserve culturally important colors when they would otherwise
+    // be filtered by the generic minor-2nd-above-chord-tone rule.
+    const HARMONIC_AVOID_OVERRIDES = {
+        indian_raags: {
+            UPTREND: [6],    // #4 color in Yaman/Lydian flavor
+            DOWNTREND: [1]   // b2 color in Bhairavi/Phrygian flavor
+        }
+    };
+
+    function normalizeScaleRegime(regime) {
+        if (regime === 'MAJOR') return 'UPTREND';
+        if (regime === 'MINOR') return 'DOWNTREND';
+        return regime === 'DOWNTREND' ? 'DOWNTREND' : 'UPTREND';
+    }
+
+    function getScaleIntervals(regime) {
+        const normalized = normalizeScaleRegime(regime);
+        const genre = GENRES[musicState.currentGenre];
+        if (genre && genre.scales) {
+            return genre.scales[normalized] || genre.scales.UPTREND || SCALES.MAJOR;
+        }
+        return SCALES[normalized] || SCALES.MAJOR;
+    }
+
+    function getCurrentChordInfo(chordStep, regimeOverride) {
+        const progressionKey = audioState.chordProgression || 'canon';
+        const progression = CHORD_PROGRESSIONS[progressionKey] || CHORD_PROGRESSIONS.canon;
+        const regime = regimeOverride || musicState.regime;
+        const chordRegime = (regime === 'DOWNTREND' || regime === 'MINOR') ? 'MINOR' : 'MAJOR';
+        const step = Number.isFinite(chordStep) ? chordStep : musicState.progressionStep;
+        const degree = progression[chordRegime][step % 16];
+        const chordMap = chordRegime === 'MAJOR' ? CHORD_MAP_MAJOR : CHORD_MAP_MINOR;
+        const intervals = chordMap[degree] || [0, 4, 7];
+        const chordTonePCs = new Set(intervals.map(i => (musicState.rootMidi + i + 120) % 12));
+        return { progressionKey, chordRegime, degree, intervals, chordTonePCs };
+    }
+
+    function getAvoidOverrideIntervals(regime) {
+        const normalized = normalizeScaleRegime(regime);
+        const genreOverrides = HARMONIC_AVOID_OVERRIDES[musicState.currentGenre];
+        if (!genreOverrides) return new Set();
+        const vals = genreOverrides[normalized] || [];
+        return new Set(vals);
+    }
+
     /**
      * Get all scale notes within a range using current genre's scales
      * Falls back to legacy SCALES if genre not found
      */
     function getScaleNotes(regime, rootMidi, minMidi, maxMidi) {
-        // Try to get intervals from current genre
-        let intervals;
-        const genre = GENRES[musicState.currentGenre];
-        if (genre && genre.scales) {
-            // Map MAJOR/MINOR to UPTREND/DOWNTREND for backwards compatibility
-            if (regime === 'MAJOR') regime = 'UPTREND';
-            if (regime === 'MINOR') regime = 'DOWNTREND';
-            intervals = genre.scales[regime] || genre.scales.UPTREND;
-        } else {
-            // Fallback to legacy SCALES
-            intervals = SCALES[regime] || SCALES.MAJOR;
-        }
-        
+        const intervals = getScaleIntervals(regime);
         const notes = [];
         for (let midi = minMidi; midi <= maxMidi; midi++) {
             if (intervals.includes((midi - rootMidi + 120) % 12)) {
@@ -92,19 +126,93 @@
      * Get current chord tones as mod-12 set
      */
     function getCurrentChordToneMods() {
-        const progressionKey = audioState.chordProgression || 'canon';
-        const progression = CHORD_PROGRESSIONS[progressionKey] || CHORD_PROGRESSIONS.canon;
-        const regime = musicState.regime;
-        
-        // Map UPTREND/DOWNTREND to MAJOR/MINOR for chord progressions
-        const chordRegime = (regime === 'DOWNTREND' || regime === 'MINOR') ? 'MINOR' : 'MAJOR';
-        
-        const degree = progression[chordRegime][musicState.progressionStep % 16];
-        const chordMap = chordRegime === 'MAJOR' ? CHORD_MAP_MAJOR : CHORD_MAP_MINOR;
-        const intervals = chordMap[degree] || [0, 4, 7];
-        
-        // Return chord tones as mod-12 set
-        return new Set(intervals.map(i => (musicState.rootMidi + i) % 12));
+        return getCurrentChordInfo().chordTonePCs;
+    }
+
+    /**
+     * Build a chord-aware tonal context for the current harmony.
+     * Tiering:
+     * - structural: chord tones (root/3rd/5th)
+     * - extension: scale notes that do not clash by minor-2nd-above rule
+     * - avoid: scale notes that clash and are not genre-overridden
+     */
+    function getTonalContext(params) {
+        const opts = params || {};
+        const regime = opts.regime || musicState.regime;
+        const rootMidi = Number.isFinite(opts.rootMidi) ? opts.rootMidi : musicState.rootMidi;
+        const minMidi = Number.isFinite(opts.minMidi) ? opts.minMidi : NOTE_CONFIG.bassMin;
+        const maxMidi = Number.isFinite(opts.maxMidi) ? opts.maxMidi : NOTE_CONFIG.sopranoMax;
+        const chordStep = Number.isFinite(opts.chordStep) ? opts.chordStep : musicState.progressionStep;
+        const scaleRegime = normalizeScaleRegime(regime);
+
+        const chordInfo = getCurrentChordInfo(chordStep, regime);
+        const scaleNotes = getScaleNotes(scaleRegime, rootMidi, minMidi, maxMidi);
+        const overrideIntervals = getAvoidOverrideIntervals(scaleRegime);
+        const rootPc = ((rootMidi % 12) + 12) % 12;
+
+        const structuralNotes = [];
+        const extensionNotes = [];
+        const avoidNotes = [];
+        const playableNotes = [];
+        const weightsByMidi = {};
+
+        for (const midi of scaleNotes) {
+            const pc = ((midi % 12) + 12) % 12;
+            const relInterval = (pc - rootPc + 12) % 12;
+            const isStructural = chordInfo.chordTonePCs.has(pc);
+            const clashesBySemitone = chordInfo.chordTonePCs.has((pc + 11) % 12); // one semitone above chord tone
+            const allowByOverride = overrideIntervals.has(relInterval);
+            const isAvoid = !isStructural && clashesBySemitone && !allowByOverride;
+
+            if (isStructural) {
+                structuralNotes.push(midi);
+                playableNotes.push(midi);
+                weightsByMidi[midi] = 1.0;
+            } else if (isAvoid) {
+                avoidNotes.push(midi);
+                weightsByMidi[midi] = 0.1;
+            } else {
+                extensionNotes.push(midi);
+                playableNotes.push(midi);
+                weightsByMidi[midi] = 0.7;
+            }
+        }
+
+        // Safety fallback: never return an empty playable pool.
+        if (playableNotes.length === 0) {
+            if (structuralNotes.length > 0) {
+                playableNotes.push(...structuralNotes);
+            } else {
+                playableNotes.push(...scaleNotes);
+            }
+        }
+
+        return {
+            regime: scaleRegime,
+            chordRegime: chordInfo.chordRegime,
+            chordStep: chordStep % 16,
+            degree: chordInfo.degree,
+            scaleNotes: scaleNotes,
+            playableNotes: playableNotes,
+            structuralNotes: structuralNotes,
+            extensionNotes: extensionNotes,
+            avoidNotes: avoidNotes,
+            chordTonePCs: chordInfo.chordTonePCs,
+            avoidOverrideIntervals: overrideIntervals,
+            weightsByMidi: weightsByMidi
+        };
+    }
+
+    function isAvoidNoteForTonalContext(midi, tonalContext) {
+        if (!tonalContext || !Array.isArray(tonalContext.avoidNotes)) return false;
+        const pc = ((midi % 12) + 12) % 12;
+        return tonalContext.avoidNotes.some(n => (((n % 12) + 12) % 12) === pc);
+    }
+
+    function nearestStructuralNote(targetMidi, tonalContext, maxDistance) {
+        const structural = tonalContext && tonalContext.structuralNotes;
+        if (!structural || structural.length === 0) return targetMidi;
+        return nearestScaleNote(targetMidi, structural, maxDistance);
     }
 
     /**
@@ -331,15 +439,8 @@
      * Get chord tones within a MIDI range for the current progression step
      */
     function getChordTonesInRange(minMidi, maxMidi) {
-        const regime = musicState.regime;
-        const chordRegime = (regime === 'DOWNTREND' || regime === 'MINOR') ? 'MINOR' : 'MAJOR';
-        
-        const progressionKey = audioState.chordProgression || 'canon';
-        const progression = CHORD_PROGRESSIONS[progressionKey] || CHORD_PROGRESSIONS.canon;
-        const degree = progression[chordRegime][musicState.progressionStep % 16];
-        const chordMap = chordRegime === 'MAJOR' ? CHORD_MAP_MAJOR : CHORD_MAP_MINOR;
-        const intervals = chordMap[degree] || [0, 4, 7];
-        
+        const chordInfo = getCurrentChordInfo();
+        const intervals = chordInfo.intervals;
         const tones = [];
         for (let oct = -2; oct <= 8; oct++) {
             for (const interval of intervals) {
@@ -452,16 +553,11 @@
      * @returns {{root: number, third: number, fifth: number}}
      */
     function getChordComponentPCs() {
-        const progressionKey = audioState.chordProgression || 'canon';
-        const progression = CHORD_PROGRESSIONS[progressionKey] || CHORD_PROGRESSIONS.canon;
-        const chordRegime = (musicState.regime === 'DOWNTREND' || musicState.regime === 'MINOR') ? 'MINOR' : 'MAJOR';
-        const degree = progression[chordRegime][musicState.progressionStep % 16];
-        const chordMap = chordRegime === 'MAJOR' ? CHORD_MAP_MAJOR : CHORD_MAP_MINOR;
-        const intervals = chordMap[degree] || [0, 4, 7];
+        const intervals = getCurrentChordInfo().intervals;
         return {
-            root: (musicState.rootMidi + intervals[0]) % 12,
-            third: (musicState.rootMidi + intervals[1]) % 12,
-            fifth: (musicState.rootMidi + intervals[2]) % 12
+            root: (musicState.rootMidi + intervals[0] + 120) % 12,
+            third: (musicState.rootMidi + intervals[1] + 120) % 12,
+            fifth: (musicState.rootMidi + intervals[2] + 120) % 12
         };
     }
 
@@ -561,9 +657,12 @@
 
     _am.updateRegimeFromPrice = updateRegimeFromPrice;
     _am.getScaleNotes = getScaleNotes;
+    _am.getTonalContext = getTonalContext;
     _am.getCurrentChordToneMods = getCurrentChordToneMods;
     _am.quantizeToChord = quantizeToChord;
     _am.nearestScaleNote = nearestScaleNote;
+    _am.nearestStructuralNote = nearestStructuralNote;
+    _am.isAvoidNoteForTonalContext = isAvoidNoteForTonalContext;
     _am.offsetScaleDegree = offsetScaleDegree;
     _am.nearestScaleNoteAbove = nearestScaleNoteAbove;
     _am.updateVisiblePriceRange = updateVisiblePriceRange;

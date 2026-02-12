@@ -19,7 +19,7 @@
     var yAxisW = 50;
     // Reserve space for LEFT note axis when audio is active (piano keyboard style)
     var audioActive = !!(window.audioState && window.audioState.playing);
-    var noteAxisW = audioActive ? 40 : 0;
+    var noteAxisW = audioActive ? 52 : 0;
     // Reserve space for X-axis tick labels so they don't get clipped at the bottom.
     // Slightly taller to support 2-line day labels (month + day) when zoomed out.
     var xAxisH = 40;
@@ -1842,7 +1842,7 @@
             } else {
               ctx.fillStyle = isMinor ? 'rgba(176, 122, 255, 0.9)' : 'rgba(122, 167, 255, 0.9)';
             }
-            ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
+            ctx.font = 'bold 11px ui-monospace, SFMono-Regular, Menlo, monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
             // Position label below the note shape
@@ -1894,7 +1894,7 @@
         ctx.lineTo(pad + noteAxisW, pricePlot.y + pricePlot.h);
         ctx.stroke();
         
-        ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
 
@@ -2292,7 +2292,7 @@
     var pad = 14;
     var yAxisW = 50;
     var audioActive = !!(window.audioState && window.audioState.playing);
-    var noteAxisW = audioActive ? 40 : 0;
+    var noteAxisW = audioActive ? 52 : 0;
     var xAxisH = 40;
     var plotW = Math.max(1, r.width - (pad*2 + yAxisW + noteAxisW));
     var plotX = pad + noteAxisW;
@@ -2368,7 +2368,7 @@
       // Keep in sync with draw(): reserve space for axes.
       var yAxisW = 50;
       var audioActive = !!(window.audioState && window.audioState.playing);
-      var noteAxisW = audioActive ? 40 : 0;
+      var noteAxisW = audioActive ? 52 : 0;
       var plotW = Math.max(1, r.width - (14*2 + yAxisW + noteAxisW));
       var barsPerPx = barsVisible / plotW;
       state.xOffset = state.xOffset0 - dxPx * barsPerPx;
@@ -2584,7 +2584,7 @@
     var pad = 14;
     var yAxisW = 50;
     var audioActive = !!(window.audioState && window.audioState.playing);
-    var noteAxisW = audioActive ? 40 : 0;
+    var noteAxisW = audioActive ? 52 : 0;
     var plotX = pad + noteAxisW;
     var plotW = Math.max(1, r.width - (pad*2 + yAxisW + noteAxisW));
     var mouseX = (e.clientX - r.left);
