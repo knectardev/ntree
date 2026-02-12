@@ -61,6 +61,21 @@
     // Track current held notes for extension (module scope)
     let currentSopranoNote = null;
     let currentBassNote = null;
+    let _activeSopranoNote = null;
+    const _sopranoSlide = {
+        synth: null,
+        vibrato: null,
+        drive: null,
+        compressor: null,
+        limiter: null,
+        active: false,
+        currentMidi: null,
+        holdUntil: 0,
+        samplerSuppressed: false,
+        failSafeUntil: 0,
+        errorCount: 0,
+        lastUpdateSec: 0
+    };
     const _phrasingState = {
         soprano: { lastMidi: null, lastPrice: null },
         bass: { lastMidi: null, lastPrice: null }
@@ -203,6 +218,227 @@
         // Soprano gets slightly more headroom for expressive slide-style phrasing.
         const cap = (voice === 'soprano') ? 4.0 : 3.0;
         return Math.max(0.04, Math.min(cap, scaled));
+    }
+
+    function isSopranoSlideInstrumentActive() {
+        return String(audioState.upperWick && audioState.upperWick.instrument || '') === 'slide_guitar';
+    }
+
+    function isSopranoSlidePathEnabled() {
+        if (Number.isFinite(_sopranoSlide.failSafeUntil) && Tone.now() < _sopranoSlide.failSafeUntil) {
+            return false;
+        }
+        const slur = clamp01(audioState.slurAmount ?? 0.5);
+        // High slur should always engage continuous-slide behavior so users can
+        // clearly hear the difference even if they don't switch instruments.
+        if (slur >= 0.8) return true;
+        // Slide guitar enables glide behavior earlier.
+        if (isSopranoSlideInstrumentActive()) return slur >= 0.12;
+        return false;
+    }
+
+    function ensureSopranoSlideVoice() {
+        if (_sopranoSlide.synth) return _sopranoSlide.synth;
+        if (typeof Tone === 'undefined') return null;
+        try {
+            const vibrato = new Tone.Vibrato(3.6, 0.11).start();
+            const drive = new Tone.Distortion(0.12);
+            drive.wet.value = 0.0;
+            const compressor = new Tone.Compressor(-28, 3);
+            const limiter = new Tone.Limiter(-6);
+            const synth = new Tone.MonoSynth({
+                oscillator: { type: 'sawtooth' },
+                filter: { Q: 2.2, type: 'lowpass', rolloff: -12 },
+                envelope: {
+                    attack: 0.05,
+                    decay: 0.2,
+                    sustain: 0.8,
+                    release: 0.8
+                },
+                filterEnvelope: {
+                    attack: 0.02,
+                    decay: 0.18,
+                    sustain: 0.3,
+                    release: 0.45,
+                    baseFrequency: 200,
+                    octaves: 4
+                },
+                portamento: 0.02
+            });
+            synth.chain(vibrato, drive, compressor, limiter, Tone.Destination);
+            synth.volume.value = Number.isFinite(audioState.upperWick.volume) ? audioState.upperWick.volume : -18;
+            _sopranoSlide.synth = synth;
+            _sopranoSlide.vibrato = vibrato;
+            _sopranoSlide.drive = drive;
+            _sopranoSlide.compressor = compressor;
+            _sopranoSlide.limiter = limiter;
+            return synth;
+        } catch (_e) {
+            return null;
+        }
+    }
+
+    function updateSopranoSlideVoiceLevel() {
+        if (!_sopranoSlide.synth) return;
+        const requested = Number.isFinite(audioState.upperWick.volume) ? audioState.upperWick.volume : -18;
+        // Keep headroom for the saturated slide chain and user +dB settings.
+        _sopranoSlide.synth.volume.value = Math.min(requested, -2);
+    }
+
+    function suppressSopranoSamplerForSlide() {
+        if (_sopranoSlide.samplerSuppressed) return;
+        if (!audioState._sopranoSampler) return;
+        try { audioState._sopranoSampler.releaseAll?.(); } catch (_e) {}
+        _sopranoSlide.samplerSuppressed = true;
+    }
+
+    function clearSopranoSamplerSuppression() {
+        _sopranoSlide.samplerSuppressed = false;
+    }
+
+    function releaseSopranoSlideVoice(nowSec) {
+        if (!_sopranoSlide.synth || !_sopranoSlide.active) return;
+        try {
+            _sopranoSlide.synth.triggerRelease(Number.isFinite(nowSec) ? nowSec : Tone.now());
+        } catch (_e) {}
+        _sopranoSlide.active = false;
+        _sopranoSlide.currentMidi = null;
+        _sopranoSlide.holdUntil = 0;
+        _sopranoSlide.lastUpdateSec = 0;
+        _activeSopranoNote = null;
+    }
+
+    function armSopranoSlideFailSafe(nowSec, err) {
+        _sopranoSlide.errorCount = (_sopranoSlide.errorCount || 0) + 1;
+        _sopranoSlide.failSafeUntil = (Number.isFinite(nowSec) ? nowSec : Tone.now()) + 30;
+        _activeSopranoNote = null;
+        clearSopranoSamplerSuppression();
+        releaseSopranoSlideVoice(nowSec);
+        if (err) {
+            console.warn('[Audio] Slide lane fail-safe engaged (30s). Falling back to sampler.', err);
+        }
+    }
+
+    function shouldSlideToNextSoprano(nextMidi, price) {
+        if (!_activeSopranoNote) return false;
+        const st = _phrasingState.soprano;
+        if (!st || st.lastMidi === null) return false;
+        const slurAmount = clamp01(audioState.slurAmount ?? 0.5);
+        if (slurAmount >= 0.8) return true;
+        if (slurAmount < 0.62) return false;
+        const semitoneGap = Math.abs(Number(st.lastMidi) - Number(nextMidi));
+        if (!Number.isFinite(semitoneGap) || semitoneGap <= 0 || semitoneGap > 12) return false;
+
+        const visMin = Number(musicState.visiblePriceMin);
+        const visMax = Number(musicState.visiblePriceMax);
+        const span = (Number.isFinite(visMin) && Number.isFinite(visMax) && visMax > visMin) ? (visMax - visMin) : 1;
+        const pNow = Number(price);
+        const pPrev = Number(st.lastPrice);
+        if (!Number.isFinite(pNow) || !Number.isFinite(pPrev)) return false;
+        const priceDeltaNorm = Math.abs(pNow - pPrev) / Math.max(1e-9, span);
+        const sustain = clamp01(audioState.sustainFactor ?? 0.35);
+        const movementAllowance = 0.0015 + (sustain * 0.01) + (Math.pow(slurAmount, 2.2) * 0.055);
+        return priceDeltaNorm <= movementAllowance;
+    }
+
+    function playSopranoSlideVoice(midi, nowSec, durationSec, doSlide) {
+        const synth = ensureSopranoSlideVoice();
+        if (!synth) return false;
+        updateSopranoSlideVoiceLevel();
+
+        const slurAmount = clamp01(audioState.slurAmount ?? 0.5);
+        if (_sopranoSlide.vibrato && _sopranoSlide.vibrato.depth) {
+            // Keep vibrato static/light to avoid automation churn artifacts.
+            _sopranoSlide.vibrato.depth.value = 0.06 + (slurAmount * 0.05);
+        }
+        const midiGap = _sopranoSlide.currentMidi === null
+            ? 0
+            : Math.abs(Number(_sopranoSlide.currentMidi) - Number(midi));
+        const note = Tone.Frequency(midi, 'midi').toNote();
+
+        // Avoid redundant automation churn when target pitch did not change.
+        if (_sopranoSlide.active && doSlide && _sopranoSlide.currentMidi === midi) {
+            const holdMul = 0.45 + (Math.pow(slurAmount, 2.0) * 1.6);
+            _sopranoSlide.holdUntil = nowSec + Math.max(0.05, Math.min(3.2, durationSec * holdMul));
+            if (_activeSopranoNote) _activeSopranoNote.midi = midi;
+            return true;
+        }
+
+        if (!_sopranoSlide.active || !doSlide) {
+            // Hard purge before a new phrase to avoid ghost-voice buildup.
+            try {
+                synth.triggerRelease(nowSec);
+            } catch (_e) {}
+            const scoopCents = -Math.round(25 + (slurAmount * 90));
+            const scoopDur = 0.02 + (slurAmount * 0.07);
+            synth.portamento = 0;
+            try {
+                synth.detune.cancelScheduledValues(nowSec);
+                synth.detune.setValueAtTime(scoopCents, nowSec);
+                synth.detune.linearRampToValueAtTime(0, nowSec + scoopDur);
+            } catch (_e) {}
+            try {
+                // Tiny offset helps release register before the next attack.
+                synth.triggerAttack(note, nowSec + 0.01, 0.78);
+            } catch (_e) {
+                return false;
+            }
+            _sopranoSlide.active = true;
+            _activeSopranoNote = { midi: midi, startTime: nowSec };
+        } else {
+            // Throttle glide control updates slightly to reduce high-slur audio-thread churn.
+            if (Number.isFinite(_sopranoSlide.lastUpdateSec) && (nowSec - _sopranoSlide.lastUpdateSec) < 0.04) {
+                const holdMul = 0.45 + (Math.pow(slurAmount, 2.0) * 1.6);
+                _sopranoSlide.holdUntil = nowSec + Math.max(0.05, Math.min(3.2, durationSec * holdMul));
+                _sopranoSlide.currentMidi = midi;
+                if (_activeSopranoNote) _activeSopranoNote.midi = midi;
+                return true;
+            }
+            const glideSec = Math.max(0.025, Math.min(0.5, Math.pow(midiGap, 0.7) * (0.04 + slurAmount * 0.06)));
+            synth.portamento = glideSec;
+            try {
+                // Use explicit frequency ramps for stability in long-running loops.
+                const targetHz = Tone.Frequency(midi, 'midi').toFrequency();
+                if (!Number.isFinite(targetHz) || targetHz <= 0) return false;
+                if (synth.frequency && synth.frequency.cancelScheduledValues && synth.frequency.linearRampToValueAtTime) {
+                    synth.frequency.cancelScheduledValues(nowSec);
+                    synth.frequency.linearRampToValueAtTime(targetHz, nowSec + glideSec);
+                } else {
+                    // Conservative fallback: one controlled re-attack if frequency param
+                    // is unavailable on this Tone build.
+                    synth.triggerAttack(note, nowSec, 0.72);
+                }
+            } catch (_e) {
+                return false;
+            }
+            if (_activeSopranoNote) {
+                _activeSopranoNote.midi = midi;
+            } else {
+                _activeSopranoNote = { midi: midi, startTime: nowSec };
+            }
+        }
+
+        _sopranoSlide.currentMidi = midi;
+        _sopranoSlide.lastUpdateSec = nowSec;
+        const holdMul = 0.45 + (Math.pow(slurAmount, 2.0) * 1.6);
+        _sopranoSlide.holdUntil = nowSec + Math.max(0.05, Math.min(3.2, durationSec * holdMul));
+        return true;
+    }
+
+    function tickSopranoSlideVoice(nowSec) {
+        if (!_sopranoSlide.active) return;
+        // Guard against very long uninterrupted mono-voice lifetimes which can
+        // degrade in some browser/audio-driver combinations.
+        if (_activeSopranoNote && Number.isFinite(_activeSopranoNote.startTime)) {
+            const activeFor = nowSec - _activeSopranoNote.startTime;
+            if (activeFor > 6.0) {
+                releaseSopranoSlideVoice(nowSec);
+                return;
+            }
+        }
+        if (Number.isFinite(_sopranoSlide.holdUntil) && nowSec >= _sopranoSlide.holdUntil) {
+            releaseSopranoSlideVoice(nowSec);
+        }
     }
 
     function extendLastNoteEvent(voice, durationMs, nowMs) {
@@ -607,10 +843,12 @@
         // Reset held note tracking
         currentSopranoNote = null;
         currentBassNote = null;
+        _activeSopranoNote = null;
         _phrasingState.soprano.lastMidi = null;
         _phrasingState.soprano.lastPrice = null;
         _phrasingState.bass.lastMidi = null;
         _phrasingState.bass.lastPrice = null;
+        releaseSopranoSlideVoice(Tone.now());
         
         // Reset reference prices for fresh MIDI mapping
         audioState._referencePrice = null;
@@ -713,6 +951,8 @@
         _phrasingState.soprano.lastPrice = null;
         _phrasingState.bass.lastMidi = null;
         _phrasingState.bass.lastPrice = null;
+        _activeSopranoNote = null;
+        releaseSopranoSlideVoice(Tone.now());
         if (typeof window.requestDraw === 'function') {
             window.requestDraw('audio_stop');
         }
@@ -731,6 +971,8 @@
         // Silence any currently ringing notes
         if (audioState._sopranoSampler) audioState._sopranoSampler.releaseAll();
         if (audioState._bassSampler) audioState._bassSampler.releaseAll();
+        _activeSopranoNote = null;
+        releaseSopranoSlideVoice(Tone.now());
         // Pause Tone.Transport so scheduled events don't fire
         if (Tone.Transport.state === 'started') {
             Tone.Transport.pause();
@@ -775,6 +1017,15 @@
             console.warn('[Audio] Animation running but not initialized');
             stopAudioAnimation();
             return;
+        }
+        // Auto-resume audio context if browser suspended it during long playback.
+        if (Tone && Tone.context && Tone.context.state !== 'running') {
+            const nowMs = performance.now();
+            const lastTry = Number(audioState._lastContextResumeTryMs || 0);
+            if ((nowMs - lastTry) > 2000) {
+                audioState._lastContextResumeTryMs = nowMs;
+                Tone.context.resume().catch(() => {});
+            }
         }
 
         // Calculate time delta since last frame
@@ -887,6 +1138,7 @@
         
         const now = Tone.now();
         const perfNow = performance.now();
+        tickSopranoSlideVoice(now);
         let regime = musicState.regime;
         const complexity = audioState.sensitivity || 0.5;  // Complexity slider (0=pure, 1=chaotic)
         
@@ -904,6 +1156,12 @@
             updateRegimeFromPrice(barData.c);
             advanceProgression();
             regime = musicState.regime;
+            // Periodic cleanup guard against stuck sampler voices.
+            if ((barIndex % 4) === 0) {
+                try { audioState._sopranoSampler && audioState._sopranoSampler.releaseAll?.(); } catch (_e) {}
+                try { audioState._bassSampler && audioState._bassSampler.releaseAll?.(); } catch (_e) {}
+                try { audioState._harmonySampler && audioState._harmonySampler.releaseAll?.(); } catch (_e) {}
+            }
 
             // Emit chord event for visual overlay
             emitChordEvent(barIndex);
@@ -942,6 +1200,12 @@
         // ── SOPRANO PATHFINDER (High Agility: runs, arpeggios, orbits) ──
         const sopranoPulse = shouldTriggerSopranoPulse(subStepInBar);
         const shouldPlaySoprano = sopranoPulse.shouldPlay;
+        const slidePathEnabled = isSopranoSlidePathEnabled();
+        if (audioState.upperWick.enabled && !shouldPlaySoprano && slidePathEnabled && _sopranoSlide.active) {
+            // Strict monophonic policy: no orphan tails when soprano is gated off.
+            releaseSopranoSlideVoice(now);
+            clearSopranoSamplerSuppression();
+        }
         
         let sopranoMidi = musicState.prevSoprano || 72;
         
@@ -1063,18 +1327,49 @@
             const sopranoDurationSec = applySlurDurationScale(baseSopranoDurationSec, 'soprano');
             const sopranoDurationMs = sopranoDurationSec * 1000;
             const tieSoprano = shouldTieNote('soprano', sopranoMidi, barData.h);
+            const hadActiveSoprano = !!_activeSopranoNote;
+            const slideTransition = slidePathEnabled && shouldSlideToNextSoprano(sopranoMidi, barData.h);
+            let slidePlayed = false;
             if (audioState._sopranoSampler) {
                 const noteFreq = Tone.Frequency(sopranoMidi, 'midi').toNote();
-                if (!tieSoprano) {
+                if (!tieSoprano && !slidePathEnabled) {
                     try {
                         audioState._sopranoSampler.triggerAttackRelease(noteFreq, sopranoDurationSec, now, 0.7);
                     } catch (e) {}
                 }
             }
-            if (tieSoprano) {
+            if (slidePathEnabled) {
+                // Stop sampler tails once when entering slide mode; avoid per-step
+                // release spam that can cause audible zipper/static artifacts.
+                suppressSopranoSamplerForSlide();
+                try {
+                    slidePlayed = playSopranoSlideVoice(sopranoMidi, now, sopranoDurationSec, slideTransition);
+                } catch (slideErr) {
+                    slidePlayed = false;
+                    armSopranoSlideFailSafe(now, slideErr);
+                }
+            } else {
+                clearSopranoSamplerSuppression();
+                _activeSopranoNote = null;
+                releaseSopranoSlideVoice(now);
+            }
+            if (tieSoprano || (slidePathEnabled && hadActiveSoprano && slidePlayed)) {
+                if (tieSoprano && !slidePathEnabled && audioState._sopranoSampler) {
+                    try {
+                        // Keep tied notes audible even when reattack is reduced.
+                        const noteFreq = Tone.Frequency(sopranoMidi, 'midi').toNote();
+                        audioState._sopranoSampler.triggerAttackRelease(noteFreq, Math.max(0.08, sopranoDurationSec * 0.9), now, 0.42);
+                    } catch (_e) {}
+                }
                 extendLastNoteEvent('soprano', sopranoDurationMs, perfNow);
             } else {
                 emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow, sopranoRhythmForNote);
+            }
+            if (slidePathEnabled && !slidePlayed && !tieSoprano && audioState._sopranoSampler) {
+                const noteFreq = Tone.Frequency(sopranoMidi, 'midi').toNote();
+                try {
+                    audioState._sopranoSampler.triggerAttackRelease(noteFreq, sopranoDurationSec, now, 0.7);
+                } catch (_e) {}
             }
             _phrasingState.soprano.lastMidi = sopranoMidi;
             _phrasingState.soprano.lastPrice = Number(barData.h);
@@ -1204,6 +1499,12 @@
                 }
             }
             if (tieBass) {
+                if (audioState._bassSampler) {
+                    try {
+                        const noteFreq = Tone.Frequency(bassMidi, 'midi').toNote();
+                        audioState._bassSampler.triggerAttackRelease(noteFreq, Math.max(0.1, bassDurationSec * 0.9), now, 0.45);
+                    } catch (_e) {}
+                }
                 extendLastNoteEvent('bass', bassDurationMs, perfNow);
             } else {
                 emitSubStepNote('bass', bassMidi, barData.l, preciseBarIndex, bassDurationMs, perfNow);

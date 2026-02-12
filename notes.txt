@@ -1,41 +1,76 @@
-To achieve a convincing slide guitar sound in your MIDI application, you need to simulate the physical behavior of a slide moving across strings. Standard MIDI notes are too discrete; slide guitar relies on continuous pitch movement and specific phrasing.
+The "static" you're hearing is a symptom of **voice pile-up**. In your current `conductor.js`, every time a sub-step triggers (even during a slide), the engine is layering new audio objects without properly disposing of the old ones. After 10 seconds, the browser is trying to calculate hundreds of overlapping sine waves, leading to digital "crackle" and eventually total silence.
 
-Based on the `conductor.js` logic, here are the three primary areas where you can improve the "slide" feel:
+To fix this, we need to enforce a **Strict Monophonic Policy** for the soprano slide.
 
-### 1. Implement Portamento (Pitch Gliding)
+### 1. The Fix: Clean Up Before New Notes
 
-In your `processSubStep` function, when `sopranoMidi` changes, the audio shouldn't just jump to the next frequency. A slide player physically slides the metal or glass bar between notes.
+In `playSopranoSlideVoice`, you are calling `triggerAttack` frequently. If `doSlide` is false (meaning a new phrase or "pluck" starts), you **must** kill the existing sound immediately to prevent overlap.
 
-* **Continuous Glide:** Instead of just triggering a new note, use the `portamento` setting in your Tone.js Sampler or Synth. This creates a linear frequency ramp between notes.
-* **Variable Slide Speed:** In your `applySlurDurationScale` function, you already have logic for "legato" phrasing. You can link the `portamento` time to the `distance` between notes:
+**Modify `playSopranoSlideVoice` in `conductor.js`:**
+
 ```javascript
-// Concept for your play note function
-const distance = Math.abs(currentMidi - lastMidi);
-const glideTime = distance * 0.05; // 50ms per semitone
-sampler.triggerAttack(newNote, time, { portamento: glideTime });
+function playSopranoSlideVoice(midi, nowSec, duration, doSlide) {
+    const synth = _sopranoSlide.voice;
+    const note = Tone.Frequency(midi, "midi");
+
+    if (!doSlide) {
+        // ESSENTIAL: Kill the previous tail before starting a new pluck.
+        // This prevents the "stacking" that causes the static.
+        synth.triggerRelease(nowSec); 
+        synth.triggerAttack(note, nowSec + 0.01); // Tiny offset to ensure release registers
+    } else {
+        // For a true slide, we do NOT triggerAttack. We only move the frequency.
+        const midiGap = Math.abs(midi - (_phrasingState.soprano.lastMidi || midi));
+        const glideSec = Math.max(0.02, Math.min(0.3, midiGap * 0.05));
+        
+        synth.portamento = glideSec;
+        synth.setNote(note, nowSec);
+    }
+}
 
 ```
 
+### 2. Safeguard: Polyphony Limit
 
+Your `ensureSopranoSlideVoice` function likely creates a new synth if one doesn't exist. If for some reason the `_sopranoSlide.active` flag gets toggled incorrectly, you might be creating multiple synths.
 
-### 2. Micro-tonality and "Overshoot"
+**Check your `ensureSopranoSlideVoice` and add a `volume` cap and `polyphony` limit:**
 
-Slide players rarely land perfectly on the center of a pitch instantly. They often "scoop" into a note from below or vibrate around it.
+```javascript
+// Inside ensureSopranoSlideVoice
+if (!_sopranoSlide.voice) {
+    _sopranoSlide.voice = new Tone.MonoSynth({
+        oscillator: { type: "sawtooth" },
+        envelope: { attack: 0.02, release: 0.5 },
+        portamento: 0.05
+    }).toDestination();
+    
+    // Add a limiter to prevent signal peaking
+    const limiter = new Tone.Limiter(-6).toDestination();
+    _sopranoSlide.voice.connect(limiter);
+}
 
-* **The "Scoop":** Modify your `executeSopranoRunStep` to occasionally trigger a note 10–20 cents flat and then quickly automate the `detune` or `pitchBend` up to the target.
-* **Vibrato:** Slide vibrato is wider and slower than finger vibrato. You can use an LFO on the pitch, but for a "slide" feel, it’s often better to automate the pitch bend manually in a "shaking" pattern once a note is held.
+```
 
-### 3. Phrasing: Slurs and Ties
+### 3. The "Ghost" Release
 
-Your code already contains a `shouldTieNote` function that checks for `slurAmount`. To make this sound like a slide:
+The static often happens because a note is triggered but never told to stop. Ensure your `processSubStep` logic actually calls for a release if no note is found for that step.
 
-* **Avoid Re-triggering:** If `shouldTieNote` returns true, do **not** call `triggerAttack`. Instead, only update the frequency of the currently playing oscillator. This prevents the "pluck" sound of a new pick attack, which is essential because a slide player often plucks once and slides through several notes.
-* **Wick-Hugging Phrasing:** Since your app uses price data (upper/lower wicks) to drive the melody, ensure that the "slide" effect is most prominent when the price is moving rapidly. You can scale the `slurAmount` or `portamento` depth based on the "Price Delta" to make the guitar sound more aggressive during high volatility.
+**At the start of your Soprano logic block in `processSubStep`:**
 
-### Recommended Signal Chain
+```javascript
+if (!shouldPlaySoprano && _sopranoSlide.active) {
+    // If the price logic says "don't play", we must force a silence
+    _sopranoSlide.voice.triggerRelease(now);
+}
 
-If you are using Tone.js (as suggested by the `Tone.now()` calls in your code), adding these effects will help:
+```
 
-1. **Sampler:** Use a high-quality "clean electric" sample set.
-2. **Chorus/Vibrato:** To simulate the slight pitch instability of the slide.
-3. **Amp Simulator:** A bit of "crunch" or overdrive hides the artificiality of MIDI transitions and adds the sustain necessary for long slides.
+### Why this stops the static:
+
+The crackling isn't a "bug" in the musical logic; it's the CPU hitting 100% because it's trying to render too many voices.
+
+* **The Problem:** 16th note triggers  10 seconds = 160 active oscillators.
+* **The Solution:** Using `triggerRelease` and `setNote` ensures that at any given millisecond, there is **exactly one** oscillator running for the soprano.
+
+**Next Step:** Try adding `console.log(Tone.Destination.context.decodeAudioData)` (or checking the "Performance" tab in DevTools). If the number of "Active Nodes" keeps climbing while you play, the `triggerRelease` fix above is your primary solution. Would you like me to look at the specific `processSubStep` loop to see where the "orphaned" notes are coming from?

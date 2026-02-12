@@ -11,6 +11,9 @@
     'use strict';
     const _am = window._audioModule = window._audioModule || {};
     const audioState = _am.audioState || window.audioState || {};
+    // Local sample probing can generate many 404s when folders are empty.
+    // Default to fallback-only unless explicitly enabled for local kit testing.
+    const ENABLE_LOCAL_SAMPLE_PROBE = !!(audioState && audioState.enableLocalDrumProbe);
 
     const DRUM_BEATS = {
         simple: {
@@ -330,6 +333,10 @@
     }
 
     async function createPieceSampler(piece) {
+        if (!ENABLE_LOCAL_SAMPLE_PROBE) {
+            const sampler = createFallbackSampler(FALLBACK[piece]);
+            return { sampler: sampler, keys: FALLBACK_NOTES.slice(), source: 'fallback' };
+        }
         const localCandidates = Array.isArray(LOCAL_FILES[piece]) ? LOCAL_FILES[piece] : [];
         const available = [];
         for (let i = 0; i < localCandidates.length; i++) {
