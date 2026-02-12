@@ -131,6 +131,7 @@
                     <div class="ddItem" role="option" data-value="strings">Strings</div>
                     <div class="ddItem" role="option" data-value="acoustic_guitar_nylon">Nylon Guitar</div>
                     <div class="ddItem" role="option" data-value="acoustic_guitar_steel">Steel Guitar</div>
+                    <div class="ddItem" role="option" data-value="slide_guitar">Slide Guitar</div>
                     <div class="ddItem" role="option" data-value="sitar">Sitar</div>
                     <div class="ddItem" role="option" data-value="banjo">Banjo</div>
                     <div class="ddItem" role="option" data-value="flute">Flute</div>
@@ -692,6 +693,12 @@
                 <span class="hint" style="min-width:130px;">Flow / Sustain:</span>
                 <input id="audioSustainFactor" type="range" min="0" max="1" step="0.05" value="0.35" style="flex:1;accent-color:#ff69b4;" />
                 <span class="hint mono" id="audioSustainFactorLabel" style="min-width:50px;text-align:right;">35%</span>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                <span class="hint" style="min-width:130px;">Slur Amount:</span>
+                <input id="audioSlurAmount" type="range" min="0" max="1" step="0.05" value="0.5" style="flex:1;accent-color:#ff69b4;" />
+                <span class="hint mono" id="audioSlurAmountLabel" style="min-width:50px;text-align:right;">50%</span>
               </div>
 
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">

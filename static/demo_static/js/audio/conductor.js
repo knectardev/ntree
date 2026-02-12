@@ -171,16 +171,38 @@
         if (!st) return false;
         const sustain = clamp01(audioState.sustainFactor ?? 0.35);
         if (sustain <= 0) return false;
-        if (st.lastMidi === null || st.lastMidi !== midi) return false;
+        if (st.lastMidi === null) return false;
         const visMin = Number(musicState.visiblePriceMin);
         const visMax = Number(musicState.visiblePriceMax);
         const span = (Number.isFinite(visMin) && Number.isFinite(visMax) && visMax > visMin) ? (visMax - visMin) : 1;
         const pNow = Number(price);
         const pPrev = Number(st.lastPrice);
         if (!Number.isFinite(pNow) || !Number.isFinite(pPrev)) return false;
+
+        const slurAmount = clamp01(audioState.slurAmount ?? 0.5);
+        const semitoneGap = Math.abs(Number(st.lastMidi) - Number(midi));
+        // Keep tie as same-pitch only; legato between different pitches is handled
+        // via long overlap durations to avoid hidden pitch-skip artifacts.
+        if (semitoneGap !== 0) return false;
+
         const delta = Math.abs(pNow - pPrev);
-        const threshold = span * (0.001 + sustain * 0.02);
+        // Non-linear scaling gives stronger legato response near slider max.
+        // 0.0 -> ~0.20x, 0.5 -> ~1.20x, 1.0 -> ~6.20x threshold.
+        const slurMul = 0.2 + (Math.pow(slurAmount, 2.6) * 6.0);
+        const threshold = span * (0.001 + sustain * 0.02) * slurMul;
         return delta <= threshold;
+    }
+
+    function applySlurDurationScale(durationSec, voice) {
+        if (!Number.isFinite(durationSec)) return 0.12;
+        const slur = clamp01(audioState.slurAmount ?? 0.5);
+        // Strongly nonlinear: low values stay short, high values become very legato.
+        // 0.0 -> 0.35x, 0.5 -> ~0.78x, 1.0 -> 3.55x.
+        const mul = 0.35 + (Math.pow(slur, 2.4) * 3.2);
+        const scaled = durationSec * mul;
+        // Soprano gets slightly more headroom for expressive slide-style phrasing.
+        const cap = (voice === 'soprano') ? 4.0 : 3.0;
+        return Math.max(0.04, Math.min(cap, scaled));
     }
 
     function extendLastNoteEvent(voice, durationMs, nowMs) {
@@ -1037,7 +1059,8 @@
             updateSopranoHistory(sopranoMidi);
             
             const sopranoRhythmForNote = pickSopranoRhythmValue(sopranoPulse.mode);
-            const sopranoDurationSec = computeDynamicDurationSec(barIndex, 'soprano') * rhythmDurationScale(sopranoRhythmForNote);
+            const baseSopranoDurationSec = computeDynamicDurationSec(barIndex, 'soprano') * rhythmDurationScale(sopranoRhythmForNote);
+            const sopranoDurationSec = applySlurDurationScale(baseSopranoDurationSec, 'soprano');
             const sopranoDurationMs = sopranoDurationSec * 1000;
             const tieSoprano = shouldTieNote('soprano', sopranoMidi, barData.h);
             if (audioState._sopranoSampler) {
@@ -1163,9 +1186,12 @@
             bassMidi = Math.max(bassRange.min, Math.min(bassRange.max, bassMidi));
             updateBassHistory(bassMidi);
             
-            const bassDurationSec = bassPhrasingEnabled
+            const baseBassDurationSec = bassPhrasingEnabled
                 ? computeDynamicDurationSec(barIndex, 'bass')
                 : (bassInterval * SUB_STEP_SECONDS);
+            const bassDurationSec = bassPhrasingEnabled
+                ? applySlurDurationScale(baseBassDurationSec, 'bass')
+                : baseBassDurationSec;
             const bassDurationMs = bassDurationSec * 1000;
             const tieBass = bassPhrasingEnabled ? shouldTieNote('bass', bassMidi, barData.l) : false;
             if (audioState._bassSampler) {

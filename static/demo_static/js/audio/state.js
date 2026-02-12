@@ -156,6 +156,7 @@
         beatStochasticity: 0,   // 0-1: humanization for drums (dropouts, ghost notes, velocity, micro-timing)
         rhythmDensity: 8,       // 1-16: Euclidean pulses per bar for rhythmic phrasing
         sustainFactor: 0.35,    // 0-1: tie/legato aggressiveness when pitch is stable
+        slurAmount: 0.5,        // 0-1: tolerance level for tying nearby notes into slurs
         phrasingApplyToBass: false, // When true, Euclidean/tie/dynamic-duration phrasing is also applied to bass
         melodicRange: 1.0,     // Vertical Zoom: expands/compresses price-to-MIDI mapping
         glowDuration: 3,
@@ -356,6 +357,8 @@
         rhythmDensityLabel: document.getElementById('audioRhythmDensityLabel'),
         sustainFactor: document.getElementById('audioSustainFactor'),
         sustainFactorLabel: document.getElementById('audioSustainFactorLabel'),
+        slurAmount: document.getElementById('audioSlurAmount'),
+        slurAmountLabel: document.getElementById('audioSlurAmountLabel'),
         phrasingApplyBassChk: document.getElementById('audioPhrasingApplyBass'),
         melodicRange: document.getElementById('audioMelodicRange'),
         melodicRangeLabel: document.getElementById('audioMelodicRangeLabel'),

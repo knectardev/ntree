@@ -69,6 +69,10 @@
             label: "Steel Guitar",
             baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_guitar_steel-mp3/"
         },
+        slide_guitar: {
+            label: "Slide Guitar",
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_guitar_steel-mp3/"
+        },
         sitar: {
             label: "Sitar",
             baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/sitar-mp3/"
