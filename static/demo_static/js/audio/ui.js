@@ -34,6 +34,7 @@
     const setDrumKitParams = _am.setDrumKitParams;
     const previewDrumPiece = _am.previewDrumPiece;
     const previewFullKit = _am.previewFullKit;
+    const panicFlushVoices = _am.panicFlushVoices;
     const VOLUME_MIN_DB = -36;
     const VOLUME_MAX_DB = 6;
 
@@ -151,6 +152,20 @@
     const AUDIO_URL_PARAM = 'audio';
     const URL_UPDATE_DEBOUNCE_MS = 300;
     let _urlUpdateTimer = null;
+    let _dynamicFlushTimer = null;
+
+    function scheduleDynamicAudioFlush() {
+        if (!audioState.playing || !audioState._initialized) return;
+        if (typeof panicFlushVoices !== 'function') return;
+        if (_dynamicFlushTimer) clearTimeout(_dynamicFlushTimer);
+        _dynamicFlushTimer = setTimeout(function() {
+            _dynamicFlushTimer = null;
+            try {
+                const t = (typeof Tone !== 'undefined' && Tone.now) ? Tone.now() : 0;
+                panicFlushVoices(t, { flushSamplers: true });
+            } catch (_e) {}
+        }, 90);
+    }
 
     /**
      * Build settings object from current audioState (for localStorage and URL).
@@ -1114,6 +1129,9 @@
         setupSlider(ui.rhythmDensity, ui.rhythmDensityLabel, '', 'rhythmDensity', v => Math.round(v));
         setupSlider(ui.sustainFactor, ui.sustainFactorLabel, '%', 'sustainFactor', v => Math.round(v * 100));
         setupSlider(ui.slurAmount, ui.slurAmountLabel, '%', 'slurAmount', v => Math.round(v * 100));
+        [ui.sensitivity, ui.beatStochasticity, ui.rhythmDensity, ui.sustainFactor, ui.slurAmount, ui.melodicRange]
+            .filter(Boolean)
+            .forEach((el) => el.addEventListener('input', scheduleDynamicAudioFlush));
         if (ui.phrasingApplyBassChk) {
             ui.phrasingApplyBassChk.addEventListener('change', () => {
                 audioState.phrasingApplyToBass = !!ui.phrasingApplyBassChk.checked;

@@ -441,6 +441,22 @@
         }
     }
 
+    function panicFlushVoices(nowSec, opts) {
+        const t = Number.isFinite(nowSec) ? nowSec : Tone.now();
+        const cfg = opts && typeof opts === 'object' ? opts : {};
+        const flushSamplers = cfg.flushSamplers !== false;
+        try {
+            _activeSopranoNote = null;
+            clearSopranoSamplerSuppression();
+            releaseSopranoSlideVoice(t);
+        } catch (_e) {}
+        if (flushSamplers) {
+            try { audioState._sopranoSampler && audioState._sopranoSampler.releaseAll?.(); } catch (_e) {}
+            try { audioState._bassSampler && audioState._bassSampler.releaseAll?.(); } catch (_e) {}
+            try { audioState._harmonySampler && audioState._harmonySampler.releaseAll?.(); } catch (_e) {}
+        }
+    }
+
     function extendLastNoteEvent(voice, durationMs, nowMs) {
         if (!window._audioNoteEvents || !window._audioNoteEvents.length) return;
         for (let i = window._audioNoteEvents.length - 1; i >= 0; i--) {
@@ -1156,12 +1172,6 @@
             updateRegimeFromPrice(barData.c);
             advanceProgression();
             regime = musicState.regime;
-            // Periodic cleanup guard against stuck sampler voices.
-            if ((barIndex % 4) === 0) {
-                try { audioState._sopranoSampler && audioState._sopranoSampler.releaseAll?.(); } catch (_e) {}
-                try { audioState._bassSampler && audioState._bassSampler.releaseAll?.(); } catch (_e) {}
-                try { audioState._harmonySampler && audioState._harmonySampler.releaseAll?.(); } catch (_e) {}
-            }
 
             // Emit chord event for visual overlay
             emitChordEvent(barIndex);
@@ -1354,13 +1364,6 @@
                 releaseSopranoSlideVoice(now);
             }
             if (tieSoprano || (slidePathEnabled && hadActiveSoprano && slidePlayed)) {
-                if (tieSoprano && !slidePathEnabled && audioState._sopranoSampler) {
-                    try {
-                        // Keep tied notes audible even when reattack is reduced.
-                        const noteFreq = Tone.Frequency(sopranoMidi, 'midi').toNote();
-                        audioState._sopranoSampler.triggerAttackRelease(noteFreq, Math.max(0.08, sopranoDurationSec * 0.9), now, 0.42);
-                    } catch (_e) {}
-                }
                 extendLastNoteEvent('soprano', sopranoDurationMs, perfNow);
             } else {
                 emitSubStepNote('soprano', sopranoMidi, barData.h, preciseBarIndex, sopranoDurationMs, perfNow, sopranoRhythmForNote);
@@ -1499,12 +1502,6 @@
                 }
             }
             if (tieBass) {
-                if (audioState._bassSampler) {
-                    try {
-                        const noteFreq = Tone.Frequency(bassMidi, 'midi').toNote();
-                        audioState._bassSampler.triggerAttackRelease(noteFreq, Math.max(0.1, bassDurationSec * 0.9), now, 0.45);
-                    } catch (_e) {}
-                }
                 extendLastNoteEvent('bass', bassDurationMs, perfNow);
             } else {
                 emitSubStepNote('bass', bassMidi, barData.l, preciseBarIndex, bassDurationMs, perfNow);
@@ -1888,4 +1885,5 @@
     _am.emitNoteEvent = emitNoteEvent;
     _am.onBarAdvance = onBarAdvance;
     _am.hookIntoReplaySystem = hookIntoReplaySystem;
+    _am.panicFlushVoices = panicFlushVoices;
 })();

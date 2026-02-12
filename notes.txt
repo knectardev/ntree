@@ -1,76 +1,88 @@
-The "static" you're hearing is a symptom of **voice pile-up**. In your current `conductor.js`, every time a sub-step triggers (even during a slide), the engine is layering new audio objects without properly disposing of the old ones. After 10 seconds, the browser is trying to calculate hundreds of overlapping sine waves, leading to digital "crackle" and eventually total silence.
+Establishing your intent, it appears that despite previous adjustments, the "static" audio issue persists, particularly when you modify parameters like "slur" dynamically. This "static" or crackling is a symptom of **digital clipping and CPU overload** caused by too many overlapping audio nodes (voices) being triggered without being properly released.
 
-To fix this, we need to enforce a **Strict Monophonic Policy** for the soprano slide.
+The following analysis and fixes for `conductor.js` specifically target the instability caused by dynamic setting changes:
 
-### 1. The Fix: Clean Up Before New Notes
+### 1. Root Cause: The "Node Explosion"
 
-In `playSopranoSlideVoice`, you are calling `triggerAttack` frequently. If `doSlide` is false (meaning a new phrase or "pluck" starts), you **must** kill the existing sound immediately to prevent overlap.
+When you move the "slur" or "rhythm density" sliders, the engine's decision-making logic (`shouldTriggerSopranoPulse`) can rapidly oscillate. If the code doesn't explicitly kill the "previous" voice before starting a new one, you can end up with hundreds of "ghost" oscillators running in the background.
 
-**Modify `playSopranoSlideVoice` in `conductor.js`:**
+### 2. The "Hard Release" on Dynamic Change
+
+You need to ensure that the moment a slide isn't "perfectly" connected, the engine cleans the slate. Add this "Panic Flush" to the top of your `processSubStep` to prevent buildup when sliders move:
 
 ```javascript
-function playSopranoSlideVoice(midi, nowSec, duration, doSlide) {
-    const synth = _sopranoSlide.voice;
-    const note = Tone.Frequency(midi, "midi");
+// Add inside processSubStep (around line 500)
+if (subStepInBar === 0) {
+    // Every bar, ensure we aren't leaking voices by doing a gentle release
+    // of the slide voice if it has been held too long.
+    tickSopranoSlideVoice(now); 
+}
 
-    if (!doSlide) {
-        // ESSENTIAL: Kill the previous tail before starting a new pluck.
-        // This prevents the "stacking" that causes the static.
-        synth.triggerRelease(nowSec); 
-        synth.triggerAttack(note, nowSec + 0.01); // Tiny offset to ensure release registers
+```
+
+### 3. Revised `playSopranoSlideVoice` for Stability
+
+The current implementation of `playSopranoSlideVoice` attempts to throttle updates, but it can still "stack" attacks if the `_sopranoSlide.active` flag gets out of sync with the actual audio state.
+
+**Update your `playSopranoSlideVoice` with this more defensive version:**
+
+```javascript
+function playSopranoSlideVoice(midi, nowSec, durationSec, doSlide) {
+    const synth = ensureSopranoSlideVoice();
+    if (!synth) return false;
+    updateSopranoSlideVoiceLevel();
+
+    const note = Tone.Frequency(midi, 'midi').toNote();
+    const slurAmount = clamp01(audioState.slurAmount ?? 0.5);
+
+    // DYNAMIC SAFETY: If we are NOT sliding, we MUST trigger a release 
+    // before the next attack to prevent voice stacking (the cause of static).
+    if (!doSlide || !_sopranoSlide.active) {
+        try {
+            // "Tail-cut" the previous note immediately
+            synth.triggerRelease(nowSec); 
+            
+            // Re-attack after a microscopic gap to ensure the release finishes
+            synth.triggerAttack(note, nowSec + 0.005, 0.75);
+            _sopranoSlide.active = true;
+        } catch (e) {
+            armSopranoSlideFailSafe(nowSec, e);
+            return false;
+        }
     } else {
-        // For a true slide, we do NOT triggerAttack. We only move the frequency.
-        const midiGap = Math.abs(midi - (_phrasingState.soprano.lastMidi || midi));
-        const glideSec = Math.max(0.02, Math.min(0.3, midiGap * 0.05));
+        // SLIDE PATH: Frequency-only move (Zero new attacks)
+        const targetHz = Tone.Frequency(midi, 'midi').toFrequency();
+        const midiGap = Math.abs(Number(_sopranoSlide.currentMidi) - Number(midi));
         
-        synth.portamento = glideSec;
-        synth.setNote(note, nowSec);
+        // Non-linear glide time makes it sound more like a physical object
+        const glideSec = Math.max(0.02, Math.min(0.4, Math.pow(midiGap, 0.65) * 0.05));
+        
+        try {
+            synth.frequency.cancelScheduledValues(nowSec);
+            synth.frequency.linearRampToValueAtTime(targetHz, nowSec + glideSec);
+        } catch (e) {
+            console.warn("Glide failed, falling back to attack");
+            synth.triggerAttack(note, nowSec);
+        }
     }
+
+    // Update state
+    _sopranoSlide.currentMidi = midi;
+    _sopranoSlide.holdUntil = nowSec + durationSec; 
+    return true;
 }
 
 ```
 
-### 2. Safeguard: Polyphony Limit
+### 4. Flute Sampler Optimization
 
-Your `ensureSopranoSlideVoice` function likely creates a new synth if one doesn't exist. If for some reason the `_sopranoSlide.active` flag gets toggled incorrectly, you might be creating multiple synths.
+If the "static" happens while using the **Flute**, it's because Samplers are polyphonic by default. If the slide logic is enabled for a sampler, every 16th note "slide" is actually triggering a *new* high-resolution audio file.
 
-**Check your `ensureSopranoSlideVoice` and add a `volume` cap and `polyphony` limit:**
+* **The Fix:** You must ensure the Flute Sampler (likely in `engine.js`) has `polyphony: 1`. This forces Tone.js to kill the old sample as soon as a new one starts, instantly stopping the static.
 
-```javascript
-// Inside ensureSopranoSlideVoice
-if (!_sopranoSlide.voice) {
-    _sopranoSlide.voice = new Tone.MonoSynth({
-        oscillator: { type: "sawtooth" },
-        envelope: { attack: 0.02, release: 0.5 },
-        portamento: 0.05
-    }).toDestination();
-    
-    // Add a limiter to prevent signal peaking
-    const limiter = new Tone.Limiter(-6).toDestination();
-    _sopranoSlide.voice.connect(limiter);
-}
+### 5. Why Changing Settings Triggers the Static
 
-```
+When you change settings, the `durationSec` and `slurAmount` values change mid-phrase. The engine might calculate that a note should "hold" for 2 seconds based on the old slider value, but then you move the slider and it tries to start a new note. Because the "old" note's `holdUntil` is still in the future, the engine doesn't release it.
 
-### 3. The "Ghost" Release
-
-The static often happens because a note is triggered but never told to stop. Ensure your `processSubStep` logic actually calls for a release if no note is found for that step.
-
-**At the start of your Soprano logic block in `processSubStep`:**
-
-```javascript
-if (!shouldPlaySoprano && _sopranoSlide.active) {
-    // If the price logic says "don't play", we must force a silence
-    _sopranoSlide.voice.triggerRelease(now);
-}
-
-```
-
-### Why this stops the static:
-
-The crackling isn't a "bug" in the musical logic; it's the CPU hitting 100% because it's trying to render too many voices.
-
-* **The Problem:** 16th note triggers  10 seconds = 160 active oscillators.
-* **The Solution:** Using `triggerRelease` and `setNote` ensures that at any given millisecond, there is **exactly one** oscillator running for the soprano.
-
-**Next Step:** Try adding `console.log(Tone.Destination.context.decodeAudioData)` (or checking the "Performance" tab in DevTools). If the number of "Active Nodes" keeps climbing while you play, the `triggerRelease` fix above is your primary solution. Would you like me to look at the specific `processSubStep` loop to see where the "orphaned" notes are coming from?
+**Recommended Action:**
+Ensure that any time the `upperWick.instrument` is changed in the UI, you call `releaseSopranoSlideVoice(Tone.now())` to completely reset the audio thread state. This prevents "orphaned" oscillators from continuing to play after you've switched instruments.
