@@ -854,6 +854,13 @@ Response:
 
 ### Real data refresh
 
+- **POST `/api/shorten-url`**
+  - JSON body: `{ url: "..." }` — full URL to shorten (any length)
+  - Stores URL in SQLite `short_links` table; returns `{ short_url: "https://host/s/abc12345" }`
+  - Used by the Short Link button in app nav
+- **GET `/s/<code>`**
+  - Redirects to the stored URL for the given short code (8-char alphanumeric)
+
 - **POST `/api/fetch-latest`**
   - Fetches bars from Alpaca and upserts into `stock_data`
   - Default behavior (no payload): incremental “from latest timestamp to now”
@@ -1211,6 +1218,7 @@ The following reflects the latest series of changes to the chart and replay expe
 - **Inner harmony chord-quality alignment fix**: Updated `audio/conductor.js` inner-harmony voicing selection to follow the active progression chord quality (`major/minor/dim`) from `getChordLabel()` instead of per-candle bullish/bearish body direction, preventing minor voicings from being emitted over major-labeled chords in uptrend sections.
 - **Inner harmony harmonic-context integration**: Inner harmony now snaps generated mid-voice notes to the same chord-aware tonal context used by melody/bass when `Harmonic-aware scale` is enabled (playable-pool quantization + avoid-note gravity + structural anchor on the lead harmony tone), reducing dissonant inner-voice clashes against the active chord progression.
 - **Soprano rhythm compatibility fix**: Upper-wick rhythm selection now controls soprano onset grid (quarter/eighth/sixteenth behavior), while `Pattern Density` acts as sparsity over that chosen grid instead of replacing it. Random rhythm modes use fixed onset grids (`random_4_8_16` on 16th-grid, `random_4_8` on 8th-grid) with per-note random duration choices.
+- **Sampler load resilience fix**: Audio engine sampler loading now uses per-voice fallback instruments (`harpsichord`, `electric_piano`, `acoustic_bass`) when a selected soundfont URL fails to load, so one instrument failure no longer blocks all audio playback startup.
 - **chart.html**: Added app nav (Dashboard, Backtest Config), status chip (“Last update”), and **Session History** modal with Cards / Ledger / Matrix views for replay session history (orders, positions); Refresh and Close actions; Escape to close.
 - **07_render_and_interactions.js**: When Audio Visual playback is active, the canvas reserves a **note axis** (52px) on the left of the plot for piano-style note labels; plot width and layout adjust via `noteAxisW` so the chart and sonification stay aligned.
 - **Audio module refactor**: Split monolithic `13_audio_controls.js` (3,454 lines) into 7 focused modules in `static/demo_static/js/audio/`: `config.js`, `state.js`, `theory.js`, `pathfinder.js`, `engine.js`, `conductor.js`, `ui.js`. Modules communicate via `window._audioModule` namespace. Original archived to `_archive/13_audio_controls.js`. See "Audio Visual Settings" section above for full module inventory.
@@ -1279,6 +1287,8 @@ The following reflects the latest series of changes to the chart and replay expe
 - **Cymbal-from-hi-hat voicing pass**: Revoiced ride/crash to inherit hi-hat-like noise character (white-noise shimmer + related overtone profile) while scaling for larger-disk behavior via lower metal center frequency, slower bloom, and longer resonance tail so cymbal timbre feels like a bigger hi-hat rather than a separate clanky metal source.
 - **Cymbal decay parameter hard-hook**: Added explicit `applyCymbalDecayArticulation()` mapping in `audio/drums.js` so `drumKit.cymbalDecay` continuously retunes ride/crash synth envelope attack/decay/release plus wash/noise decay (applied on synth init and `setDrumKitParams()`), and aligned trigger durations/previews to the same stronger scaling for clearly audible decay slider response.
 - **Audio URL parameterization**: Audio settings are now reflected in the page URL via a single `?audio=` query param (base64url JSON). Copying the URL and loading it in a fresh browser restores audio configuration. Precedence: URL > localStorage > defaults. Added "Copy shareable URL" button in Playback Controls. New Cursor rule `.cursor/rules/audio-url-params.mdc` requires updating URL serialization when adding new audio parameters.
+- **Short Link button**: Added "Short Link" button in app nav (right of Backtest Config) that generates a short link from the current parameterized URL (including audio settings). Uses `POST /api/shorten-url` with server-side storage in SQLite `short_links` table; returns `https://host/s/abc12345`. Short link, when loaded in a fresh browser, redirects to the full URL and restores chart and audio configuration. Handles URLs of any length (TinyURL has ~2KB limit).
+- **Synth Brass soundfont fix**: Corrected `synth_brass` baseUrl in `audio/config.js` from `synthbrass_1-mp3` to `synth_brass_1-mp3` to match gleitz midi-js-soundfonts folder names; fixes "Sample load failed: Failed to load Synth Brass" and restores harmony playback when Synth Brass is selected.
 
 ---
 

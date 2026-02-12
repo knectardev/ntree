@@ -1,7 +1,7 @@
 import sqlite3
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 # Always anchor the DB path to the repo (avoids accidentally creating/reading a DB from whatever the current
@@ -179,6 +179,17 @@ def init_database():
         cursor.execute("ALTER TABLE bars ADD COLUMN ref_symbol TEXT")
     except sqlite3.OperationalError:
         pass
+
+    # Short links for chart/audio sharing (short code -> full URL)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS short_links (
+            code TEXT PRIMARY KEY,
+            url TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_short_links_code ON short_links(code)')
+
     # Ensure unique bars per source/scenario (drop old expression index if present)
     cursor.execute('DROP INDEX IF EXISTS idx_bars_unique')
     cursor.execute('''
@@ -395,6 +406,37 @@ def list_all_tickers() -> List[str]:
             continue
         out.append(str(t).strip().upper())
     return out
+
+def store_short_link(url: str) -> str:
+    """Store a URL and return a short code. Uses 8-char alphanumeric."""
+    import secrets
+    import string
+    alphabet = string.ascii_lowercase + string.digits
+    for _ in range(10):
+        code = ''.join(secrets.choice(alphabet) for _ in range(8))
+        conn = get_db_connection()
+        try:
+            conn.execute('INSERT INTO short_links (code, url) VALUES (?, ?)', (code, url))
+            conn.commit()
+            return code
+        except sqlite3.IntegrityError:
+            continue  # code collision, retry
+        finally:
+            conn.close()
+    raise RuntimeError('Could not generate unique short code')
+
+
+def get_short_link_url(code: str) -> Optional[str]:
+    """Look up URL by short code. Returns None if not found."""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute('SELECT url FROM short_links WHERE code = ?', (code,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
 
 if __name__ == '__main__':
     init_database()

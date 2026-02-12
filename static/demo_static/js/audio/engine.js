@@ -69,6 +69,33 @@
         });
     }
 
+    function getVoiceFallbackInstrument(voice) {
+        if (voice === 'soprano' || voice === 'upper') return 'harpsichord';
+        if (voice === 'harmony') return 'electric_piano';
+        return 'acoustic_bass';
+    }
+
+    async function loadSamplerWithFallback(instrumentKey, voice) {
+        try {
+            return await loadSampler(instrumentKey);
+        } catch (primaryErr) {
+            const fallbackKey = getVoiceFallbackInstrument(voice);
+            if (fallbackKey === instrumentKey) {
+                throw primaryErr;
+            }
+            console.warn('[Audio] Primary sampler failed for', voice, instrumentKey, '-> fallback', fallbackKey, primaryErr);
+            try {
+                const sampler = await loadSampler(fallbackKey);
+                sampler._fallbackFrom = instrumentKey;
+                sampler._instrumentKey = fallbackKey;
+                return sampler;
+            } catch (fallbackErr) {
+                console.error('[Audio] Fallback sampler also failed for', voice, fallbackKey, fallbackErr);
+                throw primaryErr;
+            }
+        }
+    }
+
     /**
      * Hot-swap a sampler during playback (for instrument changes)
      */
@@ -77,8 +104,12 @@
         updateStatus('Switching instrument...');
         
         try {
-            const newSampler = await loadSampler(instrumentKey);
+            const newSampler = await loadSamplerWithFallback(instrumentKey, voice);
             newSampler.volume.value = -10;
+            if (newSampler._fallbackFrom) {
+                console.warn('[Audio] Using fallback instrument for', voice, 'requested', newSampler._fallbackFrom, 'loaded', newSampler._instrumentKey);
+                updateStatus('Fallback instrument loaded');
+            }
             
             if (voice === 'soprano') {
                 // Dispose old sampler
@@ -138,19 +169,19 @@
         try {
             // Load soprano (upper wick) sampler
             const sopranoInstrument = getSelectedInstrument('upper');
-            audioState._sopranoSampler = await loadSampler(sopranoInstrument);
+            audioState._sopranoSampler = await loadSamplerWithFallback(sopranoInstrument, 'soprano');
             audioState._sopranoSampler.volume.value = Number.isFinite(audioState.upperWick.volume) ? audioState.upperWick.volume : -18;
             console.log('[Audio] Soprano sampler loaded:', sopranoInstrument);
 
             // Load bass (lower wick) sampler
             const bassInstrument = getSelectedInstrument('lower');
-            audioState._bassSampler = await loadSampler(bassInstrument);
+            audioState._bassSampler = await loadSamplerWithFallback(bassInstrument, 'bass');
             audioState._bassSampler.volume.value = Number.isFinite(audioState.lowerWick.volume) ? audioState.lowerWick.volume : -18;
             console.log('[Audio] Bass sampler loaded:', bassInstrument);
 
             // Load harmony (inner voice) sampler
             const harmonyInstrument = getSelectedInstrument('harmony');
-            audioState._harmonySampler = await loadSampler(harmonyInstrument);
+            audioState._harmonySampler = await loadSamplerWithFallback(harmonyInstrument, 'harmony');
             audioState._harmonySampler.volume.value = Number.isFinite(audioState.harmony && audioState.harmony.volume)
                 ? audioState.harmony.volume
                 : -16;

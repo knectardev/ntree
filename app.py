@@ -1,9 +1,6 @@
 from flask import Flask, render_template, jsonify, request, send_file, redirect
-from database import get_db_connection, init_database, get_synthetic_datasets, list_real_tickers, list_all_tickers, list_chart_tickers
+from database import get_db_connection, init_database, get_synthetic_datasets, list_real_tickers, list_all_tickers, list_chart_tickers, store_short_link, get_short_link_url
 from datetime import datetime, timedelta, timezone
-from urllib.request import urlopen
-from urllib.parse import quote
-from urllib.error import URLError, HTTPError
 import alpaca_trade_api as tradeapi
 import time
 import os
@@ -2390,25 +2387,33 @@ def delete_backtest_config(cfg_id):
     return jsonify({'deleted': cfg_id})
 
 
-@app.route('/api/shorten-url', methods=['GET'])
+@app.route('/api/shorten-url', methods=['POST'])
 def api_shorten_url():
     """
-    Shorten a long URL via TinyURL. Used for sharing chart + audio settings.
-    Query param: url (required) - the full URL to shorten.
-    Returns: { short_url: "https://tinyurl.com/xxx" } or { error: "..." }
+    Store a long URL and return a short link. Handles URLs of any length (e.g. chart + audio params).
+    JSON body: { url: "https://..." }
+    Returns: { short_url: "https://host/s/abc12345" } or { error: "..." }
     """
-    long_url = request.args.get('url', '').strip()
-    if not long_url:
-        return jsonify({'error': 'url query param required'}), 400
     try:
-        api_url = 'https://tinyurl.com/api-create.php?url=' + quote(long_url, safe='')
-        with urlopen(api_url, timeout=10) as resp:
-            short_url = resp.read().decode('utf-8').strip()
-        if not short_url or not short_url.startswith('http'):
-            return jsonify({'error': 'invalid response from shortener'}), 502
+        data = request.get_json(silent=True) or {}
+        long_url = (data.get('url') or '').strip()
+        if not long_url:
+            return jsonify({'error': 'url required in JSON body'}), 400
+        code = store_short_link(long_url)
+        base = request.url_root.rstrip('/')
+        short_url = f"{base}/s/{code}"
         return jsonify({'short_url': short_url})
-    except (URLError, HTTPError, OSError) as e:
-        return jsonify({'error': str(e)}), 502
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/s/<code>')
+def short_link_redirect(code: str):
+    """Redirect short link to stored URL."""
+    url = get_short_link_url(code)
+    if not url:
+        return 'Link not found', 404
+    return redirect(url)
 
 
 @app.route('/api/fetch-latest', methods=['POST'])

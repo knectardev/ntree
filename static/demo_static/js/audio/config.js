@@ -164,7 +164,7 @@
         },
         synth_brass: {
             label: "Synth Brass",
-            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/synthbrass_1-mp3/"
+            baseUrl: "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/synth_brass_1-mp3/"
         }
     };
 
